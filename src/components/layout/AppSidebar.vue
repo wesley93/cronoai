@@ -27,11 +27,10 @@ const badges = computed<Partial<Record<ModuleId, { text: string; tone: string }>
   }
 })
 
-function reset() {
-  if (window.confirm('Restaurar a obra de exemplo? Todas as alterações locais serão descartadas.')) {
-    project.resetToSeed()
-    ui.notify('info', 'Dados de exemplo restaurados', 'Edifício Residencial Aurora recarregado.')
-  }
+async function criarExemplo() {
+  const r = await project.criarObra({ modelo: 'exemplo' })
+  if (r.ok) ui.notify('info', 'Obra de exemplo criada', 'Uma nova obra de exemplo foi aberta; as suas obras continuam salvas.')
+  else ui.notify('error', 'Não foi possível criar a obra de exemplo', r.erro)
 }
 </script>
 
@@ -74,7 +73,7 @@ function reset() {
         <div class="line-clamp-2 text-xs font-medium text-zinc-800 dark:text-zinc-200">{{ project.state.meta.name }}</div>
         <div class="mt-1">{{ project.leaves.length }} tarefas · {{ project.schedule.criticalPath.length }} críticas em aberto</div>
       </div>
-      <button class="btn-ghost w-full justify-start" @click="reset"><RotateCcw class="h-3.5 w-3.5" /> Restaurar obra de exemplo</button>
+      <button class="btn-ghost w-full justify-start" @click="criarExemplo"><RotateCcw class="h-3.5 w-3.5" /> Criar obra de exemplo</button>
     </div>
   </aside>
 </template>

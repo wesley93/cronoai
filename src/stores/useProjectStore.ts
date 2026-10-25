@@ -1,6 +1,6 @@
 // Estado global reativo da obra: toda ação (apontamento, cenário, SINAPI, XML) recalcula CPM, EVM e suprimentos.
 import { defineStore } from 'pinia'
-import { computed, reactive, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import type {
   DecisionLogEntry,
   DetectedRestriction,
@@ -14,7 +14,7 @@ import type {
   Task,
 } from '@/types/domain'
 import type { MSProjectTask } from '@/types/msProject'
-import type { PersistedState, ScenarioUndo } from '@/types/obra'
+import type { IndiceObras, MigracaoV1, PersistedState, ResumoObra, ScenarioUndo } from '@/types/obra'
 import { SEED_HOLIDAYS, SEED_MATERIALS, SEED_META, SEED_REPORTS, SEED_TASKS } from '@/data/seed'
 import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
 import {
@@ -47,8 +47,20 @@ import {
 import { SAFETY_MARGIN_DAYS, analyzeSupplies } from '@/lib/supplies'
 import { fmtBRL, fmtMonth, uid } from '@/lib/format'
 import { nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
+import { criarRegistro, lerEstadoV1, migrarRegistro } from '@/lib/migracaoEstado'
+import { avaliarCota, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, type DadosObra } from '@/lib/obras'
+import { obterArmazenamento, type ArmazenamentoObras } from './armazenamentoObras'
+import { useUiStore } from './ui'
 
-const STORAGE_KEY = 'cronoai-state-v1'
+/** Atraso entre a última alteração e a gravação no armazenamento. */
+const ATRASO_GRAVACAO_MS = 300
+/** Intervalo mínimo entre duas consultas da cota de armazenamento. */
+const INTERVALO_COTA_MS = 60_000
+
+export type EstadoGravacao = 'salvo' | 'pendente' | 'erro'
+export type ResultadoAcao = { ok: true } | { ok: false; erro: string }
+export type ResultadoCriacao = { ok: true; id: string } | { ok: false; erro: string; erros?: string[] }
+export type NovaObra = { modelo: 'exemplo' } | { modelo: 'branco'; dados: DadosObra }
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
@@ -97,17 +109,11 @@ function seedBudget(): BudgetLine[] {
   ]
 }
 
-function loadState(): PersistedState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as PersistedState
-      if (parsed?.tasks?.length && parsed.meta) return { ...buildSeedState(), ...parsed }
-    }
-  } catch {
-    /* estado salvo corrompido ou indisponível: recomeça com os dados de exemplo */
-  }
-  return buildSeedState()
+/** Mensagem ao usuário para uma falha de gravação, sem detalhe técnico. */
+function mensagemDeFalha(err: unknown): string {
+  return err instanceof DOMException && err.name === 'QuotaExceededError'
+    ? 'O armazenamento do navegador está cheio.'
+    : 'Não foi possível gravar no armazenamento do navegador.'
 }
 
 export interface SinapiInsert {
@@ -126,23 +132,234 @@ export interface SinapiInsert {
 }
 
 export const useProjectStore = defineStore('project', () => {
-  const state = reactive<PersistedState>(loadState())
+  // Antes de `carregar()` o estado é a obra de exemplo e a gravação fica desligada: não há como sobrescrever a obra salva.
+  const state = reactive<PersistedState>(buildSeedState())
 
+  // ---------------------------------------------------------------- obras e armazenamento
+  const obras = ref<ResumoObra[]>([])
+  const obraAtivaId = ref('')
+  const estadoGravacao = ref<EstadoGravacao>('salvo')
+  const mensagemGravacao = ref('')
+  /** Percentual de uso do armazenamento quando passa do limiar de alerta (80%). */
+  const alertaCota = ref<number | undefined>(undefined)
+  /** Avisos da última carga (migração da v1 parcial ou ilegível, armazenamento indisponível). */
+  const avisosCarga = ref<string[]>([])
+  const armazenamentoIndisponivel = ref(false)
+  const migracaoV1 = ref<MigracaoV1 | undefined>(undefined)
+  const carregado = ref(false)
+
+  let armazenamento: ArmazenamentoObras | undefined
+  let indice: IndiceObras | undefined
+  let gravacaoLigada = false
   let saveTimer: ReturnType<typeof setTimeout> | undefined
+  let fila: Promise<unknown> = Promise.resolve()
+  let ultimaConsultaCota = 0
+
   watch(
     state,
     () => {
+      if (!gravacaoLigada) return
+      estadoGravacao.value = 'pendente'
       clearTimeout(saveTimer)
-      saveTimer = setTimeout(() => {
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-        } catch {
-          /* cota excedida ou modo privado: segue apenas em memória */
-        }
-      }, 300)
+      saveTimer = setTimeout(() => void salvarAgora(), ATRASO_GRAVACAO_MS)
     },
     { deep: true },
   )
+
+  function agora(): string {
+    return new Date().toISOString()
+  }
+
+  /** Atualiza a linha da obra ativa no índice em memória com o que está no estado. */
+  function indiceComAtiva(atualizadoEm: string): IndiceObras {
+    const base: IndiceObras = indice ?? {
+      versaoIndice: 1,
+      obraAtivaId: obraAtivaId.value,
+      obras: [],
+      ...(migracaoV1.value ? { migracaoV1: migracaoV1.value } : {}),
+    }
+    const resumo = resumirObra(obraAtivaId.value, state, atualizadoEm)
+    const existe = base.obras.some((o) => o.id === resumo.id)
+    return {
+      ...base,
+      obraAtivaId: obraAtivaId.value,
+      obras: existe ? base.obras.map((o) => (o.id === resumo.id ? resumo : o)) : [...base.obras, resumo],
+    }
+  }
+
+  function aceitarIndice(novo: IndiceObras) {
+    indice = novo
+    obras.value = novo.obras.map((o) => ({ ...o }))
+  }
+
+  function registrarFalhaDeGravacao(err: unknown) {
+    const antes = estadoGravacao.value
+    estadoGravacao.value = 'erro'
+    mensagemGravacao.value = mensagemDeFalha(err)
+    if (antes !== 'erro') useUiStore().notify('error', 'As alterações desta obra não estão sendo salvas', mensagemGravacao.value)
+  }
+
+  async function consultarCota() {
+    if (!armazenamento || Date.now() - ultimaConsultaCota < INTERVALO_COTA_MS) return
+    ultimaConsultaCota = Date.now()
+    const { uso, cota } = await armazenamento.estimar()
+    alertaCota.value = avaliarCota(uso, cota) === 'alerta' ? Math.round(percentualCota(uso, cota) ?? 0) : undefined
+  }
+
+  /** Grava agora a obra ativa (cancela o atraso). Devolve false se falhar; as gravações seguem em fila, na ordem. */
+  function salvarAgora(): Promise<boolean> {
+    clearTimeout(saveTimer)
+    const gravar = async (): Promise<boolean> => {
+      if (!armazenamento || !obraAtivaId.value) return true
+      try {
+        const em = agora()
+        const novoIndice = indiceComAtiva(em)
+        await armazenamento.gravarObra(criarRegistro(obraAtivaId.value, state, em), novoIndice)
+        aceitarIndice(novoIndice)
+        // Sem IndexedDB o "salvo" é só na memória da sessão: o aviso de indisponibilidade continua
+        if (!armazenamentoIndisponivel.value) {
+          estadoGravacao.value = 'salvo'
+          mensagemGravacao.value = ''
+        }
+        void consultarCota().catch(() => undefined)
+        return true
+      } catch (err) {
+        registrarFalhaDeGravacao(err)
+        return false
+      }
+    }
+    const tarefa = fila.then(gravar)
+    fila = tarefa
+    return tarefa
+  }
+
+  /** Coloca o estado na tela sem disparar uma gravação (trocar de obra não é alteração). */
+  async function aplicarEstado(novo: PersistedState) {
+    gravacaoLigada = false
+    Object.assign(state, novo)
+    resetScenarioParams()
+    await nextTick() // o observador roda aqui, ainda desligado
+    gravacaoLigada = true
+  }
+
+  /** Lê e migra uma obra do armazenamento; marca como ilegível no índice em memória se falhar. */
+  async function abrirRegistro(id: string): Promise<{ estado: PersistedState; avisos: string[] } | { erro: string }> {
+    if (!armazenamento) return { erro: 'Armazenamento não carregado.' }
+    try {
+      const r = migrarRegistro(await armazenamento.lerObra(id))
+      if (r.tipo === 'ok') return { estado: r.estado, avisos: r.avisos }
+      return { erro: r.mensagem }
+    } catch {
+      return { erro: 'Não foi possível ler esta obra do armazenamento do navegador.' }
+    }
+  }
+
+  function marcarIlegivel(id: string, ilegivel: boolean) {
+    if (!indice) return
+    indice = { ...indice, obras: indice.obras.map((o) => (o.id === id ? { ...o, ilegivel: ilegivel || undefined } : o)) }
+    obras.value = indice.obras.map((o) => ({ ...o }))
+  }
+
+  /**
+   * Carrega as obras: índice → obra ativa; sem índice, migra o `cronoai-state-v1` (só leitura) para a 1ª obra.
+   * Liga a gravação só no fim. Deve ser aguardada antes de montar a interface (main.ts).
+   */
+  async function carregar(): Promise<void> {
+    gravacaoLigada = false
+    obraAtivaId.value = ''
+    indice = undefined
+    const aberto = await obterArmazenamento()
+    armazenamento = aberto.armazenamento
+    armazenamentoIndisponivel.value = aberto.indisponivel
+    const avisos: string[] = []
+    if (aberto.indisponivel) {
+      avisos.push('Armazenamento local indisponível: as alterações desta sessão não serão salvas.')
+      estadoGravacao.value = 'erro'
+      mensagemGravacao.value = 'Armazenamento local indisponível.'
+    }
+
+    let existente: IndiceObras | undefined
+    try {
+      existente = await armazenamento.lerIndice()
+    } catch {
+      avisos.push('Não foi possível ler as obras salvas no navegador. Nada foi alterado.')
+    }
+
+    let inicial: PersistedState | undefined
+    if (existente) {
+      indice = existente
+      obras.value = existente.obras.map((o) => ({ ...o }))
+      migracaoV1.value = existente.migracaoV1
+      let ids: string[] | undefined
+      try {
+        ids = await armazenamento.listarIdsObras()
+      } catch {
+        ids = undefined
+      }
+      const ordem = [existente.obraAtivaId, ...existente.obras.map((o) => o.id).filter((id) => id !== existente.obraAtivaId)]
+      for (const id of ordem) {
+        if (ids && !ids.includes(id)) {
+          marcarIlegivel(id, true)
+          continue
+        }
+        const r = await abrirRegistro(id)
+        if ('estado' in r) {
+          inicial = r.estado
+          obraAtivaId.value = id
+          avisos.push(...r.avisos)
+          marcarIlegivel(id, false)
+          break
+        }
+        marcarIlegivel(id, true)
+      }
+      if (!inicial) avisos.push('Nenhuma obra salva pôde ser lida: a obra de exemplo foi aberta. As obras ilegíveis continuam no navegador, sem alteração.')
+    } else {
+      const v1 = lerEstadoV1(armazenamento.lerV1())
+      if (v1.tipo === 'ok') {
+        inicial = v1.estado
+        avisos.push(...v1.avisos)
+        migracaoV1.value = { em: agora(), resultado: 'migrado' }
+      } else if (v1.tipo === 'corrompido') {
+        avisos.push(
+          'O estado salvo da versão anterior não pôde ser lido. Ele foi mantido no navegador sem alteração e a obra de exemplo foi aberta.',
+        )
+        migracaoV1.value = { em: agora(), resultado: 'ilegivel' }
+      }
+    }
+
+    let precisaGravar = false
+    if (!inicial) {
+      inicial = buildSeedState()
+      precisaGravar = true
+    }
+    if (!existente) {
+      obraAtivaId.value = uid('obra')
+      precisaGravar = true
+    } else if (!obraAtivaId.value) {
+      // Nenhuma obra legível no índice: a obra de exemplo entra como nova, sem tocar nas ilegíveis.
+      obraAtivaId.value = uid('obra')
+      precisaGravar = true
+    }
+    await aplicarEstado(inicial)
+    avisosCarga.value = avisos
+
+    if (precisaGravar) {
+      // Índice e obra na mesma transação. Se falhar, o índice não existe e a v1 fica intacta: a próxima carga tenta de novo (M-4).
+      const em = agora()
+      const base = indice
+      const novo = { ...indiceComAtiva(em), ...(migracaoV1.value ? { migracaoV1: migracaoV1.value } : {}) }
+      try {
+        await armazenamento.gravarObra(criarRegistro(obraAtivaId.value, state, em), novo)
+        aceitarIndice(novo)
+        if (!aberto.indisponivel) estadoGravacao.value = 'salvo'
+      } catch (err) {
+        obras.value = novo.obras.map((o) => ({ ...o }))
+        indice = base // sem índice gravado (M-4); com índice, o antigo continua valendo
+        registrarFalhaDeGravacao(err)
+      }
+    }
+    carregado.value = true
+  }
 
   // ---------------------------------------------------------------- derivados
   const calendar = computed(() => new WorkCalendar(state.meta.startDate, state.calendar))
@@ -733,8 +950,159 @@ export const useProjectStore = defineStore('project', () => {
     return result.warnings
   }
 
-  function resetToSeed() {
-    Object.assign(state, buildSeedState())
+  // ---------------------------------------------------------------- Obras (SPEC-14)
+  /** Grava a obra atual antes de uma troca, se houver o que gravar. Falhou: a troca é cancelada, para não perder alterações. */
+  async function garantirObraAtualSalva(): Promise<boolean> {
+    await nextTick() // deixa o observador do estado marcar como "pendente" uma alteração feita neste mesmo instante
+    return estadoGravacao.value === 'salvo' ? true : salvarAgora()
+  }
+
+  const ERRO_SALVAR_ANTES = 'A obra atual não pôde ser salva. Resolva o aviso de armazenamento antes de trocar de obra.'
+
+  function indiceComAtivaNova(ativaId: string, obrasLista: ResumoObra[]): IndiceObras {
+    const base = indice ?? { versaoIndice: 1 as const, obraAtivaId: ativaId, obras: [] }
+    return { ...base, obraAtivaId: ativaId, obras: obrasLista }
+  }
+
+  /** Troca a obra ativa: grava a atual, lê e migra a nova, grava o índice e só então muda a tela. */
+  async function trocarObra(id: string): Promise<ResultadoAcao> {
+    if (!armazenamento) return { ok: false, erro: 'As obras ainda não foram carregadas.' }
+    if (id === obraAtivaId.value) return { ok: true }
+    if (!(await garantirObraAtualSalva())) return { ok: false, erro: ERRO_SALVAR_ANTES }
+    const r = await abrirRegistro(id)
+    if (!('estado' in r)) {
+      marcarIlegivel(id, true)
+      return { ok: false, erro: r.erro }
+    }
+    const lista = (indice?.obras ?? obras.value).map((o) => (o.id === id ? { ...o, ilegivel: undefined } : o))
+    const novoIndice = indiceComAtivaNova(id, lista)
+    try {
+      await armazenamento.gravarIndice(novoIndice)
+    } catch (err) {
+      return { ok: false, erro: mensagemDeFalha(err) }
+    }
+    aceitarIndice(novoIndice)
+    obraAtivaId.value = id
+    await aplicarEstado(r.estado)
+    return { ok: true }
+  }
+
+  /** Cria uma obra (em branco ou a de exemplo) e a torna ativa. */
+  async function criarObra(nova: NovaObra): Promise<ResultadoCriacao> {
+    if (!armazenamento) return { ok: false, erro: 'As obras ainda não foram carregadas.' }
+    let estado: PersistedState
+    if (nova.modelo === 'branco') {
+      const erros = validarDadosObra(nova.dados)
+      if (erros.length) return { ok: false, erro: erros[0], erros }
+      estado = estadoObraVazia(nova.dados, SEED_META.dailyIndirectCost)
+    } else {
+      estado = buildSeedState()
+      // Nome único na lista: "Edifício … (2)" quando o exemplo já existe
+      const nomes = obras.value.map((o) => o.nome)
+      let nome = SEED_META.name
+      for (let n = 2; nomes.includes(nome); n++) nome = `${SEED_META.name} (${n})`
+      estado.meta.name = nome
+    }
+    if (!(await garantirObraAtualSalva())) return { ok: false, erro: ERRO_SALVAR_ANTES }
+    const id = uid('obra')
+    const em = agora()
+    const novoIndice = indiceComAtivaNova(id, [...(indice?.obras ?? obras.value), resumirObra(id, estado, em)])
+    try {
+      await armazenamento.gravarObra(criarRegistro(id, estado, em), novoIndice)
+    } catch (err) {
+      return { ok: false, erro: mensagemDeFalha(err) }
+    }
+    aceitarIndice(novoIndice)
+    obraAtivaId.value = id
+    await aplicarEstado(estado)
+    return { ok: true, id }
+  }
+
+  /** Copia uma obra para uma nova, independente (não a torna ativa). */
+  async function duplicarObra(id: string): Promise<ResultadoCriacao> {
+    if (!armazenamento) return { ok: false, erro: 'As obras ainda não foram carregadas.' }
+    if (id === obraAtivaId.value && !(await garantirObraAtualSalva())) return { ok: false, erro: ERRO_SALVAR_ANTES }
+    const origem = id === obraAtivaId.value ? { estado: clone(state) } : await abrirRegistro(id)
+    if (!('estado' in origem)) return { ok: false, erro: origem.erro }
+    const copia = origem.estado
+    copia.meta.name = nomeDaCopia(copia.meta.name, obras.value.map((o) => o.nome))
+    const novoId = uid('obra')
+    const em = agora()
+    const base = indice ?? indiceComAtivaNova(obraAtivaId.value, obras.value)
+    const novoIndice: IndiceObras = { ...base, obras: [...base.obras, resumirObra(novoId, copia, em)] }
+    try {
+      await armazenamento.gravarObra(criarRegistro(novoId, copia, em), novoIndice)
+    } catch (err) {
+      return { ok: false, erro: mensagemDeFalha(err) }
+    }
+    aceitarIndice(novoIndice)
+    return { ok: true, id: novoId }
+  }
+
+  /** Exclui uma obra. A única não é excluída; excluir a ativa abre a 1ª outra obra legível. */
+  async function excluirObra(id: string): Promise<ResultadoAcao> {
+    if (!armazenamento) return { ok: false, erro: 'As obras ainda não foram carregadas.' }
+    const lista = indice?.obras ?? obras.value
+    if (!lista.some((o) => o.id === id)) return { ok: false, erro: 'Obra não encontrada.' }
+    if (lista.length <= 1) return { ok: false, erro: 'A obra não pode ser excluída: é a única.' }
+    const restantes = lista.filter((o) => o.id !== id)
+    const eraAtiva = id === obraAtivaId.value
+    let proxima: { id: string; estado: PersistedState } | undefined
+    if (eraAtiva) {
+      for (const o of restantes) {
+        const r = await abrirRegistro(o.id)
+        if ('estado' in r) {
+          proxima = { id: o.id, estado: r.estado }
+          break
+        }
+        marcarIlegivel(o.id, true)
+      }
+      if (!proxima) return { ok: false, erro: 'Não há outra obra legível para abrir no lugar desta.' }
+    } else if (!(await garantirObraAtualSalva())) {
+      return { ok: false, erro: ERRO_SALVAR_ANTES }
+    }
+    await fila // uma gravação em andamento não pode ressuscitar a obra excluída
+    const atual = indice ?? indiceComAtivaNova(obraAtivaId.value, lista)
+    const novoIndice: IndiceObras = {
+      ...atual,
+      obraAtivaId: proxima?.id ?? obraAtivaId.value,
+      obras: atual.obras.filter((o) => o.id !== id),
+    }
+    try {
+      await armazenamento.excluirObra(id, novoIndice)
+    } catch (err) {
+      return { ok: false, erro: mensagemDeFalha(err) }
+    }
+    aceitarIndice(novoIndice)
+    if (proxima) {
+      clearTimeout(saveTimer) // alterações pendentes eram da obra excluída
+      obraAtivaId.value = proxima.id
+      await aplicarEstado(proxima.estado)
+      estadoGravacao.value = armazenamentoIndisponivel.value ? 'erro' : 'salvo'
+    }
+    return { ok: true }
+  }
+
+  /** Edita os dados da obra ativa. A data de status passa por `setStatusDate` (com registro no log). */
+  function atualizarDadosObra(dados: DadosObra): { ok: true } | { ok: false; erros: string[] } {
+    const erros = validarDadosObra(dados)
+    if (erros.length) return { ok: false, erros }
+    const meta = state.meta
+    meta.name = dados.nome.trim()
+    meta.manager = (dados.responsavel ?? '').trim()
+    meta.startDate = dados.dataInicio
+    // Campo opcional vazio = "não informado": a propriedade some, como na obra de exemplo
+    if (dados.uf) meta.uf = dados.uf
+    else delete meta.uf
+    if (dados.municipio?.trim()) meta.municipio = dados.municipio.trim()
+    else delete meta.municipio
+    if (dados.regimeSinapi) meta.regimeSinapi = dados.regimeSinapi
+    else delete meta.regimeSinapi
+    if (dados.dataBaseSinapi) meta.dataBaseSinapi = dados.dataBaseSinapi
+    else delete meta.dataBaseSinapi
+    if (dados.dataStatus !== meta.statusDate) setStatusDate(dados.dataStatus)
+    obras.value = obras.value.map((o) => (o.id === obraAtivaId.value ? resumirObra(o.id, state, o.atualizadoEm) : o))
+    return { ok: true }
   }
 
   return {
@@ -797,6 +1165,21 @@ export const useProjectStore = defineStore('project', () => {
     setStatusDate,
     exportXml,
     importXml,
-    resetToSeed,
+    obras,
+    obraAtivaId,
+    estadoGravacao,
+    mensagemGravacao,
+    alertaCota,
+    avisosCarga,
+    armazenamentoIndisponivel,
+    migracaoV1,
+    carregado,
+    carregar,
+    salvarAgora,
+    trocarObra,
+    criarObra,
+    duplicarObra,
+    excluirObra,
+    atualizarDadosObra,
   }
 })

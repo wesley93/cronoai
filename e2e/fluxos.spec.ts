@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { cartaoCenario, expect, kpi, test, toast, topo } from './fixtures'
+import { cartaoCenario, expect, kpi, obraAtivaSalvaContem, test, toast, topo } from './fixtures'
 
 const ESPACO = ' ' // o Intl põe espaço não separável depois de "R$"
 
@@ -33,10 +33,8 @@ test('C-7: recarregar mantém o estado salvo', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'Aprovar e Atualizar EAP' }).click()
   await expect(kpi(page, 'Entrega das chaves')).toContainText('16/06/27')
-  // A gravação tem atraso (debounce de 300 ms): espera o estado chegar ao localStorage, sem sleep fixo
-  await expect
-    .poll(() => page.evaluate(() => (localStorage.getItem('cronoai-state-v1') ?? '').includes('"percentComplete":75')))
-    .toBe(true)
+  // A gravação tem atraso (debounce de 300 ms): espera o estado chegar ao IndexedDB (obra ativa), sem sleep fixo
+  await expect.poll(() => obraAtivaSalvaContem(page, '"percentComplete":75')).toBe(true)
   await page.reload()
   await expect(kpi(page, 'Entrega das chaves')).toContainText('16/06/27')
   await page.getByRole('navigation').getByRole('button', { name: /EAP \/ MS Project/ }).click()
