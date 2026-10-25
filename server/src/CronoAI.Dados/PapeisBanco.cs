@@ -21,5 +21,11 @@ public static class PapeisBanco
     /// <summary>Nome fixo da tabela de histórico de migrações, no schema <see cref="Schema"/>.</summary>
     public const string HistoricoMigracoes = "__ef_migrations_history";
 
+    /// <summary>Variável de sessão do PostgreSQL com o usuário do contexto (lida pelas políticas de RLS).</summary>
+    public const string VariavelUsuario = "app.usuario_id";
+
+    /// <summary>Variável de sessão do PostgreSQL com a empresa do contexto (lida pelas políticas de RLS).</summary>
+    public const string VariavelEmpresa = "app.empresa_id";
+
     #endregion
 }

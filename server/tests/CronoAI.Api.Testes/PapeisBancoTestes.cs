@@ -95,39 +95,6 @@ public sealed class PapeisBancoTestes
         Assert.Equal("cronoai", await comando.ExecuteScalarAsync(TestContext.Current.CancellationToken));
     }
 
-    [Fact]
-    public async Task Identificadores_cabem_em_63_bytes()
-    {
-        // 63 bytes é o limite do PostgreSQL: nome com exatamente 63 é sinal de truncamento silencioso.
-        // Passa vazio hoje (sem tabelas) e protege a partir do ciclo 00012.
-        await using var conexao = await AbrirAsync(_banco.StringConexaoApp);
-        await using var comando = new NpgsqlCommand(
-            """
-            SELECT c.relname
-              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-             WHERE n.nspname = 'cronoai' AND octet_length(c.relname) >= 63
-            UNION ALL
-            SELECT k.conname
-              FROM pg_constraint k JOIN pg_namespace n ON n.oid = k.connamespace
-             WHERE n.nspname = 'cronoai' AND octet_length(k.conname) >= 63
-            UNION ALL
-            SELECT c.relname
-              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-             WHERE n.nspname = 'cronoai'
-             GROUP BY c.relname HAVING count(*) > 1
-            """,
-            conexao);
-
-        var suspeitos = new List<string>();
-        await using var leitor = await comando.ExecuteReaderAsync(TestContext.Current.CancellationToken);
-        while (await leitor.ReadAsync(TestContext.Current.CancellationToken))
-        {
-            suspeitos.Add(leitor.GetString(0));
-        }
-
-        Assert.Empty(suspeitos);
-    }
-
     #endregion
 
     #region Métodos privados

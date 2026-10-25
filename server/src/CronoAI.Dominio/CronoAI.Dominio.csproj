@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Domínio puro: sem nenhum pacote (nem EF nem ASP.NET). A regra é guardada por ArquiteturaTestes. -->
+  <PropertyGroup>
+    <RootNamespace>CronoAI.Dominio</RootNamespace>
+  </PropertyGroup>
+
+</Project>

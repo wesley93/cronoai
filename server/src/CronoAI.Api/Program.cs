@@ -17,8 +17,8 @@ builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 
 // A API conecta como cronoai_app (só DML). A senha vem de user-secrets/variável de ambiente, nunca do appsettings.
-// AddDbContext (e não pool): os ciclos seguintes terão filtro por empresa dependente da requisição.
-builder.Services.AddDbContext<CronoDbContext>((servicos, opcoes) =>
+// Fábrica singleton + contexto scoped criado por ela (não AddDbContext): o contexto de banco é imutável por instância.
+builder.Services.AddSingleton<IFabricaCronoDbContext>(servicos =>
 {
     var ambiente = servicos.GetRequiredService<IHostEnvironment>();
     var configuracao = servicos.GetRequiredService<IConfiguration>();
@@ -30,8 +30,9 @@ builder.Services.AddDbContext<CronoDbContext>((servicos, opcoes) =>
 
     // A mensagem de erro do PostgreSQL pode trazer valores de linha: detalhe só em Development.
     var montador = new NpgsqlConnectionStringBuilder(stringConexao) { IncludeErrorDetail = ambiente.IsDevelopment() };
-    CronoDbContextConfiguracao.Configurar(opcoes, montador.ConnectionString);
+    return new FabricaCronoDbContext(montador.ConnectionString);
 });
+builder.Services.AddScoped(servicos => servicos.GetRequiredService<IFabricaCronoDbContext>().Criar(ContextoSessaoBanco.Vazio));
 
 // Vivo = só o processo (sem dependências); pronto = inclui o banco. Corpo apenas "Healthy"/"Unhealthy".
 const string TagPronto = "ready";

@@ -26,25 +26,20 @@ public sealed class MigracoesTestes
     #region Métodos públicos
 
     [Fact]
-    public async Task Migracao_inicial_aplica_em_banco_limpo()
+    public async Task Migracao_IdentidadeEmpresas_aplica_e_reaplica()
     {
         // O banco do contêiner nasceu limpo e a fixture migrou uma vez como cronoai_migrador.
         await using var contexto = _banco.CriarContextoMigrador();
 
         var aplicadas = (await contexto.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken)).ToList();
 
-        var unica = Assert.Single(aplicadas);
-        Assert.EndsWith("_Inicial", unica, StringComparison.Ordinal);
-    }
+        Assert.Equal(2, aplicadas.Count);
+        Assert.EndsWith("_Inicial", aplicadas[0], StringComparison.Ordinal);
+        Assert.EndsWith("_IdentidadeEmpresas", aplicadas[1], StringComparison.Ordinal);
 
-    [Fact]
-    public async Task Reaplicar_migracoes_nao_altera_o_banco()
-    {
-        await using var contexto = _banco.CriarContextoMigrador();
-
+        // O 2º MigrateAsync não lança e não altera nada.
         await contexto.Database.MigrateAsync(TestContext.Current.CancellationToken);
-
-        Assert.Single(await contexto.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(2, (await contexto.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken)).Count());
     }
 
     [Fact]

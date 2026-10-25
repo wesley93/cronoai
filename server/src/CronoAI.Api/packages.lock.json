@@ -66,9 +66,13 @@
       "cronoai.dados": {
         "type": "Project",
         "dependencies": {
+          "CronoAI.Dominio": "[1.0.0, )",
           "EFCore.NamingConventions": "[10.0.1, )",
           "Npgsql.EntityFrameworkCore.PostgreSQL": "[10.0.3, )"
         }
+      },
+      "cronoai.dominio": {
+        "type": "Project"
       },
       "EFCore.NamingConventions": {
         "type": "CentralTransitive",

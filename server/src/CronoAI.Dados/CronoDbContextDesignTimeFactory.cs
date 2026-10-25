@@ -7,6 +7,7 @@ namespace CronoAI.Dados;
 /// Factory usada só pelo <c>dotnet ef</c>. Lê a string do migrador do ambiente; não há valor
 /// padrão (e portanto nenhuma senha) no código. Na CI usa-se uma string fictícia sem senha,
 /// suficiente para construir o modelo (<c>has-pending-model-changes</c> não abre conexão).
+/// O contexto de banco é vazio: o modelo das migrações é o mesmo de execução.
 /// </summary>
 public sealed class CronoDbContextDesignTimeFactory : IDesignTimeDbContextFactory<CronoDbContext>
 {
@@ -29,7 +30,7 @@ public sealed class CronoDbContextDesignTimeFactory : IDesignTimeDbContextFactor
 
         var opcoes = new DbContextOptionsBuilder<CronoDbContext>();
         CronoDbContextConfiguracao.Configurar(opcoes, stringConexao);
-        return new CronoDbContext(opcoes.Options);
+        return new CronoDbContext(opcoes.Options, ContextoSessaoBanco.Vazio);
     }
 
     #endregion

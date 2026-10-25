@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/CronoAI.Api/CronoAI.Api.csproj" />
     <Project Path="src/CronoAI.Dados/CronoAI.Dados.csproj" />
+    <Project Path="src/CronoAI.Dominio/CronoAI.Dominio.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/CronoAI.Api.Testes/CronoAI.Api.Testes.csproj" />

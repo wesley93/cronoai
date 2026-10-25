@@ -307,6 +307,9 @@
           "System.Composition.Hosting": "9.0.0",
           "System.Composition.Runtime": "9.0.0"
         }
+      },
+      "cronoai.dominio": {
+        "type": "Project"
       }
     }
   }

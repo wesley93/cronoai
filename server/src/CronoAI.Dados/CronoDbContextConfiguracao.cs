@@ -1,3 +1,4 @@
+using CronoAI.Dados.Rls;
 using Microsoft.EntityFrameworkCore;
 
 namespace CronoAI.Dados;
@@ -10,7 +11,10 @@ public static class CronoDbContextConfiguracao
 {
     #region Métodos públicos
 
-    /// <summary>Aplica Npgsql, <c>snake_case</c> e o histórico de migrações explícito no schema da aplicação.</summary>
+    /// <summary>
+    /// Aplica Npgsql, <c>snake_case</c>, o histórico de migrações explícito no schema da aplicação e o interceptor
+    /// que fixa as variáveis de sessão do RLS em toda abertura de conexão.
+    /// </summary>
     public static DbContextOptionsBuilder Configurar(DbContextOptionsBuilder opcoes, string stringConexao)
     {
         ArgumentNullException.ThrowIfNull(opcoes);
@@ -20,7 +24,8 @@ public static class CronoDbContextConfiguracao
             .UseNpgsql(
                 stringConexao,
                 npgsql => npgsql.MigrationsHistoryTable(PapeisBanco.HistoricoMigracoes, PapeisBanco.Schema))
-            .UseSnakeCaseNamingConvention();
+            .UseSnakeCaseNamingConvention()
+            .AddInterceptors(ContextoSessaoInterceptor.Instancia);
     }
 
     #endregion

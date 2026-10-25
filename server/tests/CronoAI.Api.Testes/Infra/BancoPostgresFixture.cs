@@ -43,6 +43,12 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
     /// <summary>String do papel <c>cronoai_migrador</c> (dono do schema).</summary>
     public string StringConexaoMigrador { get; private set; } = "";
 
+    /// <summary>Fábrica de contextos conectados como <c>cronoai_app</c> (o papel da API).</summary>
+    public IFabricaCronoDbContext FabricaApp => new FabricaCronoDbContext(StringConexaoApp);
+
+    /// <summary>Fábrica de contextos conectados como <c>cronoai_migrador</c> (dono; também sujeito ao RLS).</summary>
+    public IFabricaCronoDbContext FabricaMigrador => new FabricaCronoDbContext(StringConexaoMigrador);
+
     #endregion
 
     #region Métodos públicos
@@ -108,7 +114,7 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
     {
         var opcoes = new DbContextOptionsBuilder<CronoDbContext>();
         CronoDbContextConfiguracao.Configurar(opcoes, StringConexaoMigrador);
-        return new CronoDbContext(opcoes.Options);
+        return new CronoDbContext(opcoes.Options, ContextoSessaoBanco.Vazio);
     }
 
     #endregion
