@@ -19,6 +19,8 @@ export interface OpcoesXlsxSintetico {
   linhasBrutas?: string
   /** XML cru dos `<si>` que substitui os textos compartilhados gerados. */
   sharedStringsBruto?: string
+  /** XML cru de `xl/_rels/workbook.xml.rels` (substitui o gerado). */
+  relsBruto?: string
   /** Entradas extras do zip. */
   extras?: EntradaSintetica[]
   /** Omite o sharedStrings (todos os textos viram `inlineStr`). */
@@ -78,7 +80,7 @@ export function criarXlsxSintetico(abas: AbaSintetica[], opcoes: OpcoesXlsxSinte
     '</Relationships>'
   const entradas: EntradaSintetica[] = [
     { nome: 'xl/workbook.xml', dados: workbook },
-    { nome: 'xl/_rels/workbook.xml.rels', dados: rels },
+    { nome: 'xl/_rels/workbook.xml.rels', dados: opcoes.relsBruto ?? rels },
     ...folhas.map((x, k) => ({ nome: `xl/worksheets/sheet${k + 1}.xml`, dados: x })),
   ]
   if (!opcoes.semSharedStrings) {

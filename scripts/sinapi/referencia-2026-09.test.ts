@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { validarRecorteSinapi } from '@/lib/recorteSinapi'
 import { horasPorDia } from '@/lib/calendarioTrabalho'
 import { durationFromTeam, scheduleDays, totalManHours } from '@/lib/sinapi'
-import { equipeDaComposicao, funcaoPrincipal, notasDaTarefaSinapi, recursosDaEquipe, rotuloFuncao } from '@/lib/sinapiRup'
+import { ehFuncaoDeApoio, equipeDaComposicao, funcaoPrincipal, notasDaTarefaSinapi, recursosDaEquipe, rotuloFuncao } from '@/lib/sinapiRup'
 import { lerSinapi, normalizar, type DadosSinapi } from './layout2025.ts'
 import { abrirPlanilha, type Planilha } from './planilha.ts'
 import { montarRecorte, sha256Hex } from './recorte.ts'
@@ -301,7 +301,13 @@ describe.skipIf(!temArquivo)('planilha SINAPI 09/2026 (referência local)', () =
       const eq = equipeDaComposicao(comp.maoDeObra)!
       expect(eq.principal.funcao).toBe('SERVENTE')
       expect(totalManHours(100, eq.principal.coeficiente)).toBeCloseTo(158.15891, 9)
-      expect(scheduleDays(durationFromTeam(100, eq.principal.coeficiente, 2, 8))).toBe(10) // 9,8849 → 10 (antes da EO-1: 1 d e 772 serventes)
+      expect(scheduleDays(durationFromTeam(100, eq.principal.coeficiente, 2, 8))).toBe(10) // 9,8849 → 10
+      // ANTES da EO-1 (principal sem excluir a supervisão): o engenheiro (0,004143) era a principal: HH 0,4143, 1 d e ⌈2 × 1,5815891 ÷ 0,004143⌉ = 764 serventes
+      // (o plano dizia 772 porque usava os coeficientes arredondados 1,5816 e 0,0041)
+      const antes = comp.maoDeObra.filter((f) => !ehFuncaoDeApoio(f.funcao)).reduce((m, f) => (f.coeficiente > m.coeficiente ? f : m))
+      expect(antes.funcao).toBe('ENGENHEIRO CIVIL DE OBRA PLENO')
+      expect(scheduleDays(durationFromTeam(100, antes.coeficiente, 2, 8))).toBe(1)
+      expect(Math.ceil((2 * 1.5815891) / antes.coeficiente - 1e-9)).toBe(764)
       const recursos = recursosDaEquipe('Servente', 2, eq.proporcoes)
       expect(recursos).toEqual([{ resource: 'Servente', units: 2 }])
       const notas = notasDaTarefaSinapi({ codigo: '107113', quantidade: 100, unidade: 'M', fonte: 'SP 09/2026 não desonerado', maoDeObra: comp.maoDeObra, recursos })
@@ -316,6 +322,11 @@ describe.skipIf(!temArquivo)('planilha SINAPI 09/2026 (referência local)', () =
       expect(eq.principal.funcao).toBe('PEDREIRO')
       expect(totalManHours(50, 0.276)).toBeCloseTo(13.8, 9)
       expect(scheduleDays(durationFromTeam(50, 0.276, 2, 8))).toBe(1) // 0,8625 → 1 (antes da EO-1, pelo encarregado: 17,55 HH → 2 d)
+      // ANTES da EO-1: o encarregado geral (0,351) era a principal: HH 17,55 e 2 d
+      const antes = comp.maoDeObra.filter((f) => !ehFuncaoDeApoio(f.funcao)).reduce((m, f) => (f.coeficiente > m.coeficiente ? f : m))
+      expect(antes.funcao).toBe('ENCARREGADO GERAL')
+      expect(totalManHours(50, antes.coeficiente)).toBeCloseTo(17.55, 9)
+      expect(scheduleDays(durationFromTeam(50, antes.coeficiente, 2, 8))).toBe(2)
       expect(eq.supervisao.map((f) => f.funcao)).toEqual(['ENGENHEIRO CIVIL DE OBRA PLENO', 'ENCARREGADO GERAL'])
       // Servente: 2 × 1,128 ÷ 0,276 = 8,17 → ⌈8,17 − 0,05⌉ = 9
       expect(recursosDaEquipe('Pedreiro', 2, eq.proporcoes).map((r) => `${r.resource} ${r.units}`)).toEqual(['Pedreiro 2', 'Servente 9'])

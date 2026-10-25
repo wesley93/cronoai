@@ -87,29 +87,69 @@ export function colunaDaReferencia(ref: string): number {
   return n
 }
 
+interface Elemento {
+  /** Texto dos atributos (entre o nome e o `>`). */
+  atributos: string
+  /** Conteúdo entre a abertura e o fechamento (vazio se a tag é autofechada). */
+  corpo: string
+  /** Posição logo depois do elemento. */
+  fim: number
+}
+
+const ESPACO_OU_FIM = new Set([9, 10, 13, 32, 47, 62]) // tab, LF, CR, espaço, "/" e ">"
+
+/**
+ * Próximo elemento `<nome ...>…</nome>` (ou autofechado) a partir de `de`, por `indexOf` (tempo linear: cada busca anda para frente).
+ * Tag sem `>` ou elemento sem fechamento é RECUSADO: nunca se varre o resto do arquivo de novo a cada tag (regex lenta com `<si>` repetido).
+ */
+function proximoElemento(xml: string, nome: string, de: number): Elemento | undefined {
+  let i = de
+  for (;;) {
+    i = xml.indexOf('<' + nome, i)
+    if (i < 0) return undefined
+    if (ESPACO_OU_FIM.has(xml.charCodeAt(i + 1 + nome.length))) break // `<c` não casa com `<cols`
+    i += 1
+  }
+  const fechaAbertura = xml.indexOf('>', i)
+  if (fechaAbertura < 0) throw new ErroPlanilha('O XML tem uma tag que não termina.')
+  if (xml.charCodeAt(fechaAbertura - 1) === 47) return { atributos: xml.slice(i + 1 + nome.length, fechaAbertura - 1), corpo: '', fim: fechaAbertura + 1 }
+  const fecha = xml.indexOf('</' + nome + '>', fechaAbertura + 1)
+  if (fecha < 0) throw new ErroPlanilha('O XML tem um elemento sem fechamento.')
+  return { atributos: xml.slice(i + 1 + nome.length, fechaAbertura), corpo: xml.slice(fechaAbertura + 1, fecha), fim: fecha + nome.length + 3 }
+}
+
 /** Textos de todos os `<t>` de um bloco, sem os de fonética (`rPh`). */
 function textosDe(bloco: string, max: number): string {
-  const semFonetica = bloco.includes('<rPh') ? bloco.replace(/<rPh\b[\s\S]*?<\/rPh>/g, '') : bloco
+  let limpo = bloco
+  if (bloco.includes('<rPh')) {
+    limpo = ''
+    let pos = 0
+    for (let e = proximoElemento(bloco, 'rPh', 0); e; e = proximoElemento(bloco, 'rPh', pos)) {
+      const ini = bloco.indexOf('<rPh', pos)
+      limpo += bloco.slice(pos, ini)
+      pos = e.fim
+    }
+    limpo += bloco.slice(pos)
+  }
   let out = ''
-  const re = /<t\b[^>]*?(?:\/>|>([\s\S]*?)<\/t>)/g
-  for (let r = re.exec(semFonetica); r; r = re.exec(semFonetica)) out += decodificarEntidades(r[1] ?? '')
+  for (let e = proximoElemento(limpo, 't', 0); e; e = proximoElemento(limpo, 't', e.fim)) out += decodificarEntidades(e.corpo)
   return limpar(out, max)
 }
 
 function lerTextosCompartilhados(xml: string, l: LimitesPlanilha): string[] {
   conferirXml(xml, 'sharedStrings')
   const out: string[] = []
-  const re = /<si\b[^>]*?(?:\/>|>([\s\S]*?)<\/si>)/g
-  for (let r = re.exec(xml); r; r = re.exec(xml)) {
+  for (let e = proximoElemento(xml, 'si', 0); e; e = proximoElemento(xml, 'si', e.fim)) {
     if (out.length >= l.maxTextosCompartilhados) throw new ErroPlanilha(`A planilha tem mais de ${l.maxTextosCompartilhados} textos compartilhados.`)
-    out.push(textosDe(r[1] ?? '', l.maxTexto))
+    out.push(textosDe(e.corpo, l.maxTexto))
   }
   return out
 }
 
 function textoDoZip(zip: LeitorZip, nome: string): string {
   const dados = zip.ler(nome)
-  if (!dados) throw new ErroPlanilha(`Entrada "${nome}" ausente no xlsx.`)
+  // O nome pode vir do .rels do arquivo (texto livre, até com caractere de controle): só se cita um caminho simples
+  if (!dados) throw new ErroPlanilha(/^[\w./-]{1,100}$/.test(nome) ? `Entrada "${nome}" ausente no xlsx.` : 'Uma entrada necessária ausente no xlsx.')
   return dados.toString('utf8')
 }
 
@@ -126,15 +166,15 @@ export function abrirPlanilha(zip: LeitorZip, limites: LimitesPlanilha = LIMITES
   conferirXml(rels, 'workbook.xml.rels')
 
   const alvoPorId = new Map<string, string>()
-  for (const m of rels.matchAll(/<Relationship\b([^>]*?)\/?>/g)) {
-    const a = atributos(m[1]!)
+  for (let e = proximoElemento(rels, 'Relationship', 0); e; e = proximoElemento(rels, 'Relationship', e.fim)) {
+    const a = atributos(e.atributos)
     const id = a.get('Id')
     const alvo = a.get('Target')
     if (id && alvo) alvoPorId.set(id, caminhoDoAlvo(alvo))
   }
   const caminhos = new Map<string, string>()
-  for (const m of workbook.matchAll(/<sheet\b([^>]*?)\/?>/g)) {
-    const a = atributos(m[1]!)
+  for (let e = proximoElemento(workbook, 'sheet', 0); e; e = proximoElemento(workbook, 'sheet', e.fim)) {
+    const a = atributos(e.atributos)
     const nome = a.get('name')
     const id = a.get('r:id') ?? [...a.entries()].find(([k]) => k.endsWith(':id'))?.[1]
     const caminho = id ? alvoPorId.get(id) : undefined
@@ -151,38 +191,34 @@ export function abrirPlanilha(zip: LeitorZip, limites: LimitesPlanilha = LIMITES
     const xml = textoDoZip(zip, caminho)
     conferirXml(xml, `aba "${aba}"`)
     const partilhados = textos()
-    const reLinha = /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g
-    const reCelula = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g
     let n = 0
     let ultimaLinha = 0
-    for (let r = reLinha.exec(xml); r; r = reLinha.exec(xml)) {
+    for (let r = proximoElemento(xml, 'row', 0); r; r = proximoElemento(xml, 'row', r.fim)) {
       if (++n > limites.maxLinhas) throw new ErroPlanilha(`A aba "${aba}" tem mais de ${limites.maxLinhas} linhas.`)
-      const a = atributos(r[1]!)
+      const a = atributos(r.atributos)
       const numero = a.has('r') ? Number(a.get('r')) : ultimaLinha + 1
       if (!Number.isInteger(numero) || numero < 1) throw new ErroPlanilha('Número de linha inválido.')
       ultimaLinha = numero
       const celulas: Celula[] = []
-      const corpo = r[2] ?? ''
-      reCelula.lastIndex = 0
+      const corpo = r.corpo
       let ultimaColuna = 0
-      for (let c = reCelula.exec(corpo); c; c = reCelula.exec(corpo)) {
-        const ca = atributos(c[1]!)
+      for (let c = proximoElemento(corpo, 'c', 0); c; c = proximoElemento(corpo, 'c', c.fim)) {
+        const ca = atributos(c.atributos)
         const ref = ca.get('r')
         const coluna = ref ? colunaDaReferencia(ref) : ultimaColuna + 1
         if (coluna > limites.maxColunas) throw new ErroPlanilha(`A aba "${aba}" tem mais de ${limites.maxColunas} colunas.`)
         ultimaColuna = coluna
-        const interno = c[2]
+        const interno = c.corpo
         if (!interno) continue // célula vazia (só estilo)
         const celula: Celula = { coluna }
-        const f = /<f\b[^>]*?(?:\/>|>([\s\S]*?)<\/f>)/.exec(interno)
-        if (f?.[1]) celula.formula = limpar(decodificarEntidades(f[1]), limites.maxTexto)
+        const f = proximoElemento(interno, 'f', 0)
+        if (f?.corpo) celula.formula = limpar(decodificarEntidades(f.corpo), limites.maxTexto)
         const tipo = ca.get('t') ?? 'n'
         if (tipo === 'inlineStr') {
-          const is = /<is\b[^>]*>([\s\S]*?)<\/is>/.exec(interno)
-          if (is) celula.valor = textosDe(is[1]!, limites.maxTexto)
+          const is = proximoElemento(interno, 'is', 0)
+          if (is) celula.valor = textosDe(is.corpo, limites.maxTexto)
         } else {
-          const v = /<v\b[^>]*?(?:\/>|>([\s\S]*?)<\/v>)/.exec(interno)
-          const bruto = v?.[1]
+          const bruto = proximoElemento(interno, 'v', 0)?.corpo
           if (bruto !== undefined && bruto !== '') {
             if (tipo === 's') {
               const i = Number(bruto)

@@ -327,3 +327,18 @@ describe('chave da obra, rótulos da fonte e registro salvo', () => {
     expect(lerRegistroDeRecorte(reg, 'BA|desonerado|2026-09')).toMatchObject({ ok: false, motivo: 'invalido' })
   })
 })
+
+describe('totais do arquivo e chip da fonte alterada', () => {
+  it('totais.composicoes diferente da quantidade de composições: recusado', () => {
+    const o = clone()
+    ;(o.totais as Record<string, unknown>).composicoes = 99
+    expect(erros(o)).toEqual(['Os totais do recorte não conferem com a quantidade de composições.'])
+    expect(validarRecorteSinapi(clone()).ok).toBe(true)
+  })
+
+  it('chip curto: a marca de alteração é mantida', () => {
+    expect(rotuloCurtoDaFonte('SINAPI SP 09/2026 não desonerado · alterado')).toBe('SINAPI SP 09/2026 · alterado')
+    expect(rotuloCurtoDaFonte('SINAPI BA 09/2026 desonerado · alterado')).toBe('SINAPI BA 09/2026 · alterado')
+    expect(rotuloCurtoDaFonte('SINAPI BA 09/2026 desonerado')).toBe('SINAPI BA 09/2026')
+  })
+})

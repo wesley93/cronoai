@@ -103,6 +103,11 @@ export function taxaHora(premissas: PremissasObra, funcao: string): number {
   return t ? taxaEfetiva(t, premissas.encargosSociaisPct) : premissas.taxaFuncaoNaoCadastrada
 }
 
+/** A função tem taxa própria nas premissas (senão `taxaHora` usa a taxa "não cadastrada", ilustrativa). */
+export function taxaCadastrada(premissas: PremissasObra, funcao: string): boolean {
+  return premissas.taxas.some((x) => x.funcao === funcao)
+}
+
 export type ResultadoConversao = { ok: true; valor: number } | { ok: false; erro: string }
 
 /**

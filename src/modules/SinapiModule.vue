@@ -12,14 +12,15 @@ import BudgetSheet from './sinapi/BudgetSheet.vue'
 import BuscaComposicao from './sinapi/BuscaComposicao.vue'
 import { SINAPI_CATALOG, SINAPI_REFERENCE_URL } from '@/data/sinapiCatalog'
 import { horasPorDia } from '@/lib/calendarioTrabalho'
-import { durationFromTeam, scheduleDays, teamFromDuration, totalManHours } from '@/lib/sinapi'
-import { custoMaoDeObraPorFuncao, equipeDaComposicao, recursosDaEquipe, rotuloFuncao } from '@/lib/sinapiRup'
+import { custoMaoDeObraPorHorasAlocadas, durationFromTeam, scheduleDays, teamFromDuration, totalManHours } from '@/lib/sinapi'
+import { custoMaoDeObraPorFuncao, equipeDaComposicao, horasDeSupervisao, recursosDaEquipe, type ValoresInformados } from '@/lib/sinapiRup'
 import { itemCatalogoDoRecorte } from '@/lib/recorteSinapi'
 import type { ComposicaoRecorte } from '@/types/sinapi'
 import { rateOf } from '@/lib/scenarios'
-import { taxaHora } from '@/lib/premissas'
-import { fmtBRL, fmtBRLCents, fmtDate, fmtDiasUteis, fmtNum } from '@/lib/format'
+import { taxaCadastrada, taxaHora } from '@/lib/premissas'
+import { fmtBRLCents, fmtDate, fmtDiasUteis, fmtNum } from '@/lib/format'
 import { descreverTabelaSinapi } from '@/lib/obras'
+import { marcarFonteAlterada } from '@/lib/sinapiBudget'
 
 const project = useProjectStore()
 const ui = useUiStore()
@@ -80,15 +81,13 @@ function selecionarDoRecorte(c: ComposicaoRecorte) {
   parentWbs.value = groups.value.some((g) => g.wbs === it.group) ? it.group : groups.value[0]?.wbs ?? ''
 }
 
-// O módulo fica montado (KeepAlive): importar ou remover o recorte em Integrações troca a origem da composição
-watch(
-  usaRecorte,
-  (usa) => {
-    if (usa) limparItem()
-    else usarCatalogo(catalogIdx.value >= 0 ? catalogIdx.value : 0)
-  },
-  { immediate: false },
-)
+// O módulo fica montado (KeepAlive): importar, substituir ou remover o recorte, ou trocar de obra, muda a ORIGEM da composição. A identidade
+// (fonte + SHA-256) muda mesmo com recorte nos dois lados (obra A em SP → obra B em BA): a composição com o custo de lá sai da tela.
+const identidadeRecorte = computed(() => (recorte.value ? `${recorte.value.fonte}|${recorte.value.sha256Origem}` : ''))
+watch(identidadeRecorte, (nova) => {
+  if (nova) limparItem()
+  else usarCatalogo(catalogIdx.value >= 0 ? catalogIdx.value : 0)
+})
 
 // Jornada da obra: minutos por dia ÷ 60 (480 → 8 h), a mesma fonte do crashing (D-18)
 const horas = computed(() => horasPorDia(project.minutosPorDia))
@@ -108,7 +107,7 @@ const recursos = computed(() =>
       ],
 )
 /** Supervisão (engenheiro, encarregado): não vira recurso; vai às notas como administração local. */
-const supervisao = computed(() => (maoDeObra.value.length ? (equipeDaComposicao(maoDeObra.value)?.supervisao ?? []) : []))
+const supervisao = computed(() => horasDeSupervisao(quantity.value, maoDeObra.value.length ? (equipeDaComposicao(maoDeObra.value)?.supervisao ?? []) : []))
 const bac = computed(() => quantity.value * item.unitCost)
 // Custo de mão de obra ESTIMADO (ilustrativo: taxas das premissas da obra). Com mão de obra do recorte: Σ quantidade × coeficiente × taxa por função (D-21)
 const custoPorFuncao = computed(() =>
@@ -117,13 +116,24 @@ const custoPorFuncao = computed(() =>
         quantity.value,
         maoDeObra.value,
         (rotulo) => taxaHora(project.premissasVigentes, rotulo),
-        (rotulo) => project.premissasVigentes.taxas.some((t) => t.funcao === rotulo),
+        (rotulo) => taxaCadastrada(project.premissasVigentes, rotulo),
       )
     : undefined,
 )
 const laborCost = computed(
-  () => custoPorFuncao.value?.total ?? hh.value * rateOf(project.premissasVigentes, item.professional) + days.value * horas.value * helpers.value * rateOf(project.premissasVigentes, 'Servente'),
+  () =>
+    custoPorFuncao.value?.total ??
+    custoMaoDeObraPorHorasAlocadas({
+      hh: hh.value,
+      dias: days.value,
+      horasPorDia: horas.value,
+      serventes: helpers.value,
+      taxaOficial: rateOf(project.premissasVigentes, item.professional),
+      taxaServente: rateOf(project.premissasVigentes, 'Servente'),
+    }),
 )
+/** Como o custo estimado é calculado (aparece na tela): por coeficiente da composição (recorte) ou por horas alocadas (catálogo). */
+const metodoCusto = computed(() => (custoPorFuncao.value ? 'por coeficiente da composição' : 'por horas alocadas'))
 const foraDasTaxas = computed(() => [...new Set((custoPorFuncao.value?.funcoes ?? []).filter((f) => f.foraDasTaxas).map((f) => f.rotulo))])
 const dailyOutput = computed(() => (days.value ? quantity.value / days.value : 0))
 
@@ -160,12 +170,16 @@ const input = computed<SinapiInsert>(() => ({
   predecessorUid: predecessorUid.value,
   linkType: linkType.value,
   lagDays: lagDays.value,
-  fonte: item.fonte,
+  fonte: fonteEfetiva.value,
   maoDeObra: item.fonte ? maoDeObra.value : undefined,
+  informado: informado.value,
 }))
 const valid = computed(() => !!item.code && quantity.value > 0 && item.rup > 0 && days.value > 0 && Number.isFinite(days.value) && days.value <= 2000)
 const preview = computed(() => (valid.value ? project.previewSinapiTask(input.value) : undefined))
 const generated = computed(() => project.leaves.filter((t) => t.notes?.startsWith('Gerado pelo CronoAI')))
+/** Composição do recorte SEM mão de obra publicada: a RUP é a que o usuário digitou, e a fonte e as notas dizem isso. */
+const fonteEfetiva = computed(() => (item.fonte && !item.equipe ? marcarFonteAlterada(item.fonte) : item.fonte))
+const informado = computed<ValoresInformados | undefined>(() => (item.fonte && !item.equipe ? { rup: item.rup, custo: item.unitCost, profissional: item.professional } : undefined))
 const textoEquipe = computed(() => recursos.value.filter((r) => r.units > 0).map((r) => `${r.resource} ${r.units}`).join(' + '))
 
 function addToSheet() {
@@ -186,7 +200,7 @@ function addToSheet() {
     team: officials.value,
     group: newGroup.value ? '99' : parentWbs.value,
     ...(item.equipe ? { equipe: item.equipe.map((e) => ({ ...e })) } : {}),
-    ...(item.fonte ? { fonte: item.fonte } : {}),
+    ...(fonteEfetiva.value ? { fonte: fonteEfetiva.value } : {}),
   })
   ui.notify('success', 'Linha adicionada à planilha', `${item.code} · ${days.value} d.u. com ${officials.value} oficial(is).`)
 }
@@ -303,7 +317,7 @@ const profissionalMinusculo = computed(() => item.professional.toLowerCase())
 
         <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div class="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/60"><div class="eyebrow">Homem-hora</div><div class="mt-0.5 text-lg font-semibold tabular-nums">{{ fmtNum(hh) }} HH</div></div>
-          <div class="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/60"><div class="eyebrow">Duração</div><div class="mt-0.5 text-lg font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{{ days }} d.u.</div></div>
+          <div class="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/60"><div class="eyebrow">Duração</div><div class="mt-0.5 text-lg font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{{ days }} d.u.</div><div class="text-[10px] text-zinc-500" data-testid="duracao-jornada">(de {{ fmtNum(horas) }} h)</div></div>
           <div v-if="item.equipe" class="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/60"><div class="eyebrow">Equipe</div><div class="mt-0.5 text-lg font-semibold tabular-nums">{{ recursos.map((r) => r.units).join(' + ') }}</div><div class="text-[10px] text-zinc-500">por função (abaixo)</div></div>
           <div v-else class="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/60"><div class="eyebrow">Equipe</div><div class="mt-0.5 text-lg font-semibold tabular-nums">{{ officials }} + {{ helpers }}</div><div class="text-[10px] text-zinc-500">oficiais + serventes</div></div>
           <div class="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/60"><div class="eyebrow">Produção</div><div class="mt-0.5 text-lg font-semibold tabular-nums">{{ fmtNum(dailyOutput) }}</div><div class="text-[10px] text-zinc-500">{{ item.unit }}/dia</div></div>
@@ -312,12 +326,12 @@ const profissionalMinusculo = computed(() => item.professional.toLowerCase())
           <div><span class="text-zinc-500">Equipe por função:</span> <strong>{{ textoEquipe }}</strong></div>
           <div v-if="supervisao.length" class="mt-1 text-zinc-500" data-testid="supervisao-nao-alocada">
             Supervisão não alocada (administração local, vai às notas da tarefa):
-            {{ supervisao.map((f) => `${rotuloFuncao(f.funcao)} ${fmtNum(quantity * f.coeficiente)} h`).join('; ') }}
+            {{ supervisao.map((h) => `${h.rotulo} ${fmtNum(h.horas)} h`).join('; ') }}
           </div>
         </div>
         <div class="mt-3 flex flex-wrap justify-between gap-2 text-[12px]">
           <span>Orçamento do pacote (BAC): <strong class="tabular-nums" data-testid="bac">{{ fmtBRLCents(bac) }}</strong></span>
-          <span class="text-zinc-500">Mão de obra estimada (ilustrativa): {{ fmtBRL(laborCost) }} ({{ Math.round((laborCost / Math.max(1, bac)) * 100) }}% do BAC)</span>
+          <span class="text-zinc-500" data-testid="mao-de-obra">Mão de obra estimada (ilustrativa, {{ metodoCusto }}): {{ fmtBRLCents(laborCost) }} ({{ Math.round((laborCost / Math.max(1, bac)) * 100) }}% do BAC)</span>
         </div>
         <p v-if="foraDasTaxas.length" class="mt-1 text-[11px] text-zinc-500" data-testid="fora-das-taxas">
           Funções sem taxa nas premissas da obra, estimadas pela taxa "não cadastrada" (ilustrativa): {{ foraDasTaxas.join(', ') }}.

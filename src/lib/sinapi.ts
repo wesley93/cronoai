@@ -21,3 +21,11 @@ export function scheduleDays(rawDays: number): number {
   if (!Number.isFinite(rawDays)) return 0
   return Math.max(1, Math.ceil(rawDays - 1e-9))
 }
+
+/**
+ * Custo de mão de obra estimado SEM recorte (catálogo ilustrativo), por horas alocadas:
+ * `HH × taxa do oficial + dias × horas por dia × serventes × taxa do servente`. As taxas vêm das premissas da obra (ilustrativas).
+ */
+export function custoMaoDeObraPorHorasAlocadas(p: { hh: number; dias: number; horasPorDia: number; serventes: number; taxaOficial: number; taxaServente: number }): number {
+  return p.hh * p.taxaOficial + p.dias * p.horasPorDia * p.serventes * p.taxaServente
+}

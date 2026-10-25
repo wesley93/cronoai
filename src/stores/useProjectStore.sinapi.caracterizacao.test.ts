@@ -7,6 +7,7 @@ import { useProjectStore } from '@/stores/useProjectStore'
 import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
 import { lineFromCatalog, lineResources, parseBudgetCsv } from '@/lib/sinapiBudget'
 import { rateOf } from '@/lib/scenarios'
+import { custoMaoDeObraPorHorasAlocadas } from '@/lib/sinapi'
 
 beforeEach(() => {
   globalThis.localStorage?.clear?.()
@@ -31,7 +32,8 @@ describe('SINAPI antes do 00006: caracterização', () => {
     const prem = store.premissasVigentes
     expect(rateOf(prem, 'Pedreiro')).toBe(31.4)
     expect(rateOf(prem, 'Servente')).toBe(23.9)
-    const laborCost = 524.8 * 31.4 + 17 * 8 * 2 * 23.9
+    // Chama o código de PRODUÇÃO (o mesmo da calculadora sem recorte): 524,8 HH × 31,40 + 17 d × 8 h × 2 serventes × 23,90
+    const laborCost = custoMaoDeObraPorHorasAlocadas({ hh: 524.8, dias: 17, horasPorDia: 8, serventes: 2, taxaOficial: rateOf(prem, 'Pedreiro'), taxaServente: rateOf(prem, 'Servente') })
     expect(laborCost).toBeCloseTo(16478.72 + 6500.8, 2) // R$ 22.979,52
   })
 

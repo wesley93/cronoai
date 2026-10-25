@@ -1,7 +1,7 @@
 // Recorte SINAPI na obra (ciclo 00006, entregável 4): importação atômica, compartilhamento por chave, desvínculo, leitura adulterada,
 // calculadora e planilha com custo e RUP publicados. Fonte dos números: SINAPI 09/2026, Caixa (SP, não desonerado), 3 composições públicas.
 import { isProxy } from 'vue'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import amostraTexto from '../../e2e/arquivos/recorte-sinapi-sp-2026-09-amostra.json?raw'
 import type { DadosObra } from '@/lib/obras'
@@ -297,7 +297,6 @@ describe('leitura do armazenamento adulterado (recorte e referência)', () => {
     expect(store.recorteAtual).toBeUndefined()
     expect(store.avisoRecorte).not.toBe('')
     expect(store.carregado).toBe(true)
-    expect(store.state.tasks.length).toBeGreaterThanOrEqual(0)
     expect(adaptador.recortes.get(CHAVE)).toEqual(reg)
     expect(store.gravacaoBloqueada).toBe(false)
   })
@@ -499,4 +498,262 @@ describe('desempenho com o recorte inteiro (lição 3)', () => {
     expect(buscaMs).toBeLessThan(500)
     expect(salvarMs).toBeLessThan(2000)
   }, 60_000)
+})
+
+describe('linha da planilha alterada pelo usuário: fonte, equipe e notas (B2)', () => {
+  const ALTERADA = 'SINAPI SP 09/2026 não desonerado · alterado'
+  const PUBLICADA = 'SINAPI SP 09/2026 não desonerado'
+  const csv = (cabecalho: string, linha: string) => [`codigo;descricao;unidade;quantidade;${cabecalho}`, linha].join('\n')
+
+  async function comLinha(cabecalho: string, linha: string) {
+    const ctx = await comRecorte()
+    ctx.store.clearBudget()
+    const r = ctx.store.importBudgetCsv(csv(cabecalho, linha))
+    expect(r.errors).toEqual([])
+    return { ...ctx, linha: ctx.store.state.budget[0]! }
+  }
+  const gerar = (store: ReturnType<typeof useProjectStore>) => {
+    const r = store.generateFromBudget({ mode: 'FS', overlapPct: 0 })
+    if (!r.ok) throw new Error(r.erro)
+    return r.created[0]!
+  }
+
+  it('RUP editada na célula: a linha vira "alterada", sai a equipe do recorte e a duração usa a RUP digitada (18 d.u., e não 33); as notas citam a RUP e o custo EFETIVOS', async () => {
+    const { store, linha } = await comLinha('equipe', '103332;;m²;640;4')
+    expect(linha.fonte).toBe(PUBLICADA)
+    expect(linha.equipe).toEqual([{ recurso: 'Servente', proporcao: 0.5 }])
+    store.updateBudgetLine(linha.id, { rup: 0.9 })
+    const l = store.state.budget[0]!
+    expect(l.fonte).toBe(ALTERADA)
+    expect('equipe' in l).toBe(false)
+    expect(l.helperRatio).toBe(0.5)
+    const t = gerar(store)
+    expect(t.duracaoMin / 480).toBe(18) // 640 × 0,9 ÷ (4 × 8); com a RUP publicada seriam 33
+    expect(t.resources).toEqual([{ resource: 'Pedreiro', units: 4 }, { resource: 'Servente', units: 2 }])
+    expect(t.notes).toBe(
+      'Gerado pelo CronoAI a partir do SINAPI 103332 (SP 09/2026 não desonerado · alterado): 640 m². Função principal Pedreiro, RUP 0,9 h/m² e custo R$ 123,96/m² informados pelo usuário. ' +
+        'Publicado no SINAPI, só como referência: PEDREIRO, RUP 1,6225376 h/m², R$ 123,96/m². Equipe: Pedreiro 4 + Servente 2. HH de subcomposições (ex.: preparo de argamassa) não incluída.',
+    )
+    expect(t.notes).not.toContain('Função principal PEDREIRO, RUP 1,6225376 h/m². Equipe')
+  })
+
+  it('custo editado na célula: fonte "alterada", BAC com o custo digitado e as notas citam o custo informado e o publicado como referência', async () => {
+    const { store, linha } = await comLinha('equipe', '103332;;m²;640;4')
+    store.updateBudgetLine(linha.id, { unitCost: 150 })
+    expect(store.state.budget[0]!.fonte).toBe(ALTERADA)
+    const t = gerar(store)
+    expect(t.bac).toBeCloseTo(96000, 2)
+    expect(t.notes).toContain('RUP 1,6225376 h/m² e custo R$ 150/m² informados pelo usuário.')
+    expect(t.notes).toContain('Publicado no SINAPI, só como referência: PEDREIRO, RUP 1,6225376 h/m², R$ 123,96/m².')
+    expect(t.notes).toContain('(SP 09/2026 não desonerado · alterado)')
+  })
+
+  it('profissional trocado no CSV: as notas usam a função e a equipe EFETIVAS (nunca "Função principal PEDREIRO … Equipe: Carpinteiro 4")', async () => {
+    const { store } = await comLinha('profissional;equipe', '103332;;m²;640;Carpinteiro;4')
+    expect(store.state.budget[0]!.fonte).toBe(ALTERADA)
+    const t = gerar(store)
+    expect(t.resources).toEqual([{ resource: 'Carpinteiro', units: 4 }, { resource: 'Servente', units: 2 }])
+    expect(t.notes).toContain('Função principal Carpinteiro, RUP 1,6225376 h/m² e custo R$ 123,96/m² informados pelo usuário.')
+    expect(t.notes).toContain('Equipe: Carpinteiro 4 + Servente 2.')
+    expect(t.notes).not.toContain('Função principal PEDREIRO')
+  })
+
+  it('RUP e custo diferentes no CSV: mesma regra da edição na célula', async () => {
+    const { store } = await comLinha('rup;custo unitario;equipe', '103332;;m²;640;0,9;150;4')
+    expect(store.state.budget[0]!.fonte).toBe(ALTERADA)
+    expect(gerar(store).notes).toContain('RUP 0,9 h/m² e custo R$ 150/m² informados pelo usuário.')
+  })
+
+  it('só a quantidade ou a equipe mudam: a linha segue "publicada" e a equipe do recorte continua (desvio 9 do 1º relatório)', async () => {
+    const { store, linha } = await comLinha('equipe', '103332;;m²;640;4')
+    store.updateBudgetLine(linha.id, { quantity: 700, team: 5 })
+    const l = store.state.budget[0]!
+    expect(l.fonte).toBe(PUBLICADA)
+    expect(l.equipe).toEqual([{ recurso: 'Servente', proporcao: 0.5 }])
+    const t = gerar(store)
+    expect(t.notes).toContain('Função principal PEDREIRO, RUP 1,6225376 h/m².')
+    expect(t.notes).not.toContain('informados pelo usuário')
+  })
+
+  it('editar a célula com o MESMO valor não altera a linha', async () => {
+    const { store, linha } = await comLinha('equipe', '103332;;m²;640;4')
+    store.updateBudgetLine(linha.id, { rup: 1.6225376, unitCost: 123.96 })
+    expect(store.state.budget[0]!.fonte).toBe(PUBLICADA)
+  })
+
+  it('a linha alterada sobrevive ao recarregar e continua alterada (fonte gravada com a marca)', async () => {
+    const { store, adaptador, linha } = await comLinha('equipe', '103332;;m²;640;4')
+    store.updateBudgetLine(linha.id, { rup: 0.9 })
+    expect(await store.salvarAgora()).toBe(true)
+    const outra = await reabrir(adaptador)
+    expect(outra.state.budget[0]).toMatchObject({ fonte: ALTERADA, rup: 0.9, helperRatio: 0.5 })
+    expect('equipe' in outra.state.budget[0]!).toBe(false)
+  })
+})
+
+describe('composição de outro recorte não vira tarefa desta obra (B1)', () => {
+  const baText = () => texto({ ...amostra(), uf: 'BA' })
+  const dadosBa: DadosObra = { ...sp, nome: 'Obra BA (fictícia)', uf: 'BA' }
+  const inputDe = (fonte: string | undefined, nome = 'Alvenaria') => ({
+    name: nome, code: '103332', unit: 'm²', quantity: 640, unitCost: 123.96, durationDays: 33,
+    resources: [{ resource: 'Pedreiro', units: 4 }], parentWbs: '', newGroupName: 'Grupo (teste)', linkType: 'FS' as const, lagDays: 0, fonte,
+  })
+
+  it('obra A (SP) e obra B (BA) com recorte: o custo de SP não entra na obra BA (prévia e inclusão recusam, com mensagem); na obra SP vale', async () => {
+    const { store, idA } = await comRecorte()
+    const b = await store.criarObra({ modelo: 'branco', dados: dadosBa })
+    if (!b.ok) throw new Error(b.erro)
+    expect(await store.importarRecorteSinapi(baText())).toEqual({ ok: true })
+    expect(store.recorteAtual?.fonte).toBe('SINAPI BA 09/2026 não desonerado')
+    const antes = store.state.tasks.length
+    const msg = 'A composição escolhida vem de SINAPI SP 09/2026 não desonerado, que não é o recorte desta obra (SINAPI BA 09/2026 não desonerado). Escolha a composição de novo.'
+    expect(store.previewSinapiTask(inputDe(PUBLICADA_SP))).toEqual({ erro: msg })
+    expect(store.addSinapiTask(inputDe(PUBLICADA_SP))).toEqual({ ok: false, erro: msg })
+    expect(store.state.tasks).toHaveLength(antes)
+    // A fonte com a marca "alterado" também é conferida pela base
+    expect(store.addSinapiTask(inputDe(`${PUBLICADA_SP} · alterado`)).ok).toBe(false)
+    // Na própria obra (BA) a composição de BA entra
+    expect(store.addSinapiTask(inputDe('SINAPI BA 09/2026 não desonerado')).ok).toBe(true)
+    // De volta à obra SP: o de SP entra e o de BA é recusado
+    expect(await store.trocarObra(idA)).toEqual({ ok: true })
+    expect(store.addSinapiTask(inputDe(PUBLICADA_SP)).ok).toBe(true)
+    expect(store.addSinapiTask(inputDe('SINAPI BA 09/2026 não desonerado'))).toMatchObject({ ok: false })
+  })
+
+  it('obra sem recorte recusa fonte de recorte; sem fonte (catálogo ilustrativo) segue como sempre', async () => {
+    const { store } = await abrir()
+    await obraSp(store)
+    expect(store.addSinapiTask(inputDe(PUBLICADA_SP))).toEqual({
+      ok: false,
+      erro: 'A composição escolhida vem de SINAPI SP 09/2026 não desonerado, que não é o recorte desta obra (a obra não tem recorte). Escolha a composição de novo.',
+    })
+    expect(store.addSinapiTask(inputDe(undefined)).ok).toBe(true)
+  })
+
+  it('recorte substituído na mesma obra por outro de mesma fonte (SHA diferente): a fonte é a mesma e a inclusão segue valendo', async () => {
+    const { store } = await comRecorte()
+    const outro = amostra()
+    outro.fonte.sha256 = 'e'.repeat(64)
+    expect(await store.importarRecorteSinapi(texto(outro))).toEqual({ ok: true })
+    expect(store.addSinapiTask(inputDe(PUBLICADA_SP)).ok).toBe(true)
+  })
+})
+
+const PUBLICADA_SP = 'SINAPI SP 09/2026 não desonerado'
+
+describe('troca de obra durante a operação do recorte (R-3)', () => {
+  const porta = () => {
+    let abrir!: () => void
+    const livre = new Promise<void>((r) => (abrir = r))
+    return { livre, abrir }
+  }
+
+  it('a obra muda enquanto o recorte é lido: a importação desiste e não grava nada em nenhuma das obras', async () => {
+    const { adaptador, store } = await abrir()
+    const idA = await obraSp(store)
+    const b = await store.criarObra({ modelo: 'exemplo' })
+    if (!b.ok) throw new Error(b.erro)
+    await store.trocarObra(idA)
+    const g = porta()
+    const original = adaptador.lerRecorte.bind(adaptador)
+    adaptador.lerRecorte = async (chave) => {
+      await g.livre
+      return original(chave)
+    }
+    const importacao = store.importarRecorteSinapi(texto())
+    expect(await store.trocarObra(b.id)).toEqual({ ok: true })
+    g.abrir()
+    expect(await importacao).toEqual({ ok: false, erro: 'A obra ativa mudou durante a operação. Nada foi gravado: refaça na obra desejada.' })
+    expect(adaptador.recortes.size).toBe(0)
+    expect(store.state.meta.recorteSinapi).toBeUndefined()
+    expect(JSON.parse(adaptador.obras.get(idA)!.json).meta.recorteSinapi).toBeUndefined()
+    expect(store.recorteAtual).toBeUndefined()
+  })
+
+  it('a obra muda enquanto o recorte é gravado: a gravação termina na obra pedida e a troca espera; a obra nova não ganha o recorte nem o log', async () => {
+    const { adaptador, store } = await abrir()
+    const idA = await obraSp(store)
+    const b = await store.criarObra({ modelo: 'exemplo' })
+    if (!b.ok) throw new Error(b.erro)
+    await store.trocarObra(idA)
+    const g = porta()
+    let noPortao = false
+    const original = adaptador.gravarObra.bind(adaptador)
+    adaptador.gravarObra = async (reg, indice, extras) => {
+      if (extras?.gravarRecorte) {
+        noPortao = true
+        await g.livre
+      }
+      return original(reg, indice, extras)
+    }
+    const importacao = store.importarRecorteSinapi(texto())
+    await vi.waitFor(() => expect(noPortao).toBe(true))
+    const troca = store.trocarObra(b.id)
+    g.abrir()
+    expect(await importacao).toEqual({ ok: true })
+    expect(await troca).toEqual({ ok: true })
+    expect(store.obraAtivaId).toBe(b.id)
+    expect(adaptador.recortes.size).toBe(1)
+    expect(JSON.parse(adaptador.obras.get(idA)!.json).meta.recorteSinapi.chave).toBe(CHAVE)
+    expect(store.state.meta.recorteSinapi).toBeUndefined()
+    expect(store.recorteAtual).toBeUndefined()
+    expect(store.state.log.some((l) => l.title === 'Recorte SINAPI importado')).toBe(false)
+    expect(JSON.parse(adaptador.obras.get(b.id)!.json).meta.recorteSinapi).toBeUndefined()
+  })
+
+  it('o atraso de gravação agendado pela mudança da referência é cancelado: depois da importação o estado termina "salvo", sem nova gravação', async () => {
+    const { adaptador, store } = await abrir()
+    await obraSp(store)
+    let gravacoes = 0
+    const original = adaptador.gravarObra.bind(adaptador)
+    adaptador.gravarObra = async (reg, indice, extras) => {
+      gravacoes++
+      return original(reg, indice, extras)
+    }
+    const r = await store.importarRecorteSinapi(texto())
+    expect(r).toEqual({ ok: true })
+    // O log da importação é o único pendente; fora isso, uma gravação só (a da importação)
+    expect(gravacoes).toBe(1)
+  })
+})
+
+describe('recorte órfão de formato mais novo nunca é apagado (R-4)', () => {
+  const futuro = (chave: string) => ({ chave, versaoFormato: 2, json: '{"formato":"futuro"}', sha256Origem: 'a'.repeat(64), importadoEm: '2027-01-01T00:00:00.000Z', composicoes: 1 })
+
+  it('desvincular por troca de UF não apaga o registro do formato 2, mesmo sem outra obra usando', async () => {
+    const { adaptador, store } = await comRecorte()
+    adaptador.recortes.set(CHAVE, futuro(CHAVE))
+    expect(store.atualizarDadosObra({ ...sp, uf: 'BA' })).toEqual({ ok: true })
+    expect(await store.salvarAgora()).toBe(true)
+    expect(adaptador.recortes.get(CHAVE)).toEqual(futuro(CHAVE))
+  })
+
+  it('remover da última obra e excluir a obra também mantêm o registro do formato 2; o de formato 1 sai', async () => {
+    const { adaptador, store, idA } = await comRecorte()
+    adaptador.recortes.set(CHAVE, futuro(CHAVE))
+    expect(await store.removerRecorteSinapi()).toEqual({ ok: true })
+    expect(adaptador.recortes.get(CHAVE)).toEqual(futuro(CHAVE))
+    // Excluir a obra A (que voltou a ter referência) também mantém
+    store.state.meta.recorteSinapi = { chave: CHAVE, sha256Origem: 'a'.repeat(64), importadoEm: '2027-01-01T00:00:00.000Z' }
+    await store.criarObra({ modelo: 'exemplo' })
+    expect(await store.excluirObra(idA)).toEqual({ ok: true })
+    expect(adaptador.recortes.get(CHAVE)).toEqual(futuro(CHAVE))
+  })
+
+  it('o formato 1 continua saindo quando órfão (1 → 0)', async () => {
+    const { adaptador, store } = await comRecorte()
+    expect(await store.removerRecorteSinapi()).toEqual({ ok: true })
+    expect(adaptador.recortes.size).toBe(0)
+  })
+})
+
+describe('totais do arquivo conferem com a lista (segurança, Info 3)', () => {
+  it('totais.composicoes diferente da quantidade de composições: recusado na importação, sem gravar', async () => {
+    const { adaptador, store } = await abrir()
+    await obraSp(store)
+    const r = amostra()
+    r.totais.composicoes = 99
+    expect(await store.importarRecorteSinapi(texto(r))).toMatchObject({ ok: false, erro: 'Os totais do recorte não conferem com a quantidade de composições.' })
+    expect(adaptador.recortes.size).toBe(0)
+  })
 })

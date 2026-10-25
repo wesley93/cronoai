@@ -3,8 +3,9 @@ import { computed, ref } from 'vue'
 import { Database } from '@lucide/vue'
 import { ROTULO_REGIME_SINAPI } from '@/data/ufs'
 import { estadoCartaoSinapi } from '@/lib/integracoes'
-import { MAX_RECORTE_BYTES, descreverChave } from '@/lib/recorteSinapi'
-import { fmtDate, fmtPct } from '@/lib/format'
+import { MAX_RECORTE_BYTES, descreverChave, lerChaveRecorte } from '@/lib/recorteSinapi'
+import { fmtDate, fmtNum, fmtPct } from '@/lib/format'
+import { dataLocalISO } from '@/lib/obras'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import CartaoIntegracao from './CartaoIntegracao.vue'
@@ -25,16 +26,18 @@ const regime = computed(() => (meta.value.regimeSinapi ? ROTULO_REGIME_SINAPI[me
 const estado = computed(() => estadoCartaoSinapi(!!ativo.value))
 const sha = computed(() => ativo.value?.recorte.fonte.sha256 ?? '')
 const disponivel = computed(() => {
-  const m = project.recorteDisponivel?.split('|')
-  return m && m.length === 3 ? descreverChave(m[0]!, m[1] as 'nao-desonerado' | 'desonerado', m[2]!) : ''
+  const c = lerChaveRecorte(project.recorteDisponivel)
+  return c ? descreverChave(c.uf, c.regime, c.dataBase) : ''
 })
+/** Data da importação no dia local do usuário (não o dia UTC). */
+const dataDe = (iso: string) => fmtDate(dataLocalISO(new Date(iso)))
 const ocupado = ref(false)
 const arquivo = ref<HTMLInputElement>()
 
 async function importar(texto: string, confirmar = false): Promise<void> {
   const r = await project.importarRecorteSinapi(texto, { confirmarSubstituicao: confirmar })
   if (r.ok) {
-    ui.notify('success', 'Recorte SINAPI importado', `${project.recorteAtual?.fonte ?? ''}: ${(project.recorteAtual?.recorte.composicoes.length ?? 0).toLocaleString('pt-BR')} composições.`)
+    ui.notify('success', 'Recorte SINAPI importado', `${project.recorteAtual?.fonte ?? ''}: ${fmtNum(project.recorteAtual?.recorte.composicoes.length ?? 0)} composições.`)
   } else if (r.precisaConfirmar) {
     if (window.confirm(`${r.erro}\n\nSubstituir mesmo assim?`)) await importar(texto, true)
   } else {
@@ -103,15 +106,15 @@ async function remover() {
         <dt class="text-zinc-500">SHA-256</dt>
         <dd class="font-mono font-medium text-zinc-800 dark:text-zinc-200" :title="sha" data-testid="sinapi-sha">{{ sha.slice(0, 12) }}…</dd>
         <dt class="text-zinc-500">Importado em</dt>
-        <dd class="font-medium text-zinc-800 dark:text-zinc-200" data-testid="sinapi-importado">{{ fmtDate(ativo.importadoEm.slice(0, 10)) }}</dd>
+        <dd class="font-medium text-zinc-800 dark:text-zinc-200" data-testid="sinapi-importado">{{ dataDe(ativo.importadoEm) }}</dd>
         <dt class="text-zinc-500">Composições</dt>
-        <dd class="font-medium text-zinc-800 dark:text-zinc-200" data-testid="sinapi-composicoes">{{ ativo.recorte.composicoes.length.toLocaleString('pt-BR') }}</dd>
+        <dd class="font-medium text-zinc-800 dark:text-zinc-200" data-testid="sinapi-composicoes">{{ fmtNum(ativo.recorte.composicoes.length) }}</dd>
         <dt class="text-zinc-500">Encargos</dt>
         <dd class="font-medium text-zinc-800 dark:text-zinc-200" data-testid="sinapi-encargos">horista {{ fmtPct(ativo.recorte.encargos.horista * 100, 2) }} · mensalista {{ fmtPct(ativo.recorte.encargos.mensalista * 100, 2) }}</dd>
       </template>
     </dl>
     <p v-if="ativo?.substituidoEm" class="rounded-md border border-amber-500/40 bg-amber-400/10 p-2 text-[11.5px]" role="status" data-testid="sinapi-substituido">
-      Recorte substituído em {{ fmtDate(ativo.substituidoEm.slice(0, 10)) }}: o arquivo de origem não é mais o que esta obra importou.
+      Recorte substituído em {{ dataDe(ativo.substituidoEm) }}: o arquivo de origem não é mais o que esta obra importou.
     </p>
     <p v-if="project.avisoRecorte" class="rounded-md border border-amber-500/40 bg-amber-400/10 p-2 text-[11.5px]" role="alert" data-testid="sinapi-aviso">{{ project.avisoRecorte }}</p>
     <p v-if="!ativo && !project.avisoRecorte" class="text-[11.5px] text-zinc-500">

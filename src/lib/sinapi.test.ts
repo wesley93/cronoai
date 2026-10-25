@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { durationFromTeam, scheduleDays, teamFromDuration, totalManHours } from './sinapi'
+import { custoMaoDeObraPorHorasAlocadas, durationFromTeam, scheduleDays, teamFromDuration, totalManHours } from './sinapi'
 import { horasPorDia } from './calendarioTrabalho'
 
 describe('SINAPI: bordas', () => {
@@ -42,5 +42,16 @@ describe('SINAPI: horas por dia da obra (CR-12, EO-3, D-18)', () => {
     // Antes (8 h fixas, 33 d): 33 × 450 = 14.850 min, 726,36 min abaixo do necessário
     expect(33 * 450).toBe(14850)
     expect(Math.round((hh * 60) / 4 - 33 * 450)).toBe(726)
+  })
+})
+
+describe('custo de mão de obra por horas alocadas (catálogo ilustrativo, sem recorte)', () => {
+  it('HH × taxa do oficial + dias × horas por dia × serventes × taxa do servente', () => {
+    // Catálogo 103332, 640 m², equipe 4: HH 524,8; 17 d.u.; 2 serventes; taxas padrão R$ 31,40 e R$ 23,90
+    const c = custoMaoDeObraPorHorasAlocadas({ hh: 524.8, dias: 17, horasPorDia: 8, serventes: 2, taxaOficial: 31.4, taxaServente: 23.9 })
+    expect(c).toBeCloseTo(22979.52, 2)
+    // Com 450 min/dia (7,5 h) o trecho dos serventes usa as horas da obra
+    expect(custoMaoDeObraPorHorasAlocadas({ hh: 524.8, dias: 17, horasPorDia: 7.5, serventes: 2, taxaOficial: 31.4, taxaServente: 23.9 })).toBeCloseTo(16478.72 + 17 * 7.5 * 2 * 23.9, 2)
+    expect(custoMaoDeObraPorHorasAlocadas({ hh: 0, dias: 0, horasPorDia: 8, serventes: 0, taxaOficial: 31.4, taxaServente: 23.9 })).toBe(0)
   })
 })

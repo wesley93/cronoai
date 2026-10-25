@@ -5,7 +5,9 @@ import { premissasPadrao, taxaHora } from './premissas'
 import { durationFromTeam, scheduleDays, totalManHours } from './sinapi'
 import { horasPorDia } from './calendarioTrabalho'
 import {
-  TOLERANCIA_EQUIPE,
+  CASAS_PROPORCAO_EQUIPE,
+  arredondarProporcao,
+  horasDeSupervisao,
   custoMaoDeObraPorFuncao,
   ehFuncaoDeApoio,
   ehFuncaoDeSupervisao,
@@ -116,18 +118,37 @@ describe('função principal (D-6, EO-1)', () => {
   })
 })
 
-describe('tolerância do ceil e mínimo de 1 por função (EO-2)', () => {
-  it('TOLERANCIA_EQUIPE = 0,05', () => {
-    expect(TOLERANCIA_EQUIPE).toBe(0.05)
+describe('proporção arredondada a 2 casas antes do teto da equipe (EO-2 revisada)', () => {
+  const un = (n: number, proporcao: number) => recursosDaEquipe('Principal', n, [{ recurso: 'Outro', proporcao }])[1]!.units
+
+  it('arredonda a proporção a 2 casas (meio para cima)', () => {
+    expect(CASAS_PROPORCAO_EQUIPE).toBe(2)
+    expect(arredondarProporcao(1.279 / 0.639)).toBe(2) // 2,00156
+    expect(arredondarProporcao(0.8018)).toBe(0.8)
+    expect(arredondarProporcao(0.18324)).toBe(0.18)
+    expect(arredondarProporcao(0.005)).toBe(0.01)
+    expect(arredondarProporcao(0.004)).toBe(0)
   })
 
-  it('4,0031 → 4 (antes 5); 3,2073 → 4; 1,0994 → 2; 0,3836 → 1', () => {
-    const un = (n: number, proporcao: number) => recursosDaEquipe('Principal', n, [{ recurso: 'Outro', proporcao }])[1].units
-    expect(un(2, 1.279 / 0.639)).toBe(4) // ⌈4,0031 − 0,05⌉; antes da EO-2: ⌈4,0031 − 1e-9⌉ = 5
-    expect(Math.ceil(2 * (1.279 / 0.639) - 1e-9)).toBe(5)
-    expect(un(4, 1.145 / 1.428)).toBe(4)
-    expect(un(6, 0.376 / 2.052)).toBe(2)
-    expect(un(1, 1.8305384 / 4.7714472)).toBe(1) // 0,3836 → mínimo de 1
+  it('CR-2: 104658 com 2 pedreiros dá 4 serventes (antes da EO-2: 5) e com 32 dá 64 (a folga absoluta de 0,05 dava 65)', () => {
+    const p = 1.279 / 0.639
+    expect(un(2, p)).toBe(4)
+    expect(un(32, p)).toBe(64)
+    // Antes, com o teto sem arredondar: 5 e 65; com a folga absoluta (versão anterior desta rodada): 4 e 65
+    expect(Math.ceil(2 * p - 1e-9)).toBe(5)
+    expect(Math.ceil(32 * p - 1e-9)).toBe(65)
+    expect(Math.ceil(32 * p - 0.05)).toBe(65)
+  })
+
+  it('CR-3, CR-4 e CR-7 seguem iguais: 3,2073 → 4; 1,0994 → 2; 0,3836 → 1 (mínimo)', () => {
+    expect(un(4, 1.145 / 1.428)).toBe(4) // 4 × 0,80 = 3,2
+    expect(un(6, 0.376 / 2.052)).toBe(2) // 6 × 0,18 = 1,08
+    expect(un(1, 1.8305384 / 4.7714472)).toBe(1) // 0,38 → mínimo de 1
+    expect(un(4, 0.357 / 1.428)).toBe(1) // 4 × 0,25 = 1,0 exato (o ruído do ponto flutuante não soma 1)
+  })
+
+  it('proporção abaixo de 0,005 vira 0: vale o mínimo de 1 por função', () => {
+    expect(un(40, 0.004)).toBe(1)
   })
 
   it('a principal leva o mínimo de 1 e rótulos repetidos somam', () => {
@@ -177,6 +198,37 @@ describe('duração, equipe e BAC: CR-1 a CR-7 e CR-13/CR-14 (tabela 4.3 do plan
     expect(320 * 904.47).toBeCloseTo(289430.4, 2)
     expect(10 * 998.96).toBeCloseTo(9989.6, 2)
     expect(50 * 93.59).toBeCloseTo(4679.5, 2)
+  })
+})
+
+describe('CR-13 e CR-14: o antes → depois da EO-1 (supervisão fora da função principal), com os coeficientes PUBLICADOS', () => {
+  // Regra de ANTES: principal = maior coeficiente entre os que não são servente, auxiliar nem ajudante (engenheiro e encarregado contavam)
+  const principalAntes = (mo: readonly FuncaoMaoDeObra[]) => mo.filter((x) => !ehFuncaoDeApoio(x.funcao)).reduce((m, x) => (x.coeficiente > m.coeficiente ? x : m))
+
+  it('CR-13 (107113, 100 m, equipe 2): antes engenheiro principal, 1 d e 764 serventes; depois Servente, 10 d e 2 serventes', () => {
+    const mo = [f('90778', 'ENGENHEIRO CIVIL DE OBRA PLENO', 0.004143), f(SERV, 'SERVENTE', 1.5815891)]
+    const antes = principalAntes(mo)
+    expect(antes.funcao).toBe('ENGENHEIRO CIVIL DE OBRA PLENO')
+    expect(totalManHours(100, antes.coeficiente)).toBeCloseTo(0.4143, 9)
+    expect(scheduleDays(durationFromTeam(100, antes.coeficiente, 2, 8))).toBe(1)
+    expect(Math.ceil((2 * 1.5815891) / 0.004143 - 1e-9)).toBe(764) // ⌈763,5⌉; o plano dizia 772 com os coeficientes arredondados
+    const depois = equipeDaComposicao(mo)!
+    expect(depois.principal.funcao).toBe('SERVENTE')
+    expect(scheduleDays(durationFromTeam(100, depois.principal.coeficiente, 2, 8))).toBe(10)
+    expect(recursosDaEquipe('Servente', 2, depois.proporcoes)).toEqual([{ resource: 'Servente', units: 2 }])
+    expect(horasDeSupervisao(100, depois.supervisao)).toEqual([{ rotulo: 'Engenheiro civil de obra pleno', horas: 100 * 0.004143 }])
+  })
+
+  it('CR-14 (101183, q 50, equipe 2): antes encarregado principal, HH 17,55 e 2 d; depois Pedreiro, HH 13,8 e 1 d', () => {
+    const mo = [f('90778', 'ENGENHEIRO CIVIL DE OBRA PLENO', 0.035), f('7', 'ENCARREGADO GERAL', 0.351), f(SERV, 'SERVENTE', 1.128), f(PED, 'PEDREIRO', 0.276)]
+    const antes = principalAntes(mo)
+    expect(antes.funcao).toBe('ENCARREGADO GERAL')
+    expect(totalManHours(50, antes.coeficiente)).toBeCloseTo(17.55, 9)
+    expect(scheduleDays(durationFromTeam(50, antes.coeficiente, 2, 8))).toBe(2)
+    const depois = equipeDaComposicao(mo)!
+    expect(depois.principal.funcao).toBe('PEDREIRO')
+    expect(totalManHours(50, depois.principal.coeficiente)).toBeCloseTo(13.8, 9)
+    expect(scheduleDays(durationFromTeam(50, depois.principal.coeficiente, 2, 8))).toBe(1)
   })
 })
 
@@ -249,5 +301,36 @@ describe('notas da tarefa (D-23)', () => {
     expect(notasDaTarefaSinapi({ codigo: '1', quantidade: 2, unidade: 'UN', fonte: 'SP 09/2026 não desonerado', recursos: [] })).toBe(
       'Gerado pelo CronoAI a partir do SINAPI 1 (SP 09/2026 não desonerado): 2 UN.',
     )
+  })
+})
+
+describe('notas com valores informados pelo usuário (B2)', () => {
+  const mo = [f(SERV, 'SERVENTE', 0.8112688), f(PED, 'PEDREIRO', 1.6225376)]
+  const fonte = 'SP 09/2026 não desonerado · alterado'
+
+  it('cita a função, a RUP e o custo EFETIVOS como "informados pelo usuário" e o publicado só como referência', () => {
+    const recursos = [{ resource: 'Carpinteiro', units: 4 }, { resource: 'Servente', units: 2 }]
+    const n = notasDaTarefaSinapi({ codigo: '103332', quantidade: 640, unidade: 'm²', fonte, maoDeObra: mo, recursos, informado: { rup: 0.9, custo: 150, profissional: 'Carpinteiro', custoPublicado: 123.96 } })
+    expect(n).toBe(
+      'Gerado pelo CronoAI a partir do SINAPI 103332 (SP 09/2026 não desonerado · alterado): 640 m². Função principal Carpinteiro, RUP 0,9 h/m² e custo R$ 150/m² informados pelo usuário. ' +
+        'Publicado no SINAPI, só como referência: PEDREIRO, RUP 1,6225376 h/m², R$ 123,96/m². Equipe: Carpinteiro 4 + Servente 2. HH de subcomposições (ex.: preparo de argamassa) não incluída.',
+    )
+    expect(n).not.toContain('Função principal PEDREIRO')
+  })
+
+  it('sem mão de obra publicada (RUP digitada): só os valores informados, sem linha de referência', () => {
+    const n = notasDaTarefaSinapi({ codigo: '107113', quantidade: 100, unidade: 'M', fonte, recursos: [{ resource: 'Pedreiro', units: 2 }], informado: { rup: 1.5, custo: 97.45, profissional: 'Pedreiro' } })
+    expect(n).toBe(
+      'Gerado pelo CronoAI a partir do SINAPI 107113 (SP 09/2026 não desonerado · alterado): 100 M. Função principal Pedreiro, RUP 1,5 h/M e custo R$ 97,45/M informados pelo usuário. Equipe: Pedreiro 2. HH de subcomposições (ex.: preparo de argamassa) não incluída.',
+    )
+  })
+
+  it('horasDeSupervisao: quantidade × coeficiente, com o rótulo da função; quantidade negativa não dá hora negativa', () => {
+    const sup = [f('6', 'ENGENHEIRO CIVIL DE OBRA PLENO', 0.004143), f('7', 'ENCARREGADO GERAL', 0.351)]
+    expect(horasDeSupervisao(100, sup)).toEqual([
+      { rotulo: 'Engenheiro civil de obra pleno', horas: 100 * 0.004143 },
+      { rotulo: 'Encarregado geral', horas: 100 * 0.351 },
+    ])
+    expect(horasDeSupervisao(-5, sup).map((h) => h.horas)).toEqual([0, 0])
   })
 })

@@ -225,6 +225,8 @@ export function validarRecorteSinapi(entrada: unknown): ResultadoRecorte {
     }
   }
 
+  // Os totais gravados no arquivo precisam bater com a lista (arquivo editado à mão ou truncado)
+  if (!erros.length && totais && totais.composicoes !== composicoes.length) erros.push('Os totais do recorte não conferem com a quantidade de composições.')
   if (erros.length || !fonte || !encargos || !totais) return { ok: false, erros: erros.slice(0, MAX_ERROS) }
   return {
     ok: true,
@@ -268,9 +270,9 @@ export function chaveDaObra(meta: Pick<ProjectMeta, 'uf' | 'regimeSinapi' | 'dat
   return meta.uf && meta.regimeSinapi && meta.dataBaseSinapi ? chaveRecorte(meta.uf, meta.regimeSinapi, meta.dataBaseSinapi) : undefined
 }
 
-/** "SINAPI SP 09/2026 não desonerado" → "SINAPI SP 09/2026" (chip curto da planilha). */
+/** "SINAPI SP 09/2026 não desonerado" → "SINAPI SP 09/2026"; com a marca de alteração: "SINAPI SP 09/2026 · alterado" (chip curto da planilha). */
 export function rotuloCurtoDaFonte(fonte: string): string {
-  return fonte.replace(/ (não )?desonerado$/, '')
+  return fonte.replace(/ (não )?desonerado( · alterado)?$/, '$2')
 }
 
 /** "SINAPI SP 09/2026 não desonerado" → "SP 09/2026 não desonerado" (como entra nas notas da tarefa). */

@@ -143,3 +143,82 @@ describe('planilha: limites de linhas e colunas', () => {
     expect([...p.linhas('A')][0]!.celulas[0]!.valor).toBe('x'.repeat(10))
   })
 })
+
+/** Texto com conteúdo único por item: o deflate não o comprime a ponto de a leitura recusar por razão de compressão. */
+const repetir = (f: (i: number) => string, n: number) => Array.from({ length: n }, (_, i) => f(i)).join('')
+
+describe('planilha: tag não fechada é recusada rápido (sem regex quadrática)', () => {
+  const abas: AbaSintetica[] = [{ nome: 'A', linhas: [['x']] }]
+  const medir = (f: () => unknown) => {
+    const t = performance.now()
+    const msg = erroDe(f)
+    return { msg, ms: performance.now() - t }
+  }
+
+  it('"<si>" repetido sem fechamento nos textos compartilhados: recusa em menos de 1 s', () => {
+    const p = abrir(abas, { sharedStringsBruto: repetir((i) => `<si id="${i}">`, 100_000) })
+    const r = medir(() => [...p.linhas('A')])
+    expect(r.msg).toBe('O XML tem um elemento sem fechamento.')
+    expect(r.ms).toBeLessThan(1000)
+  })
+
+  it('"<row>" sem fechamento na aba: recusa em menos de 1 s', () => {
+    const p = abrir(abas, { linhasBrutas: repetir((i) => `<row r="${i}">`, 100_000) })
+    const r = medir(() => [...p.linhas('A')])
+    expect(r.msg).toBe('O XML tem um elemento sem fechamento.')
+    expect(r.ms).toBeLessThan(1000)
+  })
+
+  it('"<c>" sem fechamento dentro de uma linha e tag sem ">" também são recusadas rápido', () => {
+    const celulas = abrir(abas, { linhasBrutas: '<row r="1">' + repetir((i) => `<c r="A1" s="${i}">`, 100_000) + '</row>' })
+    const a = medir(() => [...celulas.linhas('A')])
+    expect(a.msg).toBe('O XML tem um elemento sem fechamento.')
+    expect(a.ms).toBeLessThan(1000)
+    const semFim = abrir(abas, { linhasBrutas: '<row r="1"><c r="A1" ' + repetir((i) => `a${i}="b" `, 100_000) + '</row>' })
+    const b = medir(() => [...semFim.linhas('A')])
+    expect(b.msg).toBe('O XML tem uma tag que não termina.')
+    expect(b.ms).toBeLessThan(1000)
+  })
+
+  it('"<Relationship " repetido sem ">" no .rels: recusa em menos de 1 s', () => {
+    const r = medir(() => abrir(abas, { relsBruto: '<Relationships>' + repetir((i) => `<Relationship Id="r${i}" `, 100_000) }))
+    expect(r.msg).toBe('O XML tem uma tag que não termina.')
+    expect(r.ms).toBeLessThan(1000)
+  })
+
+  it('textos com "<t>" ou "<rPh>" sem fechamento no próprio bloco: recusa', () => {
+    expect(erroDe(() => [...abrir(abas, { sharedStringsBruto: '<si><t>sem fim</si>' }).linhas('A')])).toBe('O XML tem um elemento sem fechamento.')
+    expect(erroDe(() => [...abrir(abas, { sharedStringsBruto: '<si><t>a</t><rPh>sem fim</si>' }).linhas('A')])).toBe('O XML tem um elemento sem fechamento.')
+  })
+
+  it('o resultado da leitura normal não mudou (aba real sintética com 5.000 linhas, tempo linear)', () => {
+    const linhas = Array.from({ length: 5000 }, (_, i) => [`texto ${i}`, i, { formula: `HYPERLINK("#",${i})`, valor: 0 }] as AbaSintetica['linhas'][number])
+    const p = abrir([{ nome: 'A', linhas }])
+    const t = performance.now()
+    const lidas = [...p.linhas('A')]
+    expect(performance.now() - t).toBeLessThan(2000)
+    expect(lidas).toHaveLength(5000)
+    expect(lidas[4999]!.celulas).toEqual([{ coluna: 1, valor: 'texto 4999' }, { coluna: 2, valor: 4999 }, { coluna: 3, valor: 0, formula: 'HYPERLINK("#",4999)' }])
+  })
+})
+
+const ESC = String.fromCharCode(27)
+
+describe('planilha: mensagem sem repetir o nome vindo do .rels', () => {
+  const abas: AbaSintetica[] = [{ nome: 'A', linhas: [['x']] }]
+  const rels = (alvo: string) =>
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="x" Target="' + alvo + '"/></Relationships>'
+
+  it('alvo ausente com caractere de controle (ESC) no nome: mensagem genérica, sem o texto do arquivo', () => {
+    const p = abrir(abas, { relsBruto: rels('worksheets/' + ESC + '[31mSEGREDO.xml') })
+    const msg = erroDe(() => [...p.linhas('A')])
+    expect(msg).toBe('Uma entrada necessária ausente no xlsx.')
+    expect(msg).not.toContain('SEGREDO')
+    expect(msg).not.toContain(ESC)
+  })
+
+  it('alvo ausente com nome simples cita o caminho', () => {
+    const p = abrir(abas, { relsBruto: rels('worksheets/inexistente.xml') })
+    expect(erroDe(() => [...p.linhas('A')])).toBe('Entrada "xl/worksheets/inexistente.xml" ausente no xlsx.')
+  })
+})

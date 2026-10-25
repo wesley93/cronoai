@@ -3,7 +3,7 @@ import { computed, reactive, ref } from 'vue'
 import { FileSpreadsheet, Upload, Download, Trash2, Wand2, KeyRound, Eraser } from '@lucide/vue'
 import type { ScheduledTask, Task } from '@/types/domain'
 import type { BudgetLine } from '@/lib/sinapiBudget'
-import { BUDGET_CSV_TEMPLATE, DEFAULT_BATCH_OPTIONS, lineDuration, lineName, lineResources, parseNumberBR } from '@/lib/sinapiBudget'
+import { BUDGET_CSV_TEMPLATE, DEFAULT_BATCH_OPTIONS, ehFonteAlterada, lineDuration, lineName, lineResources, parseNumberBR } from '@/lib/sinapiBudget'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import { downloadText } from '@/lib/download'
@@ -104,8 +104,14 @@ const cell =
           <tr v-for="l in lines" :key="l.id">
             <td class="mono">
               {{ l.code || '—' }}
-              <!-- Fonte do custo e da RUP da linha: o recorte da obra ou o catálogo ilustrativo -->
-              <div class="mt-0.5"><span :class="l.fonte ? 'chip-ok' : 'chip-warn'" :title="l.fonte ?? 'Custo e RUP ilustrativos: valide na tabela SINAPI da UF e da data-base'" data-testid="fonte-da-linha">{{ l.fonte ? rotuloCurtoDaFonte(l.fonte) : 'ilustrativo' }}</span></div>
+              <!-- Fonte do custo e da RUP da linha: o recorte da obra (verde), o recorte com valores mudados pelo usuário (âmbar tracejado) ou o catálogo ilustrativo (cinza) -->
+              <div class="mt-0.5">
+                <span
+                  :class="!l.fonte ? 'chip-neutral' : ehFonteAlterada(l.fonte) ? 'chip-warn border-dashed' : 'chip-ok'"
+                  :title="!l.fonte ? 'Custo e RUP ilustrativos: valide na tabela SINAPI da UF e da data-base' : ehFonteAlterada(l.fonte) ? 'RUP, custo ou profissional diferentes do publicado no recorte: valores informados pelo usuário' : 'Custo e RUP publicados no recorte SINAPI da obra'"
+                  data-testid="fonte-da-linha"
+                >{{ l.fonte ? rotuloCurtoDaFonte(l.fonte) : 'ilustrativo' }}</span>
+              </div>
             </td>
             <td>
               <div class="truncate" :title="l.description">{{ l.description }}</div>

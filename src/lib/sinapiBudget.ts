@@ -47,7 +47,7 @@ export function lineDuration(l: Pick<BudgetLine, 'quantity' | 'rup' | 'team'>, h
 }
 
 /**
- * Recursos da linha. Com `equipe` (recorte): cada função com `max(1, ⌈equipe × proporção − TOLERANCIA_EQUIPE⌉)`.
+ * Recursos da linha. Com `equipe` (recorte): cada função com `max(1, ⌈equipe × round2(proporção)⌉)`.
  * Sem `equipe` (catálogo ilustrativo): a principal e o "Servente" pelo `helperRatio`, com o ceil de sempre (−1e-9).
  */
 export function lineResources(l: Pick<BudgetLine, 'professional' | 'team' | 'helperRatio'> & { equipe?: readonly EquipeProporcional[] }): ResourceAssignment[] {
@@ -55,6 +55,16 @@ export function lineResources(l: Pick<BudgetLine, 'professional' | 'team' | 'hel
   const helpers = Math.ceil(Math.max(1, l.team) * Math.max(0, l.helperRatio) - 1e-9)
   return [{ resource: l.professional, units: Math.max(1, l.team) }, ...(helpers > 0 ? [{ resource: 'Servente', units: helpers }] : [])]
 }
+
+/** Serventes por oficial quando não há equipe por função publicada (o padrão da planilha CSV e da linha alterada). */
+export const HELPER_RATIO_PADRAO = 0.5
+
+/** Sufixo da fonte da linha cujo RUP, custo ou profissional o usuário mudou: ela deixa de ser "o publicado". */
+export const SUFIXO_FONTE_ALTERADA = ' · alterado'
+export const ehFonteAlterada = (fonte: string | undefined): boolean => !!fonte && fonte.endsWith(SUFIXO_FONTE_ALTERADA)
+/** Fonte do recorte sem o sufixo de alteração (a que se compara com a fonte do recorte da obra). */
+export const fonteBase = (fonte: string): string => (fonte.endsWith(SUFIXO_FONTE_ALTERADA) ? fonte.slice(0, -SUFIXO_FONTE_ALTERADA.length) : fonte)
+export const marcarFonteAlterada = (fonte: string): string => (ehFonteAlterada(fonte) ? fonte : fonte + SUFIXO_FONTE_ALTERADA)
 
 export function lineName(l: Pick<BudgetLine, 'description' | 'location'>): string {
   return l.location.trim() ? `${l.description} — ${l.location.trim()}` : l.description
@@ -180,7 +190,15 @@ export function parseBudgetCsv(text: string, catalog: readonly ItemCatalogoSinap
     if (!description) return void errors.push(`Linha ${lineNo}: sem descrição.`)
     if (!Number.isFinite(quantity) || quantity <= 0) return void errors.push(`Linha ${lineNo}: quantidade inválida.`)
     const finalRup = Number.isFinite(rup) && rup > 0 ? rup : item?.rup
-    if (!finalRup) return void errors.push(`Linha ${lineNo}: RUP ausente e código ${code || '—'} fora do catálogo.`)
+    if (!finalRup) {
+      // Composição do recorte sem mão de obra: tem custo, mas a RUP precisa vir da planilha
+      if (item?.fonte) return void errors.push(`Linha ${lineNo}: composição sem mão de obra no recorte (código ${code}): informe a RUP na planilha.`)
+      return void errors.push(`Linha ${lineNo}: RUP ausente e código ${code || '—'} fora do catálogo.`)
+    }
+    const custoFinal = Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : (item?.unitCost ?? 0)
+    const profissionalFinal = (get('professional') || item?.professional || 'Pedreiro').slice(0, 40)
+    // Do recorte, mas com RUP, custo ou profissional diferentes do publicado: a linha é "alterada" e não usa mais a equipe proporcional dele
+    const alterada = !!item?.fonte && (finalRup !== item.rup || custoFinal !== item.unitCost || profissionalFinal !== item.professional)
     lines.push({
       code: code || item?.code || '',
       description,
@@ -188,14 +206,14 @@ export function parseBudgetCsv(text: string, catalog: readonly ItemCatalogoSinap
       unit: (get('unit') || item?.unit || 'un').slice(0, 8),
       quantity,
       rup: finalRup,
-      unitCost: Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : (item?.unitCost ?? 0),
-      professional: (get('professional') || item?.professional || 'Pedreiro').slice(0, 40),
-      helperRatio: item?.helperRatio ?? 0.5,
+      unitCost: custoFinal,
+      professional: profissionalFinal,
+      helperRatio: alterada ? HELPER_RATIO_PADRAO : (item?.helperRatio ?? HELPER_RATIO_PADRAO),
       team: Number.isFinite(team) && team >= 1 ? Math.round(team) : defaultTeam,
       group: item?.group ?? inferGroup(description),
-      // Equipe por função só quando o item é do recorte e a planilha não troca o profissional (a mistura de funções segue a publicada, mesmo com RUP digitada)
-      ...(item?.equipe && !get('professional') ? { equipe: item.equipe } : {}),
-      ...(item?.fonte ? { fonte: item.fonte } : {}),
+      // Equipe por função só enquanto a linha é o publicado; alterada (RUP, custo ou profissional), usa o servente por oficial comum
+      ...(item?.equipe && !alterada ? { equipe: item.equipe } : {}),
+      ...(item?.fonte ? { fonte: alterada ? marcarFonteAlterada(item.fonte) : item.fonte } : {}),
     })
   })
   if (body.length > MAX_BUDGET_LINES) errors.push(`Somente as primeiras ${MAX_BUDGET_LINES} linhas foram lidas.`)

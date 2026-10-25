@@ -13,7 +13,7 @@ const MODULOS = [
 // O módulo inicial (Apontamento) não grava hash ao ser clicado: ele fica por último, depois de sair dele
 const ORDEM = [...MODULOS.slice(1), MODULOS[0]]
 
-test('navega pelos 6 módulos sem erro de console', async ({ page }) => {
+test('navega pelos 6 módulos do núcleo (Obras, Premissas e Integrações têm testes próprios) sem erro de console', async ({ page }) => {
   await page.goto('/')
   for (const m of ORDEM) {
     await page.getByRole('navigation').getByRole('button', { name: new RegExp(m.rotulo) }).click()

@@ -220,3 +220,14 @@ describe('versões salvas: limites (segurança do estado lido do IndexedDB)', ()
     expect(versoesValidas(Array.from({ length: 501 }, (_, i) => v(i + 1)))).toBe(false)
   })
 })
+
+describe('taxaCadastrada (ciclo 00006)', () => {
+  it('só as funções com taxa própria nas premissas são "cadastradas"; as demais usam a taxa não cadastrada', async () => {
+    const { premissasPadrao, taxaCadastrada, taxaHora } = await import('./premissas')
+    const p = premissasPadrao()
+    expect(taxaCadastrada(p, 'Pedreiro')).toBe(true)
+    expect(taxaCadastrada(p, 'Operador de equipamento')).toBe(true)
+    expect(taxaCadastrada(p, 'Impermeabilizador')).toBe(false)
+    expect(taxaHora(p, 'Impermeabilizador')).toBe(p.taxaFuncaoNaoCadastrada)
+  })
+})

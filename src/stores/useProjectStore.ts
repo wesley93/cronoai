@@ -33,6 +33,10 @@ import {
   lineName,
   lineResources,
   parseBudgetCsv,
+  ehFonteAlterada,
+  fonteBase,
+  marcarFonteAlterada,
+  HELPER_RATIO_PADRAO,
   type BatchOptions,
   type BudgetLine,
 } from '@/lib/sinapiBudget'
@@ -108,7 +112,7 @@ import {
   montarRegistroDeRecorte,
   type IndiceRecorte,
 } from '@/lib/recorteSinapi'
-import { notasDaTarefaSinapi } from '@/lib/sinapiRup'
+import { notasDaTarefaSinapi, type ValoresInformados } from '@/lib/sinapiRup'
 import { VERSAO_RECORTE, type FuncaoMaoDeObra, type ItemCatalogoSinapi, type RecorteSinapi } from '@/types/sinapi'
 import { ROTULO_RESTRICAO, calendarioExiste, montarRestricao, tarefasManuaisAlteradas, validarPrazoFinal, validarRestricao, type TipoRestricaoTela } from '@/lib/restricoes'
 import { lagEmDias, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
@@ -143,10 +147,12 @@ export interface RecorteAtivo {
   importadoEm: string
   substituidoEm?: string
 }
-export type ResultadoRecorte = { ok: true } | { ok: false; erro: string; erros?: string[]; precisaConfirmar?: boolean }
+export type ResultadoAcaoRecorte = { ok: true } | { ok: false; erro: string; erros?: string[]; precisaConfirmar?: boolean }
 export interface OpcoesSalvar {
   /** Recorte gravado na MESMA transação da obra e do índice. */
   gravarRecorte?: RegistroRecorte
+  /** Obra para a qual a ação foi pedida: se a obra ativa mudou até a vez desta gravação, ela desiste sem gravar nada. */
+  obraId?: string
   /** Aplica a mudança no estado imediatamente antes de gravar e devolve como desfazê-la se a gravação falhar. */
   mutar?: () => () => void
 }
@@ -241,6 +247,8 @@ export interface SinapiInsert {
   fonte?: string
   /** Mão de obra da composição do recorte, só para as notas da tarefa (supervisão não alocada). */
   maoDeObra?: readonly FuncaoMaoDeObra[]
+  /** RUP, custo ou profissional informados pelo usuário no lugar dos publicados (a fonte leva a marca " · alterado"). */
+  informado?: ValoresInformados
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -371,16 +379,24 @@ export const useProjectStore = defineStore('project', () => {
         opcoes.mutar?.()
         return true
       }
+      // A obra ativa mudou desde o pedido (importar, usar, remover): não grava nada na obra errada
+      if (opcoes.obraId !== undefined && opcoes.obraId !== obraAtivaId.value) return false
       let desfazer: (() => void) | undefined
       try {
         // A mudança entra no estado aqui, na vez desta gravação na fila: nenhuma outra gravação grava a referência sem o recorte
         desfazer = opcoes.mutar?.()
-        if (desfazer) await nextTick() // o observador do estado conta a mudança agora: esta gravação já a leva, então termina "salva"
+        if (desfazer) {
+          await nextTick() // o observador do estado conta a mudança agora: esta gravação já a leva, então termina "salva"
+          clearTimeout(saveTimer) // e o atraso que o observador acabou de agendar não precisa mais correr
+          timerPendente = false
+        }
+        // Recorte órfão (nenhuma obra do índice o usa mais) sai na mesma transação, menos o de formato mais novo (nunca apagado)
+        const candidatas = recortesOrfaos(indice?.obras ?? [], indiceComAtiva(agora()).obras).filter((c) => c !== opcoes.gravarRecorte?.chave)
+        const permitidas = new Set(await orfaosApagaveis(candidatas))
         const rev = revisao
         const em = agora()
         const novoIndice = indiceComAtiva(em)
-        // Recorte órfão (nenhuma obra do índice o usa mais) sai na mesma transação
-        const orfaos = recortesOrfaos(indice?.obras ?? [], novoIndice.obras).filter((c) => c !== opcoes.gravarRecorte?.chave)
+        const orfaos = recortesOrfaos(indice?.obras ?? [], novoIndice.obras).filter((c) => permitidas.has(c))
         await armazenamento.gravarObra(criarRegistro(obraAtivaId.value, state, em), novoIndice, { gravarRecorte: opcoes.gravarRecorte, excluirRecortes: orfaos })
         aceitarIndice(novoIndice)
         // Sem IndexedDB o "salvo" é só na memória da sessão: o aviso de indisponibilidade continua.
@@ -400,6 +416,21 @@ export const useProjectStore = defineStore('project', () => {
     const tarefa = fila.then(gravar)
     fila = tarefa
     return tarefa
+  }
+
+  /** Dos recortes órfãos, só os que podem sair: o de formato mais novo que o do app nunca é apagado (R-4), nem o que não se consegue ler. */
+  async function orfaosApagaveis(chaves: string[]): Promise<string[]> {
+    const out: string[] = []
+    for (const chave of chaves) {
+      try {
+        const r = await armazenamento!.lerRecorte(chave)
+        if (r && typeof r.versaoFormato === 'number' && r.versaoFormato > VERSAO_RECORTE) continue
+        out.push(chave)
+      } catch {
+        /* leitura falhou: na dúvida, não apaga */
+      }
+    }
+    return out
   }
 
   /** Coloca o estado na tela sem disparar uma gravação (trocar de obra não é alteração). */
@@ -1171,7 +1202,17 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   // ---------------------------------------------------------------- Módulo 4
+  /** Composição de outro recorte (outra obra, recorte substituído ou removido): nunca vira tarefa desta obra com o custo de lá. */
+  function erroDeFonte(fonte: string | undefined): string | undefined {
+    if (!fonte) return undefined
+    const a = recorteAtual.value
+    if (a && fonteBase(fonte) === a.fonte) return undefined
+    return `A composição escolhida vem de ${fonteBase(fonte)}, que não é o recorte desta obra${a ? ` (${a.fonte})` : ' (a obra não tem recorte)'}. Escolha a composição de novo.`
+  }
+
   function addSinapiTask(input: SinapiInsert): { ok: true; task: Task } | { ok: false; erro: string } {
+    const erroFonte = erroDeFonte(input.fonte)
+    if (erroFonte) return { ok: false, erro: erroFonte }
     const { task, group } = buildSinapiTask(input, state.tasks)
     const erro = erroSeAplicar([...state.tasks, ...(group ? [group] : []), task])
     if (erro) return { ok: false, erro }
@@ -1221,6 +1262,7 @@ export const useProjectStore = defineStore('project', () => {
         fonte: input.fonte ? fonteParaNotas(input.fonte) : undefined,
         maoDeObra: input.maoDeObra,
         recursos: input.resources.filter((r) => r.units > 0),
+        informado: input.informado,
       }),
     }
     return { task, parentWbs, group }
@@ -1228,6 +1270,8 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Prévia da inclusão: datas da nova tarefa e impacto na entrega. */
   function previewSinapiTask(input: SinapiInsert): PreviaSinapi {
+    const erroFonte = erroDeFonte(input.fonte)
+    if (erroFonte) return { erro: erroFonte }
     const { task, group } = buildSinapiTask(input, state.tasks)
     const tasks = [...state.tasks, ...(group ? [group] : []), task]
     const sim = simular(tasks)
@@ -1275,7 +1319,18 @@ export const useProjectStore = defineStore('project', () => {
 
   function updateBudgetLine(id: string, patch: Partial<Omit<BudgetLine, 'id'>>) {
     const l = state.budget.find((x) => x.id === id)
-    if (l) Object.assign(l, patch)
+    if (!l) return
+    // Linha do recorte com RUP, custo ou profissional mudados: deixa de ser "o publicado" (fonte "· alterado") e não usa mais a equipe proporcional dele
+    const mudaPublicado =
+      !!l.fonte &&
+      !ehFonteAlterada(l.fonte) &&
+      ((patch.rup !== undefined && patch.rup !== l.rup) || (patch.unitCost !== undefined && patch.unitCost !== l.unitCost) || (patch.professional !== undefined && patch.professional !== l.professional))
+    Object.assign(l, patch)
+    if (mudaPublicado) {
+      l.fonte = marcarFonteAlterada(l.fonte!)
+      delete l.equipe
+      l.helperRatio = HELPER_RATIO_PADRAO
+    }
   }
 
   function removeBudgetLine(id: string) {
@@ -1335,7 +1390,8 @@ export const useProjectStore = defineStore('project', () => {
           linkType,
           lagDays,
           fonte: l.fonte,
-          maoDeObra: maoDeObraDaLinha(l),
+          maoDeObra: composicaoDaLinha(l)?.maoDeObra,
+          informado: informadoDaLinha(l),
         },
         tasks,
       )
@@ -1351,12 +1407,18 @@ export const useProjectStore = defineStore('project', () => {
     return { tasks, created }
   }
 
-  /** Mão de obra da composição da linha, só se a linha vem do recorte vigente da obra (para as notas da tarefa). */
-  function maoDeObraDaLinha(l: Pick<BudgetLine, 'code' | 'fonte'>): readonly FuncaoMaoDeObra[] | undefined {
+  /** Composição da linha no recorte vigente da obra, só se a linha vem dele (a marca de alteração não conta): o publicado, como referência. */
+  function composicaoDaLinha(l: Pick<BudgetLine, 'code' | 'fonte'>) {
     const a = recorteAtual.value
-    if (!a || !l.fonte || l.fonte !== a.fonte) return undefined
+    if (!a || !l.fonte || fonteBase(l.fonte) !== a.fonte) return undefined
     const i = a.indice.porCodigo.get(l.code)
-    return i === undefined ? undefined : a.indice.composicoes[i]?.maoDeObra
+    return i === undefined ? undefined : a.indice.composicoes[i]
+  }
+
+  /** Valores da linha alterada pelo usuário, para as notas da tarefa (o publicado entra só como referência). */
+  function informadoDaLinha(l: BudgetLine): ValoresInformados | undefined {
+    if (!ehFonteAlterada(l.fonte)) return undefined
+    return { rup: l.rup, custo: l.unitCost, profissional: l.professional, custoPublicado: composicaoDaLinha(l)?.custoUnitario }
   }
 
   function previewBudgetBatch(opts: BatchOptions = DEFAULT_BATCH_OPTIONS): PreviaPlanilha | undefined {
@@ -1820,6 +1882,7 @@ export const useProjectStore = defineStore('project', () => {
   /** Grava a obra atual antes de uma troca, se houver o que gravar. Falhou: a troca é cancelada, para não perder alterações. */
   async function garantirObraAtualSalva(): Promise<boolean> {
     await nextTick() // deixa o observador do estado marcar como "pendente" uma alteração feita neste mesmo instante
+    await fila // e espera uma gravação em andamento, para não montar outro índice por cima dela
     // Grava sempre que houver alteração pendente (o observador já marcou ou o atraso ainda corre)
     return estadoGravacao.value === 'salvo' && !timerPendente ? true : salvarAgora()
   }
@@ -1950,7 +2013,7 @@ export const useProjectStore = defineStore('project', () => {
     }
     try {
       // O recorte que só esta obra usava sai na mesma transação (obra ilegível mantém a chave no índice: o dela não é apagado)
-      await armazenamento.excluirObra(id, novoIndice, recortesOrfaos(atual.obras, novoIndice.obras))
+      await armazenamento.excluirObra(id, novoIndice, await orfaosApagaveis(recortesOrfaos(atual.obras, novoIndice.obras)))
     } catch (err) {
       return { ok: false, erro: mensagemDeFalha(err) }
     }
@@ -1965,12 +2028,14 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   // ---------------------------------------------------------------- recorte SINAPI: importar, usar, remover
+  const ERRO_OBRA_MUDOU = 'A obra ativa mudou durante a operação. Nada foi gravado: refaça na obra desejada.'
   const erroBloqueioRecorte = () => (gravacaoBloqueada.value ? ERRO_BLOQUEADO : !armazenamento ? 'As obras ainda não foram carregadas.' : undefined)
 
   /** Vincula a obra ao recorte (e grava, na mesma transação, o recorte novo se houver); se a gravação falhar, a referência volta ao que era. */
-  async function vincularRecorte(chave: string, sha256Origem: string, importadoEm: string, gravarRecorte?: RegistroRecorte): Promise<ResultadoRecorte> {
+  async function vincularRecorte(obra: string, chave: string, sha256Origem: string, importadoEm: string, gravarRecorte?: RegistroRecorte): Promise<ResultadoAcaoRecorte> {
     const anterior = state.meta.recorteSinapi ? { ...state.meta.recorteSinapi } : undefined
     const ok = await salvarAgora({
+      obraId: obra,
       gravarRecorte,
       mutar: () => {
         state.meta.recorteSinapi = { chave, sha256Origem, importadoEm }
@@ -1980,7 +2045,9 @@ export const useProjectStore = defineStore('project', () => {
         }
       },
     })
-    return ok ? { ok: true } : { ok: false, erro: mensagemGravacao.value || 'Não foi possível gravar o recorte no armazenamento do navegador.' }
+    if (ok) return { ok: true }
+    if (obra !== obraAtivaId.value) return { ok: false, erro: ERRO_OBRA_MUDOU }
+    return { ok: false, erro: mensagemGravacao.value || 'Não foi possível gravar o recorte no armazenamento do navegador.' }
   }
 
   /**
@@ -1988,7 +2055,7 @@ export const useProjectStore = defineStore('project', () => {
    * transação, o recorte, a referência da obra e o índice. Recorte de formato mais novo já salvo nunca é sobrescrito.
    * Substituir um recorte usado por outras obras pede confirmação (`precisaConfirmar`).
    */
-  async function importarRecorteSinapi(texto: string, opcoes: { confirmarSubstituicao?: boolean } = {}): Promise<ResultadoRecorte> {
+  async function importarRecorteSinapi(texto: string, opcoes: { confirmarSubstituicao?: boolean } = {}): Promise<ResultadoAcaoRecorte> {
     const bloqueio = erroBloqueioRecorte()
     if (bloqueio) return { ok: false, erro: bloqueio }
     if (texto.length > MAX_RECORTE_BYTES) return { ok: false, erro: 'O arquivo do recorte passa de 6 MiB.' }
@@ -1998,12 +2065,14 @@ export const useProjectStore = defineStore('project', () => {
     const recusa = conferirRecorteComObra(recorte, state.meta)
     if (recusa) return { ok: false, erro: recusa }
     const chave = chaveDaObra(state.meta)!
+    const obra = obraAtivaId.value // a obra para a qual o arquivo foi escolhido: se mudar durante os awaits, desiste
     let existente: RegistroRecorte | undefined
     try {
       existente = await armazenamento!.lerRecorte(chave)
     } catch {
       return { ok: false, erro: 'Não foi possível ler o armazenamento do navegador. Nada foi importado.' }
     }
+    if (obra !== obraAtivaId.value) return { ok: false, erro: ERRO_OBRA_MUDOU }
     if (existente && typeof existente.versaoFormato === 'number' && existente.versaoFormato > VERSAO_RECORTE) {
       return { ok: false, erro: `O recorte salvo para esta chave é de um formato mais novo do CronoAI (formato ${existente.versaoFormato}). Nada foi sobrescrito.` }
     }
@@ -2012,8 +2081,10 @@ export const useProjectStore = defineStore('project', () => {
       return { ok: false, precisaConfirmar: true, erro: `Este recorte é usado por mais ${outras} obra(s): substituí-lo muda as tabelas delas nas próximas tarefas.` }
     }
     const registro = montarRegistroDeRecorte(recorte, agora())
-    const r = await vincularRecorte(chave, registro.sha256Origem, registro.importadoEm, registro)
+    const r = await vincularRecorte(obra, chave, registro.sha256Origem, registro.importadoEm, registro)
     if (!r.ok) return r
+    // Gravado na obra pedida; se a tela já está em outra obra, nada do estado em memória (recorte, log) é mexido nela
+    if (obra !== obraAtivaId.value) return { ok: true }
     recorteAtual.value = ativoDe(recorte, registro.sha256Origem, registro.importadoEm)
     avisoRecorte.value = ''
     recorteDisponivel.value = undefined
@@ -2022,22 +2093,25 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /** Vincula a obra a um recorte já salvo neste navegador com a mesma chave (Q3: nunca automático, só por esta ação). */
-  async function usarRecorteDisponivel(): Promise<ResultadoRecorte> {
+  async function usarRecorteDisponivel(): Promise<ResultadoAcaoRecorte> {
     const bloqueio = erroBloqueioRecorte()
     if (bloqueio) return { ok: false, erro: bloqueio }
     const chave = recorteDisponivel.value
     if (!chave || chave !== chaveDaObra(state.meta)) return { ok: false, erro: 'Não há recorte salvo para a UF, o regime e a data-base desta obra.' }
+    const obra = obraAtivaId.value
     let leitura
     try {
       leitura = lerRegistroDeRecorte(await armazenamento!.lerRecorte(chave), chave)
     } catch {
       return { ok: false, erro: 'Não foi possível ler o armazenamento do navegador.' }
     }
+    if (obra !== obraAtivaId.value) return { ok: false, erro: ERRO_OBRA_MUDOU }
     if (!leitura.ok) return { ok: false, erro: leitura.mensagem }
     const recusa = conferirRecorteComObra(leitura.recorte, state.meta)
     if (recusa) return { ok: false, erro: recusa }
-    const r = await vincularRecorte(chave, leitura.sha256Origem, leitura.importadoEm)
+    const r = await vincularRecorte(obra, chave, leitura.sha256Origem, leitura.importadoEm)
     if (!r.ok) return r
+    if (obra !== obraAtivaId.value) return { ok: true }
     recorteAtual.value = ativoDe(leitura.recorte, leitura.sha256Origem, leitura.importadoEm)
     avisoRecorte.value = ''
     recorteDisponivel.value = undefined
@@ -2046,12 +2120,14 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /** Remove o vínculo desta obra com o recorte; o recorte sai do navegador na mesma transação se nenhuma outra obra o usa. */
-  async function removerRecorteSinapi(): Promise<ResultadoRecorte> {
+  async function removerRecorteSinapi(): Promise<ResultadoAcaoRecorte> {
     const bloqueio = erroBloqueioRecorte()
     if (bloqueio) return { ok: false, erro: bloqueio }
     const anterior = state.meta.recorteSinapi ? { ...state.meta.recorteSinapi } : undefined
     if (!anterior) return { ok: true }
+    const obra = obraAtivaId.value
     const ok = await salvarAgora({
+      obraId: obra,
       mutar: () => {
         delete state.meta.recorteSinapi
         return () => {
@@ -2059,7 +2135,8 @@ export const useProjectStore = defineStore('project', () => {
         }
       },
     })
-    if (!ok) return { ok: false, erro: mensagemGravacao.value || 'Não foi possível gravar no armazenamento do navegador.' }
+    if (!ok) return { ok: false, erro: obra !== obraAtivaId.value ? ERRO_OBRA_MUDOU : mensagemGravacao.value || 'Não foi possível gravar no armazenamento do navegador.' }
+    if (obra !== obraAtivaId.value) return { ok: true }
     log('sinapi', 'Recorte SINAPI removido desta obra', 'A obra voltou ao catálogo ilustrativo.')
     await carregarRecorteDaObra()
     return { ok: true }

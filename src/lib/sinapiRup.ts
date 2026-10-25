@@ -5,11 +5,18 @@ import type { ResourceAssignment } from '@/types/domain'
 import type { EquipeProporcional, FuncaoMaoDeObra } from '@/types/sinapi'
 
 /**
- * Folga do arredondamento da publicação ao dimensionar as demais funções da equipe (D-6, EO-2).
- * Os coeficientes do Analítico têm poucas casas: 1,279 ÷ 0,639 = 2,0016, e o teto sem folga acrescentaria 1 profissional
- * por ruído (2 pedreiros → 5 serventes em vez de 4). OPINIÃO do plano, a validar com Orçamento/Custos; constante única.
+ * A proporção entre os coeficientes de duas funções (cᶠ ÷ cᵖ) é arredondada a 2 casas ANTES do teto da equipe (D-6, EO-2 revisada).
+ * Os coeficientes do Analítico têm poucas casas: 1,279 ÷ 0,639 = 2,0016, e o teto sem arredondar acrescentaria 1 profissional por
+ * ruído (2 pedreiros → 5 serventes em vez de 4). Diferente de uma folga absoluta, o arredondamento vale para qualquer tamanho de
+ * equipe (32 pedreiros → 64 serventes, não 65). OPINIÃO do orquestrador, a validar com Orçamento/Custos.
  */
-export const TOLERANCIA_EQUIPE = 0.05
+export const CASAS_PROPORCAO_EQUIPE = 2
+
+/** Proporção arredondada a `CASAS_PROPORCAO_EQUIPE` casas (meio para cima). */
+export function arredondarProporcao(proporcao: number): number {
+  const f = 10 ** CASAS_PROPORCAO_EQUIPE
+  return Math.round(proporcao * f) / f
+}
 
 const SUFIXO_MAO_DE_OBRA = /\s*COM ENCARGOS COMPLEMENTARES\s*$/i
 
@@ -132,14 +139,14 @@ export function equipeDaComposicao(maoDeObra: readonly FuncaoMaoDeObra[]): Equip
 }
 
 /**
- * Recursos da equipe: a principal com `equipe` profissionais e cada outra função com `max(1, ⌈equipe × cᶠ ÷ cᵖ − TOLERANCIA_EQUIPE⌉)`.
- * Rótulos repetidos somam as unidades.
+ * Recursos da equipe: a principal com `equipe` profissionais e cada outra função com `max(1, ⌈equipe × round2(cᶠ ÷ cᵖ) − 1e-9⌉)`
+ * (o 1e-9 só absorve o ruído do ponto flutuante). Rótulos repetidos somam as unidades.
  */
 export function recursosDaEquipe(principal: string, equipe: number, proporcoes: readonly EquipeProporcional[]): ResourceAssignment[] {
   const n = Math.max(1, equipe)
   const out: ResourceAssignment[] = [{ resource: principal, units: n }]
   for (const p of proporcoes) {
-    const units = Math.max(1, Math.ceil(n * p.proporcao - TOLERANCIA_EQUIPE))
+    const units = Math.max(1, Math.ceil(n * arredondarProporcao(p.proporcao) - 1e-9))
     const igual = out.find((r) => r.resource === p.recurso)
     if (igual) igual.units += units
     else out.push({ resource: p.recurso, units })
@@ -176,26 +183,53 @@ export function custoMaoDeObraPorFuncao(
 
 const numeroBR = (v: number, casas = 7) => v.toLocaleString('pt-BR', { maximumFractionDigits: casas })
 
+/** Horas de supervisão (administração local) da quantidade: `quantidade × coeficiente` por função, com o rótulo da função. */
+export function horasDeSupervisao(quantidade: number, supervisao: readonly FuncaoMaoDeObra[]): { rotulo: string; horas: number }[] {
+  return supervisao.map((f) => ({ rotulo: rotuloFuncao(f.funcao), horas: Math.max(0, quantidade) * f.coeficiente }))
+}
+
+/** Valores que o usuário informou na linha ou na calculadora, no lugar dos publicados. */
+export interface ValoresInformados {
+  rup: number
+  custo: number
+  profissional: string
+  /** Custo publicado no recorte, citado só como referência. */
+  custoPublicado?: number
+}
+
 export interface DadosNotasSinapi {
   codigo: string
   quantidade: number
   unidade: string
-  /** "SP 09/2026 não desonerado"; ausente = catálogo ilustrativo. */
+  /** "SP 09/2026 não desonerado" (com " · alterado" quando o usuário mudou valores); ausente = catálogo ilustrativo. */
   fonte?: string
   maoDeObra?: readonly FuncaoMaoDeObra[]
   recursos: readonly ResourceAssignment[]
+  /** RUP, custo ou profissional diferentes do publicado: as notas citam os efetivos como "informados pelo usuário" e o publicado como referência. */
+  informado?: ValoresInformados
 }
 
-/** Notas da tarefa gerada (D-23): fonte, principal e coeficiente, equipe, supervisão não alocada e o aviso das subcomposições. */
+/**
+ * Notas da tarefa gerada (D-23): fonte, principal e coeficiente, equipe, supervisão não alocada e o aviso das subcomposições.
+ * Com valores informados pelo usuário, a função, a RUP e o custo citados são os EFETIVOS (os que deram a duração e o BAC);
+ * o publicado entra só como referência, e a equipe é a efetiva.
+ */
 export function notasDaTarefaSinapi(d: DadosNotasSinapi): string {
   const base = `Gerado pelo CronoAI a partir do SINAPI ${d.codigo}${d.fonte ? ` (${d.fonte})` : ''}: ${d.quantidade.toLocaleString('pt-BR')} ${d.unidade}.`
-  if (!d.fonte || !d.maoDeObra?.length) return base
-  const eq = equipeDaComposicao(d.maoDeObra)
+  if (!d.fonte || (!d.maoDeObra?.length && !d.informado)) return base
+  const eq = d.maoDeObra?.length ? equipeDaComposicao(d.maoDeObra) : undefined
   const partes = [base]
-  if (eq) partes.push(`Função principal ${eq.principal.funcao}, RUP ${numeroBR(eq.principal.coeficiente)} h/${d.unidade}.`)
+  if (d.informado) {
+    const i = d.informado
+    partes.push(`Função principal ${i.profissional}, RUP ${numeroBR(i.rup)} h/${d.unidade} e custo R$ ${numeroBR(i.custo, 2)}/${d.unidade} informados pelo usuário.`)
+    if (eq) {
+      const ref = [`RUP ${numeroBR(eq.principal.coeficiente)} h/${d.unidade}`, i.custoPublicado !== undefined ? `R$ ${numeroBR(i.custoPublicado, 2)}/${d.unidade}` : ''].filter(Boolean).join(', ')
+      partes.push(`Publicado no SINAPI, só como referência: ${eq.principal.funcao}, ${ref}.`)
+    }
+  } else if (eq) partes.push(`Função principal ${eq.principal.funcao}, RUP ${numeroBR(eq.principal.coeficiente)} h/${d.unidade}.`)
   partes.push(`Equipe: ${d.recursos.filter((r) => r.units > 0).map((r) => `${r.resource} ${r.units}`).join(' + ')}.`)
   if (eq?.supervisao.length) {
-    const s = eq.supervisao.map((f) => `${rotuloFuncao(f.funcao)}: ${numeroBR(d.quantidade * f.coeficiente, 2)} h, não alocado`).join('; ')
+    const s = horasDeSupervisao(d.quantidade, eq.supervisao).map((h) => `${h.rotulo}: ${numeroBR(h.horas, 2)} h, não alocado`).join('; ')
     partes.push(`Supervisão (administração local): ${s}.`)
   }
   partes.push('HH de subcomposições (ex.: preparo de argamassa) não incluída.')

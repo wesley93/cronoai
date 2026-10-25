@@ -6,7 +6,7 @@ Lê a planilha nacional `SINAPI_Referencia_AAAA_MM.xlsx` (Caixa, layout a partir
 
 ## Requisitos
 
-- Node 22 LTS ou superior (o script é TypeScript, executado pelo *type stripping* do Node; `--experimental-strip-types` já vai no `npm run`).
+- Node 22.6 ou superior (o script é TypeScript, executado pelo *type stripping* do Node; `--experimental-strip-types` já vai no `npm run`; o `zlib.crc32` do leitor existe desde o 22.2).
 - Nenhuma dependência nova: o leitor de xlsx é próprio (`zip.ts` e `planilha.ts`).
 
 ## Passo a passo (uma vez por publicação mensal)

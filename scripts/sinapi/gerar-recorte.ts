@@ -125,7 +125,7 @@ export function executar(argv: string[], env: Record<string, string | undefined>
     const mesEsperado = dataBaseArg ?? mesDoNomeDoArquivo(nomeArquivo)
     const dados = lerSinapi(abrirPlanilha(abrirZip(bytes)), regime as 'nao-desonerado' | 'desonerado', mesEsperado)
     const recorte = montarRecorte(dados, { uf, filtro: { codigos, grupos }, arquivo: nomeArquivo, sha256: sha256Hex(bytes), bytes: bytes.length })
-    const json = JSON.stringify(recorte) // compacto: 403 caracteres por composição
+    const json = JSON.stringify(recorte) // compacto: ~410 caracteres por composição (medido em SP, 09/2026)
     const tamanho = Buffer.byteLength(json, 'utf8')
     if (tamanho > MAX_SAIDA_BYTES) {
       return falha(1, `O recorte tem ${(tamanho / 1048576).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MiB, acima do limite de 6 MiB do app. Use --codigos ou --grupos para reduzir.`)

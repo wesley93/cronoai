@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ItemCatalogoSinapi } from '@/types/sinapi'
 import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
-import { MAX_BUDGET_LINES, lineDuration, lineFromCatalog, lineResources, parseBudgetCsv, parseNumberBR } from './sinapiBudget'
+import { HELPER_RATIO_PADRAO, MAX_BUDGET_LINES, ehFonteAlterada, fonteBase, lineDuration, lineFromCatalog, lineResources, marcarFonteAlterada, parseBudgetCsv, parseNumberBR } from './sinapiBudget'
 
 describe('planilha SINAPI: bordas do CSV', () => {
   it('arquivo vazio', () => {
@@ -95,12 +95,44 @@ describe('CSV com o código do recorte (AC-12)', () => {
     expect(lineResources(r.lines[0]!)).toEqual([{ resource: 'Pedreiro', units: 4 }, { resource: 'Servente', units: 2 }])
   })
 
-  it('RUP digitada vale no lugar da do recorte e mantém a mistura de funções; profissional trocado volta ao helperRatio do catálogo', () => {
-    const rup = parseBudgetCsv('codigo;descricao;unidade;quantidade;rup\n103332;;m²;640;0,9', [item])
-    expect(rup.lines[0]).toMatchObject({ rup: 0.9, equipe: [{ recurso: 'Servente', proporcao: 0.5 }] })
-    const prof = parseBudgetCsv('codigo;descricao;unidade;quantidade;profissional\n103332;;m²;640;Carpinteiro', [item])
-    expect(prof.lines[0]).toMatchObject({ professional: 'Carpinteiro' })
-    expect(prof.lines[0]!.equipe).toBeUndefined()
+  const ALTERADA = 'SINAPI SP 09/2026 não desonerado · alterado'
+
+  it('CSV com a mesma RUP, o mesmo custo e o mesmo profissional do recorte: segue "publicado" (fonte sem marca, equipe do recorte)', () => {
+    const r = parseBudgetCsv('codigo;descricao;unidade;quantidade;rup;custo unitario;profissional;equipe\n103332;;m²;640;1,6225376;123,96;Pedreiro;4', [item])
+    expect(r.lines[0]).toMatchObject({ fonte: 'SINAPI SP 09/2026 não desonerado', equipe: [{ recurso: 'Servente', proporcao: 0.5 }], helperRatio: 0 })
+  })
+
+  it('RUP digitada diferente da publicada: fonte "· alterado", sem a equipe proporcional do recorte e com o servente por oficial comum (0,5)', () => {
+    const r = parseBudgetCsv('codigo;descricao;unidade;quantidade;rup;equipe\n103332;;m²;640;0,9;4', [item])
+    const l = r.lines[0]!
+    expect(l).toMatchObject({ rup: 0.9, fonte: ALTERADA, helperRatio: HELPER_RATIO_PADRAO })
+    expect(HELPER_RATIO_PADRAO).toBe(0.5)
+    expect('equipe' in l).toBe(false)
+    expect(lineDuration(l, 8)).toBe(18) // 640 × 0,9 ÷ (4 × 8) = 18 (com a RUP publicada seriam 33)
+    expect(lineResources(l)).toEqual([{ resource: 'Pedreiro', units: 4 }, { resource: 'Servente', units: 2 }])
+  })
+
+  it('custo digitado diferente do publicado: fonte "· alterado" e o custo digitado', () => {
+    const l = parseBudgetCsv('codigo;descricao;unidade;quantidade;custo unitario;equipe\n103332;;m²;640;150,00;4', [item]).lines[0]!
+    expect(l).toMatchObject({ unitCost: 150, rup: 1.6225376, fonte: ALTERADA, helperRatio: 0.5 })
+    expect('equipe' in l).toBe(false)
+  })
+
+  it('profissional trocado no CSV: fonte "· alterado", a equipe efetiva é a do profissional informado (nunca a do recorte)', () => {
+    const l = parseBudgetCsv('codigo;descricao;unidade;quantidade;profissional;equipe\n103332;;m²;640;Carpinteiro;4', [item]).lines[0]!
+    expect(l).toMatchObject({ professional: 'Carpinteiro', fonte: ALTERADA })
+    expect('equipe' in l).toBe(false)
+    expect(lineResources(l)).toEqual([{ resource: 'Carpinteiro', units: 4 }, { resource: 'Servente', units: 2 }])
+  })
+
+  it('as funções da marca de alteração', () => {
+    expect(ehFonteAlterada(ALTERADA)).toBe(true)
+    expect(ehFonteAlterada('SINAPI SP 09/2026 não desonerado')).toBe(false)
+    expect(ehFonteAlterada(undefined)).toBe(false)
+    expect(fonteBase(ALTERADA)).toBe('SINAPI SP 09/2026 não desonerado')
+    expect(fonteBase('SINAPI SP 09/2026 não desonerado')).toBe('SINAPI SP 09/2026 não desonerado')
+    expect(marcarFonteAlterada('SINAPI SP 09/2026 não desonerado')).toBe(ALTERADA)
+    expect(marcarFonteAlterada(ALTERADA)).toBe(ALTERADA)
   })
 
   it('código fora do recorte segue a regra de hoje (RUP ausente é erro)', () => {
@@ -109,8 +141,13 @@ describe('CSV com o código do recorte (AC-12)', () => {
     expect(r.errors).toEqual(['Linha 2: RUP ausente e código 999999 fora do catálogo.'])
   })
 
-  it('composição do recorte sem mão de obra (RUP 0) exige a RUP na planilha', () => {
+  it('composição do recorte sem mão de obra (RUP 0) exige a RUP na planilha, com mensagem própria (não "fora do catálogo")', () => {
     const r = parseBudgetCsv('codigo;descricao;unidade;quantidade\n107113;;M;100', [{ ...item, code: '107113', rup: 0, equipe: undefined }])
-    expect(r.errors).toEqual(['Linha 2: RUP ausente e código 107113 fora do catálogo.'])
+    expect(r.lines).toHaveLength(0)
+    expect(r.errors).toEqual(['Linha 2: composição sem mão de obra no recorte (código 107113): informe a RUP na planilha.'])
+    // Com a RUP digitada a linha entra (fonte alterada: a RUP é do usuário)
+    const ok = parseBudgetCsv('codigo;descricao;unidade;quantidade;rup\n107113;;M;100;1,5', [{ ...item, code: '107113', rup: 0, equipe: undefined }])
+    expect(ok.errors).toEqual([])
+    expect(ok.lines[0]).toMatchObject({ rup: 1.5, fonte: ALTERADA })
   })
 })
