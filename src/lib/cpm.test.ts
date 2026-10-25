@@ -517,13 +517,26 @@ describe('rodada 02: progresso com vínculos, restrições de término em tarefa
     expect([r.byUid.get(2)!.start, r.byUid.get(2)!.finish, r.byUid.get(2)!.inicioHora]).toEqual(['2026-08-10', '2026-08-10', '08:00'])
   })
 
-  it('R-1 (rodada 03): a data TARDIA do marco com folga 0 é a do próprio momento, igual à cedo (SNET 12/08 e marco sem vínculo na previsão)', () => {
-    const snet = agendar([tarefa(1, 0, { restricao: { tipo: 'SNET', data: '2026-08-12' } })], '2026-08-03').byUid.get(1)!
-    // Antes: cedo 12/08 e tardio 11/08 (a data caía no fim do trecho útil anterior); depois: as quatro datas em 12/08
-    expect([snet.earlyStart, snet.earlyFinish, snet.lateStart, snet.lateFinish, snet.folgaTotalMin]).toEqual(['2026-08-12', '2026-08-12', '2026-08-12', '2026-08-12', 0])
-    const previsao = prever([tarefa(1, 0)]).byUid.get(1)!
-    // Marco sem vínculo com data de status 05/08: começa no 1º momento útil depois do status (06/08 08:00)
-    expect([previsao.earlyStart, previsao.lateStart, previsao.lateFinish, previsao.folgaTotalMin]).toEqual(['2026-08-06', '2026-08-06', '2026-08-06', 0])
+  it('R-1/R-A (rodadas 03 e 04): data tardia do marco = a cedo quando o término tardio é o próprio momento; senão, o fim do trecho útil anterior', () => {
+    const datas = (r: ReturnType<typeof agendar>, uid: number) => {
+      const m = r.byUid.get(uid)!
+      return [m.earlyStart, m.earlyFinish, m.lateStart, m.lateFinish, m.folgaTotalMin / 480]
+    }
+    // 1. SNET 12/08 sozinho: as quatro datas em 12/08 (antes da rodada 03: tardia 11/08)
+    expect(datas(agendar([tarefa(1, 0, { restricao: { tipo: 'SNET', data: '2026-08-12' } })], '2026-08-03'), 1)).toEqual(['2026-08-12', '2026-08-12', '2026-08-12', '2026-08-12', 0])
+    // 2. FS entre A (sex 07/08) e B (seg 10/08), folga 0: LS = LF = 07/08 17:00 (a regra só do momento dava 10/08 na rodada 03)
+    const entre = agendar([tarefa(1, 1), tarefa(2, 0, { predecessors: [liga(1)] }), tarefa(3, 1, { predecessors: [liga(2)] })], '2026-08-07')
+    expect(datas(entre, 2)).toEqual(['2026-08-07', '2026-08-07', '2026-08-07', '2026-08-07', 0])
+    // 3. FS no fim, sem sucessora: 07/08
+    expect(datas(agendar([tarefa(1, 1), tarefa(2, 0, { predecessors: [liga(1)] })], '2026-08-07'), 2)).toEqual(['2026-08-07', '2026-08-07', '2026-08-07', '2026-08-07', 0])
+    // 4. FS com folga (o projeto vai até 14/08 por outra tarefa): cedo 10/08, tardia 14/08, folga 4 d
+    expect(datas(agendar([tarefa(1, 1), tarefa(2, 0, { predecessors: [liga(1)] }), tarefa(3, 5)], '2026-08-10'), 2)).toEqual(['2026-08-10', '2026-08-10', '2026-08-14', '2026-08-14', 4])
+    // 5. Marco sem vínculo na previsão (status 05/08) com X de 20 d: cedo 06/08, tardia 02/09 (fim do projeto), folga de 20 d (do início de 06/08 ao fim de 02/09)
+    const previsao = prever([tarefa(1, 0), tarefa(2, 20)])
+    expect(datas(previsao, 1)).toEqual(['2026-08-06', '2026-08-06', '2026-09-02', '2026-09-02', 20])
+    // 6. Marco SS +0 de tarefa que começa seg 10/08: cedo 10/08, tardia 14/08 (fim do projeto), folga de 5 d
+    const ss = agendar([tarefa(1, 5, { restricao: { tipo: 'SNET', data: '2026-08-10' } }), tarefa(2, 0, { predecessors: [liga(1, 'SS')] })], '2026-08-03')
+    expect(datas(ss, 2)).toEqual(['2026-08-10', '2026-08-10', '2026-08-14', '2026-08-14', 5])
   })
 
   it('J: o marco depois de uma tarefa em calendário de 24 h, às 00:00 em ponto, fica no dia anterior', () => {
@@ -531,6 +544,8 @@ describe('rodada 02: progresso com vínculos, restrições de término em tarefa
     const cals = compilarCalendarios('2026-08-03', [padrao, h24], 1)
     const r = computeSchedule([tarefa(1, 0, { duracaoMin: 1440, calendarioUid: 3 }), tarefa(2, 0, { calendarioUid: 3, predecessors: [liga(1)] })], cals, { mode: 'baseline' })
     expect([r.byUid.get(1)!.finish, r.byUid.get(2)!.start, r.byUid.get(2)!.finish]).toEqual(['2026-08-03', '2026-08-03', '2026-08-03'])
+    // A hora do marco acompanha a data: 24:00 do dia 03/08 (e não "03/08 00:00", que seria o início do dia)
+    expect([r.byUid.get(2)!.inicioHora, r.byUid.get(2)!.terminoHora]).toEqual(['24:00', '24:00'])
   })
 })
 

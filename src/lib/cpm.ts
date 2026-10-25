@@ -386,19 +386,19 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
      * seg 10/08 aparece em 10/08). Só às 00:00 em ponto (fim de um dia de 24 h) vale o dia anterior; antes de qualquer
      * tempo útil (início do projeto), o 1º momento útil.
      */
-    const marcoDe = (m: number): { data: string; momento: number } => {
+    const marcoDe = (m: number): { data: string; momento: number; hora: string } => {
       if (c.uteisAte(m) === 0) {
         const n = c.proximoUtil(m)
-        return { data: dataDoMomento(base, n), momento: n }
+        return { data: dataDoMomento(base, n), momento: n, hora: horaDoMomento(n) }
       }
       if (m === Math.floor(m / MINUTOS_NO_DIA_CORRIDO) * MINUTOS_NO_DIA_CORRIDO) {
         const fim = cd.fimUtilAte(m)
-        return { data: dataDoMomento(base, fim - 1), momento: fim }
+        // 00:00 do dia seguinte aparece como 24:00 do dia da data (a exportação a converte para 00:00 do dia seguinte)
+        return { data: dataDoMomento(base, fim - 1), momento: fim, hora: '24:00' }
       }
-      return { data: dataDoMomento(base, m), momento: m }
+      return { data: dataDoMomento(base, m), momento: m, hora: horaDoMomento(m) }
     }
     const marcoAgendado = marco ? marcoDe(sAgendado) : undefined
-    const marcoMomento = marcoAgendado?.momento ?? 0
     let finish = marcoAgendado ? marcoAgendado.data : dataTermino(fAgendado)
     let start = marcoAgendado ? marcoAgendado.data : dataDoMomento(base, sAgendado)
     if (forecast && t.percentComplete > 0 && t.actualStart) start = t.actualStart
@@ -407,6 +407,9 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
     const folgaLivreMin = concluida ? 0 : Math.max(0, folgaLivre)
     const unidadeDia = t.duracaoCorrida ? MINUTOS_NO_DIA_CORRIDO : mpd
     const prazo = t.prazoFinal ? momentoDeTermino(t.prazoFinal, cd) : undefined
+    // Data tardia do marco: se o término tardio é o próprio momento cedo (folga 0 sem sucessora, restrição de início), vale a data cedo;
+    // senão (marco entre tarefas), o fim do trecho útil anterior, como na data cedo de um marco depois de uma predecessora
+    const marcoTardio = lf.get(uid) === s ? marcoDe(s).data : marcoDe(cd.fimUtilAte(lf.get(uid)!)).data
     result.set(uid, {
       uid,
       inicioCedoMin: s,
@@ -415,12 +418,12 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
       terminoTardeMin: lf.get(uid)!,
       earlyStart: f === s ? marcoDe(s).data : dataDoMomento(base, c.proximoUtil(s)),
       earlyFinish: f === s ? marcoDe(s).data : dataTermino(f),
-      lateStart: lf.get(uid) === ls.get(uid) ? marcoDe(lf.get(uid)!).data : dataDoMomento(base, c.proximoUtil(ls.get(uid)!)),
-      lateFinish: lf.get(uid) === ls.get(uid) ? marcoDe(lf.get(uid)!).data : dataTermino(lf.get(uid)!),
+      lateStart: lf.get(uid) === ls.get(uid) ? marcoTardio : dataDoMomento(base, c.proximoUtil(ls.get(uid)!)),
+      lateFinish: lf.get(uid) === ls.get(uid) ? marcoTardio : dataTermino(lf.get(uid)!),
       start,
       finish,
-      inicioHora: horaDoMomento(marco ? marcoMomento : inicioNorm),
-      terminoHora: horaDoMomento(marco ? marcoMomento : cd.fimUtilAte(fAgendado)),
+      inicioHora: marcoAgendado ? marcoAgendado.hora : horaDoMomento(inicioNorm),
+      terminoHora: marcoAgendado ? marcoAgendado.hora : horaDoMomento(cd.fimUtilAte(fAgendado)),
       folgaTotalMin: folgaTotal,
       folgaLivreMin,
       totalFloat: minutosParaDias(folgaTotal, unidadeDia),

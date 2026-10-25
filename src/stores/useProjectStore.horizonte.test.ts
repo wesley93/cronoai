@@ -291,3 +291,27 @@ describe('rodada 03: calendar e baseCalendar dentro da proteção do cálculo; m
     expect(() => store.calendar).not.toThrow()
   })
 })
+
+describe('rodada 04: aviso da exportação de tarefa manual alterada no CronoAI', () => {
+  beforeEach(() => {
+    globalThis.localStorage?.clear?.()
+    usarArmazenamento(undefined)
+    setActivePinia(createPinia())
+  })
+
+  const tarefaManual = (uid: number) =>
+    `<Task><UID>${uid}</UID><ID>${uid}</ID><Name>Manual ${uid}</Name><OutlineLevel>1</OutlineLevel><Manual>1</Manual><Start>2026-03-16T09:30:00</Start><Finish>2026-03-20T16:45:00</Finish><Duration>PT40H0M0S</Duration></Task>`
+  const xmlManuais = `<?xml version="1.0" encoding="UTF-8"?><Project xmlns="http://schemas.microsoft.com/project"><Name>manuais</Name><StartDate>2026-03-02T08:00:00</StartDate><StatusDate>2026-03-01T17:00:00</StatusDate><CalendarUID>1</CalendarUID><Calendars>${CALENDARIO(1)}</Calendars><Tasks>${tarefaManual(1)}${tarefaManual(2)}${tarefaManual(3)}</Tasks></Project>`
+
+  it('sem nenhuma manual alterada o aviso não existe (0); com N alteradas diz "N tarefa(s) manual(is)…"', async () => {
+    const { store } = await abrir(criarArmazenamentoMemoria(null))
+    store.importXml(xmlManuais)
+    expect(store.state.tasks.filter((t) => t.arquivo?.manual)).toHaveLength(3)
+    expect(store.exportXml().avisos).toEqual([])
+    expect(store.updateTask(1, { duracaoMin: 4800 })).toEqual({ ok: true })
+    expect(store.exportXml().avisos).toEqual(['1 tarefa(s) manual(is) exportada(s) com datas do CronoAI: foram alteradas depois da importação.'])
+    expect(store.updateTask(2, { duracaoMin: 4800 })).toEqual({ ok: true })
+    expect(store.updateTask(3, { percentComplete: 50 })).toEqual({ ok: true })
+    expect(store.exportXml().avisos).toEqual(['3 tarefa(s) manual(is) exportada(s) com datas do CronoAI: foram alteradas depois da importação.'])
+  })
+})

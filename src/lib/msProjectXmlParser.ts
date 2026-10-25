@@ -175,7 +175,9 @@ function constraintDate(r: Exclude<Restricao, { tipo: 'ALAP' }>): string | undef
   return dt(r.data, r.tipo === 'FNET' || r.tipo === 'FNLT' || r.tipo === 'MFO' ? '17:00:00' : '08:00:00')
 }
 
-const dt = (iso: string | undefined, time: string) => (iso ? `${iso.slice(0, 10)}T${time}` : undefined)
+// `24:00:00` (fim de um dia de 24 h) não existe no MSPDI: vira 00:00:00 do dia seguinte
+const dt = (iso: string | undefined, time: string) =>
+  iso ? (time.startsWith('24:') ? `${addCalendarDays(iso.slice(0, 10), 1)}T00:00:00` : `${iso.slice(0, 10)}T${time}`) : undefined
 const money = (v: number) => (Math.round(v * 100) / 100).toFixed(2)
 
 // ---------------------------------------------------------------------------

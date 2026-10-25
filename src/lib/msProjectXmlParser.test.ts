@@ -915,4 +915,25 @@ describe('parseMspdiXml: rodada 02 (faixas de Duration e MinutesPerDay, calendá
     // Não alterada: as datas e horas manuais do arquivo (16/03 09:30 a 20/03 16:45)
     expect(exportar(false)).toEqual(['2026-03-16T09:30:00', '2026-03-20T16:45:00']) // a hora exata do arquivo, não 08:00/17:00
   })
+
+  it('R-D: marco às 24:00 de um calendário de 24 h exporta 00:00 do dia seguinte (não 00:00 do dia anterior)', () => {
+    const xml = projeto({
+      head: '<StartDate>2026-08-03T00:00:00</StartDate><StatusDate>2026-08-02T17:00:00</StatusDate><CalendarUID>1</CalendarUID>',
+      tasks:
+        tarefa(1, { duration: 'PT24H0M0S', extra: '<CalendarUID>4</CalendarUID>' }) +
+        `<Task><UID>2</UID><ID>2</ID><Name>Marco</Name><WBS>2</WBS><OutlineLevel>1</OutlineLevel><Start>2026-08-03T00:00:00</Start><Duration>PT0H0M0S</Duration><Milestone>1</Milestone><CalendarUID>4</CalendarUID><PredecessorLink><PredecessorUID>1</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink></Task>`,
+    })
+    const dia = (n: number) => `<WeekDay><DayType>${n}</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>00:00:00</FromTime><ToTime>00:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>`
+    const cal24 = `<Calendar><UID>4</UID><Name>24 Horas</Name><IsBaseCalendar>1</IsBaseCalendar><WeekDays>${[1, 2, 3, 4, 5, 6, 7].map(dia).join('')}</WeekDays></Calendar>`
+    const r = parseMspdiXml(xml.replace('<Tasks>', `<Calendars>${cal24}</Calendars><Tasks>`))
+    const meta = { name: 'Obra', company: '', manager: '', startDate: r.meta.startDate!, statusDate: r.meta.statusDate!, dailyIndirectCost: 0, ...r.meta }
+    const sch = computeSchedule(r.tasks, compilarCalendarios(meta.startDate, r.calendarios, r.calendarioPadraoUid), optsDaObra(meta, 'forecast', meta.statusDate))
+    expect([sch.byUid.get(2)!.start, sch.byUid.get(2)!.inicioHora]).toEqual(['2026-08-03', '24:00'])
+    const exportado = buildMspdiXml({ meta, tasks: r.tasks, calendarios: r.calendarios, calendarioPadraoUid: r.calendarioPadraoUid, schedule: sch })
+    expect(validateMspdi(exportado, { strictOrder: true }).errors).toEqual([])
+    const d = new DOMParser().parseFromString(exportado, 'application/xml')
+    const t2 = Array.from(d.getElementsByTagName('Task')).find((x) => x.getElementsByTagName('UID')[0]?.textContent === '2')!
+    const campo = (nome: string) => Array.from(t2.children).find((c) => c.localName === nome)?.textContent
+    expect([campo('Start'), campo('Finish')]).toEqual(['2026-08-04T00:00:00', '2026-08-04T00:00:00'])
+  })
 })
