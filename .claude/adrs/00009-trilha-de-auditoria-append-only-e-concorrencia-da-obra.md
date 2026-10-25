@@ -1,0 +1,79 @@
+# 00009 - Trilha de auditoria append-only e concorrência otimista da obra
+
+**Data**: 2026-10-25
+**Status**: Proposto (aceite do usuário pendente; retenção, pseudonimização, IP e exportação da trilha dependem do Jurídico; o limite contra o dono e o superusuário, a guarda e o backup da trilha dependem da Segurança da Informação e da Infraestrutura; as decisões Q1 a Q8 do gate são do orquestrador com autorização do usuário e seguem sujeitas à revisão dele no PR)
+**Spec/decisão relacionada**: SPEC-01 (RF-01.4, RF-01.1b), SPEC-02 (RF-02.4, RF-02.5), SPEC-14 (RF-14.3), SPEC-12 (RF-12.5, RF-12.9), ASVS 5.0.0 V1, V2, V4, V8, V14, V16, plano do ciclo 00013 (seções 3.4, 3.5, 3.6 e 15), parecer do `dba` (`00013-tarefa0-dba.md`), `PLANO-FASE-2.md` §5.3 e §8.2, [ADR 00004](00004-estrutura-convencoes-backend.md) e [ADR 00006](00006-isolamento-entre-empresas-rls.md)
+
+Classificação: o que é **opinião da equipe** vem marcado; o resto é prática documentada (com link) ou consequência de teste. Nada aqui é exigência regulatória. Esta decisão tem impacto de segurança e de dados pessoais: **não vale como aceita** sem a validação das áreas listadas no fim.
+
+## Contexto
+O ciclo 00013 coloca a obra no servidor e, com ela, nascem dois padrões que todos os ciclos seguintes herdam: dois usuários editando a mesma obra não podem se sobrescrever em silêncio (SPEC-01, RF-01.4: "edição simultânea gera 409"), e toda escrita precisa deixar um registro que ninguém altera nem apaga (SPEC-02, RF-02.4 e RF-02.5). Um defeito aqui é caro de corrigir depois: o contrato HTTP (tipo e semântica da `versao`) e a estrutura da trilha (particionamento, colunas) ficam presos a dados reais.
+
+## Decisão
+
+### 1. Concorrência otimista: `obra.versao` explícita, incrementada por gatilho (Q2)
+- **`obra.versao bigint NOT NULL DEFAULT 1`**, incrementada pelo gatilho `BEFORE UPDATE ... FOR EACH ROW` (`NEW.versao := OLD.versao + 1`), que **ignora o valor enviado**. No EF: `IsConcurrencyToken()` + `ValueGeneratedOnAddOrUpdate()`; o Npgsql lê o valor de volta por `RETURNING` (provado por teste). Convergência com o [ADR 00004](00004-estrutura-convencoes-backend.md) ("contador explícito na `obra`, porque o `xmin` da obra não muda quando uma tarefa muda"); **diverge do texto do PLANO §5.3 E2**, que dizia `xmin`. O `xmin` continua válido para entidade sem filhos.
+- **Por que não `xmin`** (parecer do `dba`, §2): é um `xid` de 32 bits, não sobrevive a dump e restore, não representa a versão do agregado e o 00015 (`PUT` em lote de tarefas) precisa que a versão da obra mude quando as tarefas mudam. Documentação: [concorrência no EF](https://learn.microsoft.com/ef/core/saving/concurrency), [Npgsql](https://www.npgsql.org/efcore/modeling/concurrency.html). **Opinião**: preferir o contador explícito.
+- **Contrato**: `versao` (inteiro) **obrigatória no corpo** de `PUT`, `POST .../arquivar` e `POST .../restaurar`; ausente → 400. `GET`, `POST` e `PUT` devolvem `versao`. Sem `If-Match`/`ETag`: o `If-Match` falho é 412 ([RFC 9110 §13.1.1](https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1)) e a SPEC-01 pede 409.
+- **Fluxo da escrita** (`ServicoObras`): (1) carrega a obra pelo `DbSet` filtrado: ausente → **404**; (2) compara a `versao` em memória: diferente → **409** com o estado carregado; (3) arquivada e a operação exige obra ativa → 409; (4) copia a versão do cliente para o valor ORIGINAL do token e salva; (5) `DbUpdateConcurrencyException` → `GetDatabaseValuesAsync`: nulo → **404**; senão → 409 com o estado do banco. Em READ COMMITTED o segundo `UPDATE` concorrente reavalia o `WHERE`, afeta zero linhas e o EF lança a exceção ([isolamento](https://www.postgresql.org/docs/current/transaction-iso.html)); não precisa de SERIALIZABLE.
+- **404 e nunca 409 para obra de outra empresa** ([ADR 00006](00006-isolamento-entre-empresas-rls.md), "carregar antes de atualizar"): sob RLS o `UPDATE` de obra alheia afeta zero linhas e, sem o carregamento, viraria 409 e revelaria que existe.
+- **409 em ProblemDetails** ([RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)): `type` curto (`conflito-de-versao`, `obra-arquivada`, `obra-nao-arquivada`, `obra-nome-duplicado`) e a extensão **`estadoAtual`** (a obra como está, com `versao`) quando a obra é visível ao chamador. Violação do banco vira 400 por campo, mapeada pelo **`SqlState` e pelo nome da constraint** (nunca a mensagem do PostgreSQL); constraint não mapeada fica 500 genérico.
+- **`PUT` substitui a representação inteira**; sem nenhuma mudança, o EF não emite `UPDATE`, a versão não anda e nada é auditado.
+
+### 2. Trilha append-only: três camadas independentes no banco (Q6)
+Cada camada cobre o furo da outra; todas são provadas por teste, **cada uma sozinha**, com controle negativo.
+1. **`REVOKE UPDATE, DELETE, TRUNCATE ON auditoria FROM cronoai_app`** (explícito, mesmo sem o `TRUNCATE` padrão): o app recebe `42501`.
+2. **RLS `FORCE` só com políticas de `SELECT` e `INSERT`** (`TO cronoai_app`, `empresa_id = E`): sem política de `UPDATE`/`DELETE`, as linhas ficam invisíveis para essas operações.
+3. **Gatilho de instrução** `BEFORE UPDATE OR DELETE OR TRUNCATE ... FOR EACH STATEMENT` com `RAISE EXCEPTION ... USING ERRCODE = 'restrict_violation'` e `ENABLE ALWAYS`: dispara com zero linhas, **para o dono** e para `TRUNCATE` (que gatilho por linha não cobre), e resiste a `session_replication_role = replica`. Documentação: [CREATE TRIGGER](https://www.postgresql.org/docs/current/sql-createtrigger.html), [privilégios](https://www.postgresql.org/docs/current/ddl-priv.html), [RLS](https://www.postgresql.org/docs/current/ddl-rowsecurity.html), [ALTER TABLE](https://www.postgresql.org/docs/current/sql-altertable.html).
+- **Limite declarado (prática):** o dono pode fazer `DROP`/`DISABLE TRIGGER` e `DROP TABLE`, e o superusuário contorna tudo. "Inclusive para o dono" vale contra **DML**, não contra DDL. Mitigações: teste de catálogo (`tgenabled = 'A'`, `tgtype`, privilégios e políticas), a regra **R19** (alerta para migração que cita a trilha junto de `DISABLE TRIGGER`, `DROP TRIGGER`, `DROP POLICY`, `ALTER POLICY`, `GRANT` ou `NO FORCE`) e a revisão humana de migração. Contra superusuário só controle de fora do banco (Infraestrutura e Segurança). Hash encadeado: **opinião**, fora do escopo.
+- **Estrutura**: `id bigint GENERATED ALWAYS AS IDENTITY`, `empresa_id`, `obra_id` (FK composta `(empresa_id, obra_id)` para a obra, `Restrict`), `usuario_id` (FK, pseudônimo), `entidade`, `entidade_id uuid`, `acao`, `antes`/`depois` (`jsonb`, só os campos alterados da lista branca, até 256 KB), `versao_depois`, `origem`, `motivo` (até 500 caracteres), `correlacao_id` (TraceId W3C) e `em`. **Sem coluna de IP (Q6, privacidade por padrão)**: uma coluna nula seria convite a preencher, e acrescentar uma coluna nula depois é uma migração barata. **Diverge do RF-02.4** ("IP"): cobertura parcial declarada, com nota na SPEC-02 e pendência do Jurídico.
+- **Ordenação**: por `(em, id)`; o identity não é monotônico por commit e tem buracos ([sequências](https://www.postgresql.org/docs/current/functions-sequence.html)). Leitura e exportação por **keyset**, nunca `OFFSET`.
+- **`entidade_id` é `uuid`**: uma entidade de chave composta do 00015 (ex.: `vinculo`) precisa de id substituto (ou a coluna vira `text`). Aviso ao 00015.
+
+### 3. Gravação na mesma transação, falha fechada
+- **`AuditoriaInterceptor : SaveChangesInterceptor`** (singleton, síncrono e assíncrono): no `SavingChanges`, percorre as entidades `IAuditavel` do `ChangeTracker` e adiciona os `RegistroAuditoria` ao **mesmo `DbContext`**: mesmo `SaveChanges`, mesmo lote, tudo ou nada ([interceptores](https://learn.microsoft.com/ef/core/logging-events-diagnostics/interceptors), [transações](https://learn.microsoft.com/ef/core/saving/transactions)). Nunca outro contexto: seria outra conexão, outra transação e outro contexto de RLS. A trilha entra no lote ANTES do `UPDATE` da obra; por isso a violação da FK da trilha (obra que sumiu no meio da operação) é mapeada para 404.
+- **`CronoDbContext.SalvarAuditadoAsync(MetadadosEscrita)`** é o único caminho para gravar entidade auditável: os metadados (origem, motivo, correlação, instante do `TimeProvider`) só existem durante a chamada. Um `SaveChanges` comum com entidade auditável **lança**; remover entidade auditável **lança**; sem usuário no contexto, lança. O `usuario_id` vem do contexto de banco imutável da sessão, **nunca do corpo**. É a falha fechada: nenhuma escrita auditável sai sem quem, de onde e por quê.
+- **Ação derivada** (`criar`, `alterar`, `arquivar`, `restaurar`) e **lista branca por entidade** (`ListaBrancaAuditoria`): só o que está na lista entra na trilha; o resto é descartado. Nunca nome, e-mail, emissor, sujeito nem IP. `origem` é o canal de negócio (`ui` neste ciclo), não o protocolo.
+- **R18 (bloqueia)**: `ExecuteUpdate`/`ExecuteDelete` fora de `ConsultasIdentidade.cs` (só `sessao`, que não é auditada) e SQL de escrita em `cronoai.obra`/`cronoai.auditoria`: esses caminhos não passam pelo `ChangeTracker` nem pelo interceptor. Testes de arquitetura complementam: o `DbSet` da trilha só recebe `Add`/`AddRange`, toda entidade auditável tem lista branca e toda entidade de empresa é auditável ou exceção declarada (`MembroEmpresa`, `Sessao`, `Empresa`, até o 00014).
+
+### 4. Arquivar em vez de apagar (Q1)
+O "D" do CRUD de obra é **arquivar** (`arquivada_em`), com `REVOKE DELETE` em `obra`: a trilha referencia a obra por FK `Restrict` e é imutável, então a exclusão física seria impossível. Restaurar limpa `arquivada_em`; os dois são auditados e versionados. A obra arquivada é somente leitura (`PUT` → 409). Exclusão definitiva, se um dia existir, é procedimento do Jurídico, nunca da API.
+
+### 5. Município e UF sem a lista oficial (Q3, Q7)
+`uf_referencia` (27 linhas semeadas pela migração, **exceção ao ADR 00004**: dado nacional imutável necessário à integridade, não dado de desenvolvimento) e `municipio_referencia` (**vazia**). Validação em camadas: `CHECK` de 7 dígitos; FK composta `(uf, municipio_uf_cod)` para `uf_referencia(sigla, codigo_ibge)` sobre coluna gerada com os 2 primeiros dígitos; dígito verificador no domínio. **A FK para `municipio_referencia` não é criada agora**: `NOT VALID` não adia a checagem das linhas novas, só das existentes, e com a tabela vazia recusaria toda obra. O ciclo da carga faz, nesta ordem: carga, `ADD CONSTRAINT ... NOT VALID`, correção das obras fora da lista, `VALIDATE CONSTRAINT` ([ALTER TABLE](https://www.postgresql.org/docs/current/sql-altertable.html)); o procedimento é provado em teste, numa tabela gêmea.
+
+## Justificativa
+- **Defesa em profundidade** na trilha e no isolamento: nenhuma camada sozinha basta (privilégio concedido por engano, política esquecida, `ExecuteUpdate`, dono do schema).
+- **Gatilho de versão no banco** e não só no código: incrementa mesmo por caminho que esqueça o EF e ignora valor enviado pelo cliente.
+- **Falha fechada** nos metadados: uma escrita sem auditoria é pior que uma escrita recusada. **Opinião**: preferir recusar.
+- **Lista branca e sem IP**: minimização (LGPD). **Opinião**, sujeita ao Jurídico.
+- **Revisão de segurança e de licença**: nenhum pacote novo; o escritor de CSV é próprio (cerca de 60 linhas), para não trazer dependência (CsvHelper) sem revisão.
+
+## Alternativas descartadas
+| Alternativa | Motivo |
+|---|---|
+| `xmin` como token da obra | Não representa o agregado; não sobrevive a restore (Q2) |
+| `DELETE` físico de obra | Impossível com a trilha referenciando a obra (Q1) |
+| Gatilho `AFTER` nas tabelas de negócio para auditar | Não conhece origem, motivo nem correlação |
+| Auditar em outro `DbContext` | Outra conexão, outra transação, outro contexto de RLS |
+| Metadados opcionais no interceptor | Falha aberta: escrita sem quem e por quê |
+| Só o `REVOKE` para o append-only | Não cobre `TRUNCATE` com privilégio nem o dono; as camadas se complementam |
+| Coluna `ip` nula | Convite a preencher dado pessoal sem decisão do Jurídico (Q6) |
+| Particionar a trilha agora | Sem volume nem prazo de retenção; ver "Revisão" |
+| `If-Match`/`ETag` com 412 | A SPEC-01 pede 409 |
+| FK `NOT VALID` para `municipio_referencia` agora | Recusaria toda obra com a tabela vazia |
+
+## Consequências
+**Positivas:** o banco recusa alterar ou apagar a trilha até para o dono (DML); duas abas na mesma obra nunca se sobrescrevem em silêncio; toda rota de escrita grava exatamente uma linha de trilha (teste por rota); uma falha da mudança ou da trilha desfaz as duas.
+**Negativas / trade-offs:** o dono (DDL) e o superusuário contornam a trilha; o `ExecuteUpdate` fica proibido nas entidades auditadas; a migração de dados de tabela auditada precisa do helper e de cuidado com o gatilho; remover membro que é responsável de obra exige reatribuir antes (FK `Restrict`; nota no ADR 00006); a trilha cresce sem retenção até o Jurídico decidir (diff de campos e teto de 256 KB por `jsonb`; medir no 00015, lotes de 3.000 tarefas).
+**Efeito nos números:** nenhum (`data_status` e os campos SINAPI só são guardados).
+
+## Validações com outras áreas
+| Tema | Área | Antes de quê |
+|---|---|---|
+| `usuario_id` (pseudônimo) e `motivo` (texto livre) na trilha; prazo de retenção e descarte; procedimento de titular sob append-only (exceção controlada ou partição); se e como gravar IP; exportação da trilha para fora do sistema | **Jurídico** | Dados reais / piloto |
+| Limite contra o dono e o superusuário; guarda e backup da trilha; eventual `SECURITY DEFINER` de privacidade; aceite dos itens ASVS V1, V2, V4, V8, V14 e V16 | **Segurança da Informação** | Uso em produção |
+| Quem roda a migração em produção (o dono pode desligar o gatilho); backup e restauração (a `versao` explícita sobrevive); papel de backup sob RLS; IP real atrás de proxy, se o Jurídico aprovar IP | **Infraestrutura** | Primeiro ambiente fora do local |
+
+## Revisão
+Revisar se: o Jurídico exigir descarte por prazo (**particionar no 00013, não depois**: PK `(id, em)`, partições criadas pelo migrador; converter depois exige tabela nova e cópia); a trilha passar de cerca de 50 milhões de linhas (ordem de grandeza, **opinião**; medir com `pg_total_relation_size`); uma entidade de chave composta entrar na trilha (id substituto); a lista oficial de municípios chegar (FK `NOT VALID` e `VALIDATE`; exceções do dígito verificador, se houver).

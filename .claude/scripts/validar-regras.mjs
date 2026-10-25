@@ -30,6 +30,12 @@
 //   R11 bloqueia  pull_request_target em workflow
 //   R12 bloqueia  msProjectXmlParser.ts alterado sem msProjectXmlParser.test.ts
 //   R13 bloqueia  workflow alterado sem bloco "permissions:"
+//   R14 bloqueia  SQL bruto com texto montado em server/src (FromSqlRaw, ExecuteSqlRaw, SqlQueryRaw)
+//   R15 bloqueia  DDL fora de migração e do helper Rls/; DML em migração fora de ExecutarDmlComRls
+//   R16 bloqueia  IgnoreQueryFilters fora de ConsultasIdentidade.cs
+//   R17 bloqueia  NpgsqlConnection/NpgsqlDataSource fora do design-time
+//   R18 bloqueia  ExecuteUpdate/ExecuteDelete fora de ConsultasIdentidade.cs e SQL de escrita em cronoai.obra/auditoria
+//   R19 alerta    migração que cita auditoria com DISABLE/DROP TRIGGER, DROP/ALTER POLICY, GRANT ou NO FORCE
 //
 // Exit: 0 sem bloqueio | 1 há achado "bloqueia" | 2 erro do script.
 // Só leitura. O trecho de linhas com segredo nunca é impresso.

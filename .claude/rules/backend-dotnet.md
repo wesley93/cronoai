@@ -30,14 +30,27 @@ Fonte da verdade: `CLAUDE.md` e o [ADR 00004](../adrs/00004-estrutura-convencoes
 - Handlers de endpoint devolvem `TypedResults` (uniões `Results<…>`), e o status que vem do pipeline (401, 403, 400 do antiforgery, 429) é declarado com `.ProducesProblem(...)`.
 - Retorno do OIDC: só o fluxo de **código** (id_token ou access_token no retorno do navegador, ou retorno sem `code`, são recusados em `OnMessageReceived`); logout do provedor desligado até a Segurança decidir.
 - Sessão: cookie `__Host-` revogável no servidor (tabela `sessao`, uuid v4 por CSPRNG); nenhum token do provedor guardado; o login acontece em `OnTicketReceived` e exige `id_token` assinado. O usuário de desenvolvimento só existe com `Development` + flag fora de `appsettings` versionado, e a API não sobe com a flag em outro ambiente.
-- Regras automáticas **R14 a R17** em `.claude/scripts/lib/regras-cronoai.mjs` (SQL bruto, DDL fora de migração/`Rls/`, DML de migração fora do helper, `IgnoreQueryFilters`, conexão crua), com casos em `regras-cronoai.test.mjs` (`node --test`).
+- Regras automáticas **R14 a R19** em `.claude/scripts/lib/regras-cronoai.mjs` (SQL bruto, DDL fora de migração/`Rls/`, DML de migração fora do helper, `IgnoreQueryFilters`, conexão crua, escrita fora do `SaveChanges` auditado e migração que mexe nas garantias da trilha), com casos em `regras-cronoai.test.mjs` (`node --test`).
+
+## Obras, auditoria e concorrência (ciclo 00013, ADR 00009)
+
+- **Entidade auditável** (`IAuditavel`) só é gravada por **`CronoDbContext.SalvarAuditadoAsync(MetadadosEscrita)`**: o `AuditoriaInterceptor` grava a trilha **na mesma transação** (mesmo `SaveChanges`). `SaveChanges` comum com entidade auditável, remoção de entidade auditável e escrita sem usuário no contexto **lançam** (falha fechada). `usuario_id` vem do contexto de banco da sessão, nunca do corpo.
+- **Lista branca** (`ListaBrancaAuditoria`): só os campos listados entram em `antes`/`depois` (chaves em `snake_case`, só os alterados); nova entidade auditável sem lista reprova o teste de arquitetura. Nunca nome, e-mail, emissor, sujeito nem IP na trilha.
+- **R18 (bloqueia)**: `ExecuteUpdate`/`ExecuteDelete` só em `ConsultasIdentidade.cs` (`sessao`) e nenhum SQL de escrita em `cronoai.obra`/`cronoai.auditoria` fora de migração. **R19 (alerta)**: migração que cita `auditoria` com `DISABLE`/`DROP TRIGGER`, `DROP`/`ALTER POLICY`, `GRANT` ou `NO FORCE`. O `DbSet` da trilha só recebe `Add`/`AddRange`; leitura só em `ConsultasAuditoria`.
+- **Concorrência**: `versao` (inteiro) **no corpo** de `PUT`, `arquivar` e `restaurar` (ausente → 400); fluxo carregar → comparar → aplicar → salvar auditado; versão velha → **409** em ProblemDetails com `type` curto e `estadoAtual`; obra de outra empresa ou que sumiu → **404** (nunca 409). `obra.versao` é incrementada por **gatilho**: o domínio e o EF nunca a calculam.
+- **Erro do banco → campo do contrato** pelo `SqlState` e pelo **nome da constraint** (`MapeadorErrosObra`), percorrendo a cadeia de `InnerException`; nunca a mensagem do PostgreSQL; constraint não mapeada → 500 genérico. Sem `catch` amplo.
+- **"Apagar" é arquivar** (`arquivada_em`); o app não tem `DELETE` em `obra` e não há rota `DELETE`. Nome único entre as obras não arquivadas (índice parcial, fora do modelo do EF: só o teste de banco o protege).
+- **Corpo de escrita limitado** (64 KB nas escritas de obra) pelo `LimiteDeCorpoMiddleware`, que também vale para corpo sem `Content-Length`.
+- **CSV de exportação**: UTF-8 com BOM, `;`, `CRLF`, todo campo entre aspas e **neutralização de `=`, `+`, `-`, `@`, TAB e CR** no início de toda célula (`EscritorCsvAuditoria`).
+- **Testes de banco da trilha e das políticas de escrita**: UPDATE (`WITH CHECK`) e DELETE (`USING`) **sem `WHERE` e sem `RETURNING`**, e no UPDATE sem ler coluna no `SET`; um teste negativo como `cronoai_app` por política de escrita; controle por mutação (afrouxe a política e veja o teste falhar). Teste que cria gatilho ou função temporária: `CREATE OR REPLACE`, `DROP ... IF EXISTS` antes e limpeza em `try/finally` com `CancellationToken.None`. Limite de nome de objeto em **bytes** (`Encoding.UTF8.GetByteCount(nome) >= 63`).
+- **Teste de isolamento por rota** usa um recurso **real** da outra empresa no `{id}` (`RecursoAlheio` no catálogo; meta-teste `Concretizacao_de_id_usa_obra_real_da_empresa_B`).
 
 ## SQL e migrações
 
 - EF Core + Npgsql é o único acesso a dados. `FromSql`/`ExecuteSql` **interpolados** (viram parâmetros); `FromSqlRaw`/`ExecuteSqlRaw` com texto montado são proibidos. SQL bruto qualifica o schema (`cronoai.`).
 - **Toda DDL de tabela só em migração** (`dotnet ef migrations add`). Nunca editar migração aplicada. A única exceção é o provisionamento local de papéis e schema em `server/db/bootstrap/` (`CREATE ROLE`/`CREATE SCHEMA`/`GRANT`/`REVOKE`/`ALTER ROLE`).
 - **Nunca** aplicar migração na partida da API (`Migrate(` só em teste). Aplicação em dev: `dotnet ef database update` com a string do migrador.
-- Seed só por comando explícito em `Development` (`dotnet run --project server/src/CronoAI.Api -- semear-desenvolvimento`), nunca em migração.
+- Seed só por comando explícito em `Development` (`dotnet run --project server/src/CronoAI.Api -- semear-desenvolvimento`), nunca em migração. **Única exceção (00013, Q3):** dado nacional imutável necessário à integridade, em tabela de referência global sem RLS e por `InsertData` (as 27 UFs).
 - Modelo muda → migração nova no mesmo diff; `has-pending-model-changes` precisa dar "sem mudança".
 
 ## Papéis e segredos

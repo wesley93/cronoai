@@ -53,22 +53,22 @@ Referência de numeração: OWASP Top 10 **2021** — https://owasp.org/Top10/ (
 
 ### Backend — ASVS 5.0.0, nível 2 (esqueleto por capítulo)
 Referência: [OWASP ASVS 5.0.0](https://github.com/OWASP/ASVS/tree/v5.0.0/5.0/en) (capítulos conforme a estrutura do `v5.0.0`). Preencher por ciclo; o que ainda não se aplica fica `NA` com o ciclo previsto.
-- **V1 Encoding and Sanitization:** SQL só via EF (`FromSql` interpolado); nada de `FromSqlRaw`/`ExecuteSqlRaw` com texto montado.
-- **V2 Validation and Business Logic:** validação de tipo, tamanho e formato na borda dos endpoints (00012+).
+- **V1 Encoding and Sanitization:** SQL só via EF (`FromSql` interpolado); nada de `FromSqlRaw`/`ExecuteSqlRaw` com texto montado. **CSV de exportação** (trilha, ciclo 00013): toda célula que começa com `=`, `+`, `-`, `@`, TAB ou CR ganha o prefixo `'`, todo campo entre aspas (ADR 00009; [OWASP CSV Injection](https://owasp.org/www-community/attacks/CSV_Injection)).
+- **V2 Validation and Business Logic:** validação de tipo, tamanho e formato na borda dos endpoints (00012+). Obras (00013): validação no domínio e no banco (nome, UF, município com dígito verificador, SINAPI tudo ou nada, `opcoes_cronograma` objeto de até 16 KB e 16 níveis), regra de negócio no servidor (versão, arquivamento, unicidade do nome), `empresaId` e `versao` do corpo do `POST` ignorados (atribuição em massa).
 - **V3 Web Frontend Security:** `NA` no backend (cabeçalhos da API em V4/V13).
-- **V4 API and Web Service:** versionamento em `/api/v1`; cabeçalhos de segurança da API; OpenAPI só em `Development`.
+- **V4 API and Web Service:** versionamento em `/api/v1`; cabeçalhos de segurança da API; OpenAPI só em `Development`. Escritas de obra: 400, 404, 409 (com `estadoAtual`) e 413 em ProblemDetails, cada status declarado no tipo e no OpenAPI; corpo limitado a 64 KB; exportação com limite de taxa próprio (00013).
 - **V5 File Handling:** `NA` até o upload de MS Project (SPEC-06).
 - **V6 Authentication:** autenticação delegada ao provedor OIDC (sem senha local; MFA do provedor); fluxo de código + PKCE S256 com cliente confidencial; usuário de desenvolvimento só com `Development` + flag, falha fechada na partida (ciclo 00012; ADR 00005).
 - **V7 Session Management:** cookie `__Host-` (`HttpOnly`, `Secure`, `SameSite=Lax`), sessão revogável no servidor, sessão nova no login, inatividade e teto de duração, antiforgery nas escritas, retenção (ciclo 00012; ADR 00005).
-- **V8 Authorization:** isolamento por empresa em três camadas (coluna + filtro do EF + RLS forçado) e teste genérico de rotas; fallback de autorização autenticado; 404 para recurso de outra empresa (ciclo 00012; ADR 00006). Autorização por obra: 00014. Testes de segurança do banco conectam como `cronoai_app`, nunca como superusuário.
+- **V8 Authorization:** isolamento por empresa em três camadas (coluna + filtro do EF + RLS forçado) e teste genérico de rotas; fallback de autorização autenticado; 404 para recurso de outra empresa (ciclo 00012; ADR 00006). Autorização por obra: 00014. Testes de segurança do banco conectam como `cronoai_app`, nunca como superusuário. Obras (00013): carregar antes de escrever (obra de outra empresa → 404, nunca 409) e `{id}` REAL da empresa B no teste genérico de rotas, com meta-teste.
 - **V9 Self-contained Tokens:** `id_token` validado (assinatura obrigatória e só algoritmos assimétricos conhecidos, `iss`, `aud`, `exp`, `nonce`, `state`) e descartado; nenhum token guardado (ciclo 00012; ADR 00005).
 - **V10 OAuth and OIDC:** código + PKCE S256, `state`/`nonce`, `redirect_uri` exata, escopos `openid profile`; provedor real e fumaça com ele: Segurança (ciclo 00012).
 - **V11 Cryptography:** segredos de integração cifrados com Data Protection (00022).
 - **V12 Secure Communication:** TLS/HSTS de produção e TLS do PostgreSQL são da Infraestrutura.
 - **V13 Configuration:** sem segredo versionado (`.env`, `user-secrets`); NuGet Audit bloqueando alta/crítica; lock files; imagens por digest; compose local só em `127.0.0.1`; PostgreSQL sem `trust` no TCP; workflow sem segredo nem deploy.
-- **V14 Data Protection:** LGPD e retenção com o Jurídico; sem PII em log.
+- **V14 Data Protection:** LGPD e retenção com o Jurídico; sem PII em log. Trilha de auditoria (00013): só `usuario_id` (pseudônimo), **sem IP** e sem nome, e-mail, emissor ou sujeito; lista branca de campos; `motivo` é texto livre (a interface avisa para não digitar dado pessoal); retenção, pseudonimização e IP pendentes do Jurídico (ADR 00009).
 - **V15 Secure Coding and Architecture:** dependências revisadas (segurança e licença) antes de produção; direção de dependências entre projetos.
-- **V16 Security Logging and Error Handling:** ProblemDetails sem pilha fora de `Development`; logs JSON sem corpo, cabeçalhos, string de conexão nem dados pessoais; `EnableSensitiveDataLogging` ausente.
+- **V16 Security Logging and Error Handling:** ProblemDetails sem pilha fora de `Development`; logs JSON sem corpo, cabeçalhos, string de conexão nem dados pessoais; `EnableSensitiveDataLogging` ausente. Escrita de obra só registra `obra_id` (nunca nome, motivo nem conteúdo); **trilha append-only em três camadas** (`REVOKE`, RLS só com SELECT e INSERT, gatilho de instrução com `ENABLE ALWAYS`), limite contra o dono (DDL) e o superusuário declarado, regras R18 e R19 (00013; ADR 00009).
 - **V17 WebRTC:** `NA`.
 
 ## Classificação

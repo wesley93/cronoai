@@ -403,17 +403,25 @@ export function temSenhaLiteral(texto) {
 const VITE_SEGREDO = /\bVITE_\w*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|SENHA|PRIVATE|CREDENTIAL)\w*/i
 
 // ---------------------------------------------------------------------------------------------------------------
-// Regras de backend .NET (R14 a R17): só o código C# de server/src (testes ficam de fora). ADR 00004 e 00006.
+// Regras de backend .NET (R14 a R19): só o código C# de server/src (testes ficam de fora). ADR 00004, 00006 e 00009.
 // ---------------------------------------------------------------------------------------------------------------
 const ARQ_SERVER_CS = /^server\/src\/.*\.cs$/
 const SQL_BRUTO = /\b(FromSqlRaw|ExecuteSqlRaw|ExecuteSqlRawAsync|SqlQueryRaw)\b/
 const DDL = /\b(CREATE|ALTER|DROP)\s+(TABLE|INDEX|POLICY|ROLE|SCHEMA)\b|\b(ENABLE|NO\s+FORCE|FORCE)\s+ROW\s+LEVEL\s+SECURITY\b/i
 const DML = /\b(INSERT\s+INTO|UPDATE\s+[\w."]+\s+SET|DELETE\s+FROM)\b/i
 const CONEXAO_CRUA = /\bNpgsql(Connection|DataSource)\b/
+// R18: escrita em massa do EF e SQL de escrita nas entidades auditadas (ADR 00009)
+const EXECUTE_EM_MASSA = /\bExecute(Update|Delete)(Async)?\s*\(/
+const CHAMADA_SQL = /\b(ExecuteSql|ExecuteSqlAsync|SqlQuery|FromSql)\s*[<(]/
+const ESCRITA_EM_AUDITADA = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+cronoai\.(obra|auditoria)\b/i
+// Único arquivo que usa ExecuteUpdate/ExecuteDelete: só sobre sessao, que não é auditada.
+const EXECUTE_PERMITIDO = '/CronoAI.Dados/Identidade/ConsultasIdentidade.cs'
+// R19: migração que desliga ou afrouxa as garantias da trilha (alerta; revisão humana decide)
+const AFROUXA_TRILHA = /\b(DISABLE\s+TRIGGER|DROP\s+TRIGGER|DROP\s+POLICY|ALTER\s+POLICY|GRANT|NO\s+FORCE)\b/i
 
 /**
- * Regras R14 a R17 sobre UMA linha de código C# de server/src. Devolve [{ id, regra, mensagem }].
- * Comentário não conta. Exportada para o teste (regras-cronoai.test.mjs).
+ * Regras R14 a R19 sobre UMA linha de código C# de server/src. Devolve [{ id, regra, mensagem, severidade? }]
+ * (sem severidade = bloqueia). Comentário não conta. Exportada para o teste (regras-cronoai.test.mjs).
  */
 export function regrasBackend(arquivo, texto) {
   if (!ARQ_SERVER_CS.test(arquivo) || !semComentario(texto)) return []
@@ -439,6 +447,19 @@ export function regrasBackend(arquivo, texto) {
   // R17: conexão crua não passa pelo interceptor que fixa as variáveis de sessão do RLS
   if (CONEXAO_CRUA.test(texto) && !arquivo.endsWith('/CronoDbContextDesignTimeFactory.cs')) {
     achados.push({ id: 'R17', regra: 'conexão fora do EF', mensagem: 'NpgsqlConnection/NpgsqlDataSource fora do design-time: conexão crua não seta app.usuario_id/app.empresa_id; use o CronoDbContext da fábrica (NpgsqlConnectionStringBuilder é permitido) (ADR 00006).' })
+  }
+  // R18: ExecuteUpdate/ExecuteDelete não passam pelo ChangeTracker nem pelo interceptor de SaveChanges: a escrita ficaria SEM trilha
+  // (e sem o contador de versão do EF). Por arquivo (a cadeia LINQ quebra linhas): só ConsultasIdentidade.cs, que escreve em sessao.
+  if (EXECUTE_EM_MASSA.test(texto) && !arquivo.endsWith(EXECUTE_PERMITIDO)) {
+    achados.push({ id: 'R18', regra: 'escrita fora do SaveChanges', mensagem: 'ExecuteUpdate/ExecuteDelete fora de CronoAI.Dados/Identidade/ConsultasIdentidade.cs: não passam pelo interceptor de auditoria; use o contexto e SalvarAuditadoAsync (ADR 00009).' })
+  }
+  // R18 (SQL): INSERT/UPDATE/DELETE em cronoai.obra ou cronoai.auditoria por SQL do EF fora de migração
+  if (!emMigracao && CHAMADA_SQL.test(texto) && ESCRITA_EM_AUDITADA.test(texto)) {
+    achados.push({ id: 'R18', regra: 'escrita fora do SaveChanges', mensagem: 'SQL de escrita em cronoai.obra ou cronoai.auditoria: a trilha só é gravada pelo SaveChanges auditado; a trilha é append-only (ADR 00009).' })
+  }
+  // R19: alerta (e não bloqueio) porque o Down() legítimo remove a tabela; a revisão humana decide
+  if (emMigracao && /auditoria/i.test(texto) && AFROUXA_TRILHA.test(texto)) {
+    achados.push({ id: 'R19', severidade: 'alerta', regra: 'migração mexe nas garantias da trilha', mensagem: 'Migração que cita auditoria com DISABLE/DROP TRIGGER, DROP/ALTER POLICY, GRANT ou NO FORCE: confirme que o append-only continua valendo em três camadas (REVOKE, RLS só com SELECT e INSERT, gatilho de instrução com ENABLE ALWAYS) (ADR 00009).' })
   }
   return achados
 }
@@ -507,9 +528,9 @@ export function aplicarRegras({ arquivos, removidos = new Set(), novas }) {
       } else if (temSenhaLiteral(texto)) {
         achados.push(achado('R08', ehTeste ? 'alerta' : 'bloqueia', 'segredo no código', a, n, 'senha literal em código: nada de senha em código, fixture ou log (CLAUDE.md › Invioláveis 5).'))
       }
-      // R14 a R17: backend .NET (server/src)
+      // R14 a R19: backend .NET (server/src); R19 é alerta
       for (const x of regrasBackend(a, texto)) {
-        achados.push(achado(x.id, 'bloqueia', x.regra, a, n, x.mensagem, recorte(texto)))
+        achados.push(achado(x.id, x.severidade ?? 'bloqueia', x.regra, a, n, x.mensagem, recorte(texto)))
       }
       // R09 VITE_ com nome de segredo: tudo que é VITE_* vai para o bundle público
       if (VITE_SEGREDO.test(texto)) {

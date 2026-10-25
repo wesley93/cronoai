@@ -33,8 +33,8 @@ Login corporativo, permissões por perfil e por obra, e uma trilha de auditoria 
 - **RF-02.3** Permissão por obra: o usuário só enxerga as obras às quais está vinculado. Engenheiro pode ter várias obras; gestor de portfólio vê a carteira inteira da empresa (ou as carteiras que lhe forem atribuídas).
 - **RF-02.3a** Permissão por frente: encarregado e empreiteiro só veem e apontam as frentes atribuídas (SPEC-01 RF-01.1c).
 - **RF-02.3b** Isolamento entre empresas testado em toda rota da API: um usuário da empresa A nunca acessa dado da empresa B, nem por id adivinhado (teste automatizado obrigatório).
-- **RF-02.4** Auditoria de toda escrita: avanço, custo, vínculo, duração, linha de base, data de status, cenário, pedido, aprovação/rejeição de relato. Guarda `antes`/`depois`, usuário, IP, origem (UI, importação, WhatsApp, API) e motivo opcional.
-- **RF-02.5** A auditoria é *append-only*: sem edição nem exclusão pela aplicação; exportável em CSV.
+- **RF-02.4** Auditoria de toda escrita: avanço, custo, vínculo, duração, linha de base, data de status, cenário, pedido, aprovação/rejeição de relato. Guarda `antes`/`depois`, usuário, IP, origem (UI, importação, WhatsApp, API) e motivo opcional. **Nota (ciclo 00013, Q6): IP pendente do Jurídico.** A trilha implementada NÃO guarda IP (privacidade por padrão); o restante do requisito (antes/depois, usuário, origem e motivo) está coberto para a obra. Quando o Jurídico decidir se e como gravar IP (inteiro, truncado ou nunca), entra uma coluna nova por migração.
+- **RF-02.5** A auditoria é *append-only*: sem edição nem exclusão pela aplicação; exportável em CSV. **Ciclo 00013:** garantido no banco em três camadas (ADR 00009) e exportável em CSV com neutralização de fórmula (`GET /api/v1/auditoria/exportacao.csv`).
 - **RF-02.6** "Quatro olhos" opcional para nova linha de base: propor → aprovar por outro engenheiro. **(recomendação)**
 
 ## 5. Requisitos não funcionais

@@ -61,7 +61,8 @@ Fase 2 (ciclo 00011): solução em `server/` com `Api → Dados → Dominio`, sc
 | Tabela | Campos principais |
 |---|---|
 | `empresa` | id, nome (sem `cnpj` por ora: minimização de dados; decisão do ciclo 00012, ADR 00006 — volta com o Jurídico se um ciclo precisar) |
-| `obra` | id, empresa_id, nome, uf, municipio_ibge, responsavel_id, data_inicio, data_status_atual, calendario_id, sinapi_uf, sinapi_regime, sinapi_data_base, premissas (jsonb versionado) |
+| `obra` | **Ciclo 00013 (criada):** id, empresa_id, nome (único entre as não arquivadas), uf, municipio_ibge (7 dígitos, com dígito verificador), responsavel_id (membro da mesma empresa), data_status (nula permitida), sinapi_uf, sinapi_regime, sinapi_data_base (fonte única dos campos SINAPI: o 00015 não os duplica nas premissas), opcoes_cronograma (jsonb opaco, até 16 KB), versao (bigint, por gatilho), criada_em, atualizada_em, arquivada_em. **Ciclo 00015 (ainda não existem):** data_inicio, calendario_id, premissas (jsonb versionado) |
+| `uf_referencia` / `municipio_referencia` | **Ciclo 00013:** listas nacionais globais, sem RLS. UF: sigla, codigo_ibge, nome (27 linhas semeadas pela migração). Município: codigo_ibge, uf, nome (vazia até a carga oficial; sem FK da obra até lá) |
 | `tarefa` | id, obra_id, uid_msproject, wbs, nome, nivel, resumo, duracao_du, pct_concluido, inicio_real, termino_real, bac, custo_real, sinapi, lead_time, snet, versao |
 | `vinculo` | obra_id, pred_id, succ_id, tipo (FS/SS/FF/SF), lag_du |
 | `atribuicao` | tarefa_id, recurso_id, unidades |
@@ -70,7 +71,7 @@ Fase 2 (ciclo 00011): solução em `server/` com `Api → Dados → Dominio`, sc
 | `snapshot` | id, obra_id, data_status, criado_em, criado_por, pv, ev, ac, … (SPEC-04) |
 | `snapshot_tarefa` | snapshot_id, tarefa_id, pct, custo_real, inicio_prev, termino_prev, folga |
 | `relato` / `restricao` / `insumo` / `pedido` | conforme SPEC-08/09 |
-| `auditoria` | id, obra_id, usuario_id, entidade, entidade_id, acao, antes (jsonb), depois (jsonb), origem, em |
+| `auditoria` | **Ciclo 00013 (criada):** id (identity), empresa_id, obra_id, usuario_id (pseudônimo), entidade, entidade_id (uuid), acao (criar, alterar, arquivar, restaurar), antes e depois (jsonb, só os campos alterados da lista branca), versao_depois, origem, motivo, correlacao_id, em. **Sem IP** (Q6; ver SPEC-02 RF-02.4). Append-only em três camadas (ADR 00009) |
 
 ## 6. Requisitos não funcionais
 - **RNF-01.1** p95 abaixo de 300 ms para leituras de obra com até 3.000 tarefas; recálculo de CPM abaixo de 1 s.

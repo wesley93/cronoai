@@ -1,16 +1,16 @@
 # CronoAI — backend (.NET 10 + PostgreSQL 17)
 
-Esqueleto (ciclo 00011) e identidade, empresas e isolamento (ciclo 00012); ainda sem regra de negócio de obra. Só ambiente
+Esqueleto (ciclo 00011), identidade, empresas e isolamento (ciclo 00012) e obras, trilha de auditoria e concorrência otimista (ciclo 00013); ainda sem tarefas, perfis nem cálculo. Só ambiente
 **local**; hospedagem e deploy são da equipe de Infraestrutura. Decisões e convenções:
 `.claude/adrs/00004-estrutura-convencoes-backend.md` (estrutura), `00005-autenticacao-oidc-bff-sessao.md` (login e sessão) e
-`00006-isolamento-entre-empresas-rls.md` (empresas, RLS e teste de rotas).
+`00006-isolamento-entre-empresas-rls.md` (empresas, RLS e teste de rotas) e `00009-trilha-de-auditoria-append-only-e-concorrencia-da-obra.md` (obras, trilha e versão).
 
 ```
 server/
   CronoAI.slnx                  solução
   src/CronoAI.Api               host (minimal APIs, autenticação, health, OpenAPI, erros, headers)
-  src/CronoAI.Dominio           entidades (Empresa, Usuario, MembroEmpresa, Sessao), sem nenhum pacote
-  src/CronoAI.Dados             DbContext, RLS e migrações (EF Core + Npgsql)
+  src/CronoAI.Dominio           entidades (Empresa, Usuario, MembroEmpresa, Sessao, Obra, RegistroAuditoria, UF e município de referência), sem nenhum pacote
+  src/CronoAI.Dados             DbContext, RLS, interceptor da trilha de auditoria e migrações (EF Core + Npgsql)
   tests/CronoAI.Api.Testes      xUnit v3 + Testcontainers
   db/bootstrap/                 provisionamento local de papéis e schema (usado pelo compose e pelos testes)
   openapi/CronoAI.Api.json      contrato gerado no build e versionado
@@ -108,6 +108,24 @@ A execução real e os testes validam normalmente.
 **Data Protection**: em `Development` o anel de chaves fica em `%LOCALAPPDATA%/CronoAI/chaves` (fora do repositório; mude com
 `DataProtection:CaminhoAnel`). Fora de `Development` o caminho é obrigatório, senão a API não sobe. Perder o anel derruba as sessões
 (não os dados). `AllowedHosts` é `localhost;127.0.0.1;[::1]`; produção por variável de ambiente (Infraestrutura).
+
+## Obras, trilha de auditoria e concorrência (ciclo 00013)
+
+Rotas (todas exigem sessão e **empresa ativa**; as escritas exigem o cabeçalho `X-XSRF-TOKEN`):
+
+| Rota | O que faz |
+|---|---|
+| `GET /api/v1/obras?incluirArquivadas=` | lista as obras da empresa ativa (sem as arquivadas por padrão) |
+| `POST /api/v1/obras` | cria a obra (201 com `Location`; nome único entre as não arquivadas, sem diferenciar caixa) |
+| `GET` / `PUT /api/v1/obras/{id}` | lê e substitui a obra |
+| `POST /api/v1/obras/{id}/arquivar` e `/restaurar` | "apagar" é arquivar; não há `DELETE` |
+| `GET /api/v1/obras/{id}/auditoria?cursor=&limite=` | trilha da obra, do mais novo ao mais antigo (cursor opaco, `limite` de 1 a 200) |
+| `GET /api/v1/auditoria/exportacao.csv?de=&ate=&obraId=` | CSV da trilha (até 366 dias; limite de taxa próprio) |
+
+- **Concorrência otimista:** `PUT`, `arquivar` e `restaurar` levam `versao` (a que o cliente leu) no corpo. Versão velha, obra arquivada ou nome repetido respondem **409** em ProblemDetails (`type` = `conflito-de-versao`, `obra-arquivada`, `obra-nao-arquivada` ou `obra-nome-duplicado`) com o `estadoAtual` da obra quando ela é visível. Obra de outra empresa responde **404**, igual à inexistente.
+- **Auditoria:** toda escrita grava, na mesma transação, quem, o quê (só os campos alterados da lista branca), quando, a origem (`ui`), a correlação com o log e o `motivo` opcional (texto livre: **não digite dado pessoal**). A trilha é append-only no banco (nem o dono altera ou apaga com `UPDATE`/`DELETE`/`TRUNCATE`). **Não há IP** (pendência do Jurídico) nem nome de usuário (só o `usuarioId`).
+- **CSV:** UTF-8 com BOM, separador `;`, `CRLF`, todo campo entre aspas; células que começam com `=`, `+`, `-`, `@`, TAB ou CR saem com o prefixo `'`.
+- **Municípios:** a lista oficial ainda não foi carregada (`municipio_referencia` vazia): o código é validado por formato, prefixo da UF e dígito verificador, então um código inexistente com dígito coincidente passa até a carga. Os **27 códigos de UF** semeados pela migração precisam ser conferidos contra a fonte oficial do IBGE antes do merge.
 
 ## Comandos
 

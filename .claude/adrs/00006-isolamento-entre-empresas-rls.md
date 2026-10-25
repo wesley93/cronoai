@@ -41,6 +41,17 @@ O CronoAI é multiempresa: um usuário da empresa A nunca acessa dado da empresa
 
 `U` e `E` são as subconsultas escalares das variáveis. Menor privilégio é do ciclo: o 00013 e o 00014 concedem o que usarem.
 
+**Acrescentado no 00013** ([ADR 00009](00009-trilha-de-auditoria-append-only-e-concorrencia-da-obra.md)):
+
+| Tabela | Privilégios do `cronoai_app` | Políticas (todas `TO cronoai_app`) |
+|---|---|---|
+| `obra` | SELECT, INSERT, UPDATE (sem DELETE: o "D" é arquivar) | SELECT: `empresa_id = E`; INSERT: `empresa_id = E`; UPDATE: `empresa_id = E` no `USING` e no `WITH CHECK` (impede mover a obra de empresa) |
+| `auditoria` | SELECT, INSERT (sem UPDATE, DELETE nem TRUNCATE) | **só** SELECT e INSERT, ambas `empresa_id = E`; nenhuma política de UPDATE ou DELETE |
+| `uf_referencia`, `municipio_referencia` | SELECT | **sem RLS** (listas nacionais globais, sem `empresa_id`); entram na lista global do teste de catálogo |
+
+- **Padrão das políticas da trilha:** a ausência de política de UPDATE/DELETE é a camada 2 do append-only (as outras são o `REVOKE` e o gatilho de instrução). Os testes de política de escrita rodam **sem `WHERE` e sem `RETURNING`** (e, no UPDATE, sem ler coluna no `SET`): com eles o PostgreSQL aplica também a política de SELECT e ela mascararia um `USING`/`WITH CHECK` afrouxado.
+- **FK composta ignora o RLS:** `fk_obra_responsavel (empresa_id, responsavel_id) → membro_empresa` garante que o responsável é membro DA MESMA empresa; membro de outra empresa e usuário inexistente dão o mesmo 400.
+
 ### `FORCE` mantido e migração de dados
 Com `FORCE` o dono (migrador) também se sujeita às políticas; como elas são `TO cronoai_app`, setar `app.*` **não** libera o migrador (teste `Dono_tambem_se_sujeita_ao_rls`). Logo, DML de migração em tabela com RLS afetaria **zero linhas sem erro**. Regra: toda migração de dados usa `ExecutarDmlComRls`, que alterna **na transação da migração** `NO FORCE` → DML (com filtro explícito por empresa) → `FORCE`; a DDL do PostgreSQL é transacional, então um erro desfaz também o `NO FORCE`. A regra R15 acusa DML em `Migrations/` fora do helper. Em produção o momento de aplicar (lock curto) é da Infraestrutura. DDL e checagens de FK e unicidade ignoram o RLS.
 
@@ -57,9 +68,10 @@ O upsert do login e a busca por (emissor, sujeito) acontecem antes de existir `u
 - **Regra para o 00013**: um `UPDATE` de recurso de outra empresa afeta zero linhas sob RLS e o EF lança `DbUpdateConcurrencyException`, que viraria **409** (errado). **Carregue a entidade pelo caminho filtrado antes** (404 se ausente) e só então atualize.
 
 ### Notas para os próximos ciclos
+- **00014, `responsavel_id` e auditoria de membro**: a FK `fk_obra_responsavel` é `RESTRICT`, então **remover um membro que é responsável de obra exige reatribuir a obra antes** (ou o 00014 decide outra regra). `MembroEmpresa`, `Sessao` e `Empresa` hoje estão na lista de exceções do teste "entidade de empresa é auditável ou exceção declarada"; o 00014 as torna auditáveis e esvazia a lista.
 - **00014, remoção de membro**: a política de `sessao` por usuário impede o administrador de encerrar ou anular a sessão de **outro** usuário, e a FK composta é `RESTRICT`. Vai precisar de política (ex.: UPDATE de `sessao` com `empresa_ativa_id = E`) ou de `ON DELETE SET NULL (empresa_ativa_id)` (PostgreSQL 15+; conferir se o EF exprime).
 - **00023**: limpeza de `sessao` em lote com papel ou política próprios (nunca `BYPASSRLS`) e índice `(expira_em)`; o `pg_dump` de backup local precisa do papel de bootstrap ou de `--enable-row-security`.
-- Toda rota com `{id}` ganha um cenário `ComIdDeOutraEmpresa` no catálogo (`Isolamento/CatalogoRotas.cs`).
+- Toda rota com `{id}` ganha um cenário `ComIdDeOutraEmpresa` no catálogo (`Isolamento/CatalogoRotas.cs`) **e declara o recurso real** (`RecursoAlheio`): o teste coloca no `{id}` um recurso EXISTENTE da empresa B, e um meta-teste confere que ele existe e é de B. Com um id aleatório o 404 viria por "não existir" e o teste passaria sem provar o isolamento (lacuna do 00012, fechada no 00013).
 
 ## Alternativas descartadas
 | Alternativa | Motivo |
