@@ -6,8 +6,10 @@
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { addCalendarDays } from './calendar'
-import { MAX_MSPDI_CHARS, parseMspdiXml } from './msProjectXmlParser'
+import { WorkCalendar, addCalendarDays } from './calendar'
+import { computeSchedule } from './cpm'
+import type { ProjectMeta } from '@/types/domain'
+import { MAX_MSPDI_CHARS, buildMspdiXml, parseMspdiXml, validateMspdi } from './msProjectXmlParser'
 
 const REF_DIR = process.env.CRONOAI_REF_DIR
 const CORPUS_DIR = REF_DIR ? join(REF_DIR, 'mpxj-mspdi') : ''
@@ -147,6 +149,7 @@ interface Linha {
   lb1a10: number
   timephased: number
   est: Estatico
+  idaVoltaOk: boolean
   resultado: 'importado' | 'recusado'
   uidsUnicos: boolean
   avisos: string[]
@@ -183,7 +186,7 @@ function relatorioMd(): string {
   }
   const porVersao = VERSOES.map((v) => linhaVersao(v, linhas.filter((l) => l.versao === v))).join('\n')
   const porArquivo = linhas
-    .map((l) => `| ${l.arquivo} | ${l.versao} | ${l.saveVersion} | ${l.kb} | ${l.resultado} | ${l.tarefasLidas}/${l.tarefasArquivo} | ${l.vinculosLidos}/${l.vinculosArquivo} | ${l.lb0Lida}/${l.lb0Arquivo} | ${l.lb1a10} | ${l.timephased} | ${l.avisos.length} | ${l.ms} |`)
+    .map((l) => `| ${l.arquivo} | ${l.versao} | ${l.saveVersion} | ${l.kb} | ${l.resultado} | ${l.tarefasLidas}/${l.tarefasArquivo} | ${l.vinculosLidos}/${l.vinculosArquivo} | ${l.lb0Lida}/${l.lb0Arquivo} | ${l.lb1a10} | ${l.timephased} | ${l.idaVoltaOk ? 'ok' : '—'} | ${l.avisos.length} | ${l.ms} |`)
     .join('\n')
   return [
     '# Relatório de caracterização do corpus MSPDI (gerado pelo teste de corpus)',
@@ -199,8 +202,8 @@ function relatorioMd(): string {
     '',
     '## Por arquivo',
     '',
-    '| Arquivo | Versão | SaveVersion | KB | Resultado | Tarefas lidas/arquivo | Vínculos lidos/arquivo | LB0 lida/arquivo | LB 1–10 | TimephasedData | Avisos | ms |',
-    '|' + ' --- |'.repeat(12),
+    '| Arquivo | Versão | SaveVersion | KB | Resultado | Tarefas lidas/arquivo | Vínculos lidos/arquivo | LB0 lida/arquivo | LB 1–10 | TimephasedData | Ida e volta | Avisos | ms |',
+    '|' + ' --- |'.repeat(13),
     porArquivo,
     '',
     '## Calendários dos arquivos de calendário (tarefa fictícia em memória)',
@@ -236,6 +239,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
   })
 
   describe.each(arquivos.map((f) => [relative(CORPUS_DIR, f).split(sep).join('/'), f] as const))('%s', (rel, caminho) => {
+    let importado: { linha: Linha; r: ReturnType<typeof parseMspdiXml> } | undefined
     it('importa sem exceção não tratada e sem perder UID, vínculo, % e datas reais', { timeout: TIMEOUT }, () => {
       expect(statSync(caminho).size).toBeLessThanOrEqual(MAX_MSPDI_CHARS)
       const xml = readFileSync(caminho, 'utf8')
@@ -246,7 +250,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
         tarefasArquivo: est.uids.length, tarefasLidas: 0, vinculosArquivo: est.vinculos.length, vinculosLidos: 0,
         pctArquivo: est.pct, pctLido: 0, inicioRealArquivo: est.inicioReal, inicioRealLido: 0,
         terminoRealArquivo: est.terminoReal, terminoRealLido: 0, lb0Arquivo: est.lb0, lb0Lida: 0,
-        lb1a10: est.lb1a10, timephased: est.timephased, est, resultado: 'recusado', uidsUnicos: true, avisos: [], ms: 0,
+        lb1a10: est.lb1a10, timephased: est.timephased, est, idaVoltaOk: false, resultado: 'recusado', uidsUnicos: true, avisos: [], ms: 0,
       }
       linhas.push(linha)
 
@@ -263,6 +267,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       }
       linha.ms = Math.round(performance.now() - t0)
       linha.resultado = 'importado'
+      importado = { linha, r }
       linha.avisos = r.warnings
 
       const uids = r.tasks.map((t) => t.uid)
@@ -303,6 +308,46 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
         est.valoresPersonalizados && `${est.valoresPersonalizados} valor(es) de ${est.camposPersonalizados} campo(s) personalizado(s)`,
       ].filter(Boolean)
       confere(informativo.length, `Não importado do MS Project: ${informativo.join('; ')}.`, /^Não importado do MS Project/)
+    })
+
+    // E3: ida e volta (parse -> computeSchedule -> buildMspdiXml -> validateMspdi strictOrder -> parse), sem o preenchimento de LB0
+    // da store: o teste é do parser, e a LB0 derivada da tarefa-resumo é dado calculado, não do arquivo.
+    it('faz ida e volta com strictOrder sem erro e sem alterar os campos preservados', { timeout: TIMEOUT }, () => {
+      if (!importado) return // arquivo recusado (sem tarefa): nada a exportar
+      const { linha, r } = importado
+      const inicio = r.meta.startDate ?? '2026-01-05'
+      const meta: ProjectMeta = {
+        name: r.meta.name || 'Obra', company: r.meta.company ?? '', manager: r.meta.manager ?? '',
+        startDate: inicio, statusDate: r.meta.statusDate ?? inicio, dailyIndirectCost: 0,
+      }
+      const schedule = computeSchedule(r.tasks, new WorkCalendar(inicio, r.calendar), { mode: 'forecast', statusDate: meta.statusDate })
+      const xml = buildMspdiXml({ meta, tasks: r.tasks, calendar: r.calendar, schedule })
+      expect(validateMspdi(xml, { strictOrder: true }).errors).toEqual([])
+
+      const volta = new Map(parseMspdiXml(xml).tasks.map((t) => [t.uid, t]))
+      expect(volta.size).toBe(r.tasks.length)
+      const diferencas: string[] = []
+      for (const t of r.tasks.filter((x) => !x.isSummary)) {
+        const b = volta.get(t.uid)
+        if (!b) {
+          diferencas.push(`uid ${t.uid} ausente`)
+          continue
+        }
+        const campos: [string, unknown, unknown][] = [
+          ['nome', b.name, t.name],
+          ['vínculos (UID e tipo)', b.predecessors.map((p) => [p.uid, p.type]), t.predecessors.map((p) => [p.uid, p.type])],
+          ['lag', b.predecessors.map((p) => p.lagDays), t.predecessors.map((p) => p.lagDays)],
+          ['% concluído', b.percentComplete, Math.round(t.percentComplete)],
+          ['início real', b.actualStart, t.actualStart],
+          ['término real', b.actualFinish, t.actualFinish],
+          ['duração', b.durationDays, t.durationDays],
+          ['início da LB0', b.baselineStart, t.baselineStart],
+          ['término da LB0', b.baselineFinish, t.baselineFinish],
+        ]
+        for (const [campo, depois, antes] of campos) if (JSON.stringify(depois) !== JSON.stringify(antes)) diferencas.push(`uid ${t.uid}: ${campo}`)
+      }
+      expect(diferencas).toEqual([])
+      linha.idaVoltaOk = true
     })
   })
 
@@ -358,6 +403,10 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       expect(somar(imp, 'lb1a10')).toBe(470)
       expect(somar(linhas, 'timephased')).toBe(10222)
       expect(imp.filter((l) => l.uidsUnicos)).toHaveLength(95)
+    })
+
+    it('ida e volta com strictOrder e campos preservados em 95 de 95 arquivos importáveis (AC-7)', () => {
+      expect(linhas.filter((l) => l.resultado === 'importado' && l.idaVoltaOk)).toHaveLength(95)
     })
 
     // Antes do ciclo 00003 nenhum destes tinha aviso (só o de data de status, calendário sem feriados e custos). Depois: um aviso por categoria.
