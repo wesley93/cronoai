@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Mic, CheckCheck, Ban, Clock3 } from 'lucide-vue-next'
+import { Mic, CheckCheck, Ban, Clock3 } from '@lucide/vue'
 import type { FieldReport } from '@/types/domain'
 import SitePhoto from '@/components/illustrations/SitePhoto.vue'
 

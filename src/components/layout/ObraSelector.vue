@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CalendarClock } from 'lucide-vue-next'
+import { CalendarClock } from '@lucide/vue'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import { fmtDateLong } from '@/lib/format'

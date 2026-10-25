@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Building2, Copy, FolderOpen, Plus, Settings2, Trash2, Info } from 'lucide-vue-next'
+import { Building2, Copy, FolderOpen, Plus, Settings2, Trash2, Info } from '@lucide/vue'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import ModuleHeader from '@/components/common/ModuleHeader.vue'

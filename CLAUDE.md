@@ -23,7 +23,7 @@ CronoAI é o copiloto de planejamento de obras integrado ao MS Project:
 
 | Item | Valor |
 |---|---|
-| Front | Vue 3 (Composition API, `<script setup lang="ts">`) + TypeScript strict + Vite 6 + Pinia + Tailwind 3 + Chart.js (vue-chartjs) + lucide-vue-next |
+| Front | Vue 3 (Composition API, `<script setup lang="ts">`) + TypeScript strict + Vite 6 + Pinia + Tailwind 3 + Chart.js (vue-chartjs) + @lucide/vue |
 | Testes | Vitest (jsdom) + Playwright (E2E, Chromium) |
 | Lint | ESLint 9 flat config (`eslint.config.js`): js + typescript-eslint + vue essential |
 | Node | 22 LTS ou superior (`.nvmrc`) |

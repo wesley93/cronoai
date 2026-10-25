@@ -23,7 +23,7 @@ Fonte da verdade: `CLAUDE.md` › **Stack e comandos** e › **Convenções**. C
 
 - Textos em **português**; números e datas pelos formatadores de `src/lib/format.ts` (`fmtBRL`, `fmtBRLCents`, `fmtDate`, `fmtIndex`, `fmtPct`, `fmtDays`…) — nunca `toFixed` solto na tela.
 - Tailwind com as classes utilitárias do `src/style.css` (`card`, `btn-*`, `chip-*`, `input`, `table-base`). Cores: zinc/slate, âmbar (destaque), esmeralda (ok), coral (crítico). Tema claro/escuro pela `ui` store.
-- Ícones: `lucide-vue-next`.
+- Ícones: `@lucide/vue`.
 - Gráficos (Chart.js via `vue-chartjs`): paleta validada para daltonismo (ver `components/charts/SCurveChart.vue`); legenda sempre presente com 2 ou mais séries; tabela alternativa ao gráfico.
 - Erro ao usuário pelo toast da `ui` store, em português e sem detalhe técnico.
 - Acessibilidade básica: botão com texto ou `aria-label`; cor nunca é a única pista (crítico também tem rótulo/ícone).

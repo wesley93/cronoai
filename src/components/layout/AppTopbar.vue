@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Menu, Moon, Sun, Upload, Download, KeyRound } from 'lucide-vue-next'
+import { Menu, Moon, Sun, Upload, Download, KeyRound } from '@lucide/vue'
 import { useUiStore } from '@/stores/ui'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useMsProject } from '@/lib/useMsProject'

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { FileSpreadsheet, Upload, Download, Trash2, Wand2, KeyRound, Eraser } from 'lucide-vue-next'
+import { FileSpreadsheet, Upload, Download, Trash2, Wand2, KeyRound, Eraser } from '@lucide/vue'
 import type { BudgetLine } from '@/lib/sinapiBudget'
 import { BUDGET_CSV_TEMPLATE, DEFAULT_BATCH_OPTIONS, lineDuration, lineName, lineResources, parseNumberBR } from '@/lib/sinapiBudget'
 import { useProjectStore } from '@/stores/useProjectStore'

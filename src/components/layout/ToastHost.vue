@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CheckCircle2, Info, TriangleAlert, XCircle, X } from 'lucide-vue-next'
+import { CheckCircle2, Info, TriangleAlert, XCircle, X } from '@lucide/vue'
 import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()

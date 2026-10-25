@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Info, TriangleAlert, X } from 'lucide-vue-next'
+import { Info, TriangleAlert, X } from '@lucide/vue'
 import { useProjectStore } from '@/stores/useProjectStore'
 
 const project = useProjectStore()
