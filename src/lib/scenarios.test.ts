@@ -1,15 +1,23 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { buildSeedState, useProjectStore } from '@/stores/useProjectStore'
-import { WorkCalendar, addCalendarDays } from './calendar'
+import { addCalendarDays } from './calendar'
+import { calendarioDeDias, compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
 import { analyzeDelay, crashingTargets, fastTrackOptions, recommendScenario, simulateAll, simulateCrashing, simulateFastTracking, simulateOvertime } from './scenarios'
 import { analyzeSupplies } from './supplies'
 
 const seed = buildSeedState()
-const cal = new WorkCalendar(seed.meta.startDate, seed.calendar)
-const forecast = computeSchedule(seed.tasks, cal, { mode: 'forecast', statusDate: seed.meta.statusDate })
-const ctx = { tasks: seed.tasks, calendar: seed.calendar, meta: seed.meta, forecast, origin: analyzeDelay(seed.tasks, forecast, cal).origin }
+const cals = compilarCalendarios(seed.meta.startDate, seed.calendarios, seed.calendarioPadraoUid)
+const forecast = computeSchedule(seed.tasks, cals, { mode: 'forecast', statusDate: seed.meta.statusDate })
+const ctx = {
+  tasks: seed.tasks,
+  calendarios: seed.calendarios,
+  calendarioPadraoUid: seed.calendarioPadraoUid,
+  meta: seed.meta,
+  forecast,
+  origin: analyzeDelay(seed.tasks, forecast, calendarioDeDias(cals.padrao)).origin,
+}
 
 describe('Crashing parametrizável', () => {
   it('padrão: +2 pedreiros e +1 servente na sucessora crítica (105) com memória de cálculo', () => {

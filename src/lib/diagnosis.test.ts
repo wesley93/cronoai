@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { WorkCalendar, defaultHolidays } from './calendar'
+import { defaultHolidays } from './calendar'
+import { calendarioPadrao, compilarCalendarios } from './calendarioTrabalho'
 import { buildDiagnosis } from './diagnosis'
 import { computeEvm, computePackageEvm } from './evm'
 import type { DelayAnalysis } from './scenarios'
 import type { Task } from '@/types/domain'
 
-const cal = new WorkCalendar('2026-11-03', { holidays: defaultHolidays(2026, 2029), extraWorkingDays: [] })
+const cal = compilarCalendarios('2026-11-03', [calendarioPadrao(defaultHolidays(2026, 2029))], 1)
 const semAtraso: DelayAnalysis = { originShift: 0, keysForecast: '2026-11-03', delayDays: 0, delayCalendarDays: 0, affected: [] }
 
 const argumentos = (tasks: Task[]) => ({
@@ -37,7 +38,7 @@ describe('buildDiagnosis', () => {
 
   it('tarefas sem orçamento (BAC = 0) e com atraso: some o texto de custo, o diagnóstico de prazo continua', () => {
     const tarefa: Task = {
-      uid: 7, wbs: '01.01', name: 'Estrutura', outlineLevel: 2, isSummary: false, durationDays: 10, predecessors: [],
+      uid: 7, wbs: '01.01', name: 'Estrutura', outlineLevel: 2, isSummary: false, duracaoMin: 4800, predecessors: [],
       percentComplete: 0, bac: 0, actualCost: 0, resources: [], baselineStart: '2026-11-10', baselineFinish: '2026-11-23',
     }
     const delay: DelayAnalysis = {
@@ -63,7 +64,7 @@ describe('buildDiagnosis', () => {
 
   it('BAC = 0 com custo real (AC > 0): não aparece Margem, EAC, TCPI nem auditoria de custo; o prazo continua', () => {
     const tarefa: Task = {
-      uid: 7, wbs: '01.01', name: 'Estrutura', outlineLevel: 2, isSummary: false, durationDays: 10, predecessors: [],
+      uid: 7, wbs: '01.01', name: 'Estrutura', outlineLevel: 2, isSummary: false, duracaoMin: 4800, predecessors: [],
       percentComplete: 40, bac: 0, actualCost: 5000, resources: [], baselineStart: '2026-11-10', baselineFinish: '2026-11-23',
     }
     const delay: DelayAnalysis = {
@@ -87,7 +88,7 @@ describe('buildDiagnosis', () => {
 
   it('tarefas sem orçamento e sem atraso: prazo dentro da linha de base', () => {
     const tarefa: Task = {
-      uid: 7, wbs: '01.01', name: 'Estrutura', outlineLevel: 2, isSummary: false, durationDays: 10, predecessors: [],
+      uid: 7, wbs: '01.01', name: 'Estrutura', outlineLevel: 2, isSummary: false, duracaoMin: 4800, predecessors: [],
       percentComplete: 0, bac: 0, actualCost: 0, resources: [], baselineStart: '2026-11-10', baselineFinish: '2026-11-23',
     }
     const d = buildDiagnosis(argumentos([tarefa]))
@@ -98,7 +99,7 @@ describe('buildDiagnosis', () => {
 
   it('com orçamento e sem desvio, segue o diagnóstico normal "sob controle"', () => {
     const tarefa: Task = {
-      uid: 1, wbs: '01.01', name: 'Fundação', outlineLevel: 2, isSummary: false, durationDays: 10, predecessors: [],
+      uid: 1, wbs: '01.01', name: 'Fundação', outlineLevel: 2, isSummary: false, duracaoMin: 4800, predecessors: [],
       percentComplete: 0, bac: 1000, actualCost: 0, resources: [], baselineStart: '2026-11-10', baselineFinish: '2026-11-23',
     }
     const d = buildDiagnosis(argumentos([tarefa]))

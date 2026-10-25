@@ -1,18 +1,45 @@
-// Motor de Caminho Crítico (CPM) com vínculos FS/SS/FF/SF, latência e reprogramação pela data de status.
-import type { PredecessorLink, ScheduleResult, ScheduledTask, Task } from '@/types/domain'
-import { WorkCalendar } from './calendar'
+// Motor de Caminho Crítico (CPM) em minutos úteis, com vínculos FS/SS/FF/SF, latência, calendário por tarefa
+// e reprogramação pela data de status (ciclo 00004, ADR 00003).
+//
+// Todo cálculo usa "momentos": minutos de relógio desde 00:00 da data-base. Cada calendário converte momento ↔ minuto útil.
+// Início de tarefa com duração vai para o próximo momento útil do calendário dela; o término fica no fim do último trecho
+// útil (17:00, e não 08:00 do dia seguinte); somar lag 0 não normaliza (o marco fica no término da predecessora).
+import type { Lag, PredecessorLink, ScheduleResult, ScheduledTask, Task } from '@/types/domain'
+import {
+  MINUTOS_NO_DIA_CORRIDO,
+  MINUTOS_POR_DIA_PADRAO,
+  dataDoMomento,
+  diasParaMinutos,
+  diaRelativo,
+  horaDoMomento,
+  lerDataHora,
+  minutosParaDias,
+  type CalendarioCompilado,
+  type CalendariosCompilados,
+} from './calendarioTrabalho'
 
 export interface ScheduleOptions {
   /** baseline = ignora avanço; forecast = reprograma o saldo a partir da data de status (como o MS Project). */
   mode: 'baseline' | 'forecast'
   statusDate?: string
+  /** Minutos por dia da obra, só para as folgas em dias e o restante em dias inteiros (padrão 480). */
+  minutosPorDia?: number
 }
 
 interface Edge {
   pred: number
   succ: number
   type: PredecessorLink['type']
-  lag: number
+  lag: Lag
+}
+
+/**
+ * Calendário em que o lag útil de um vínculo é contado (gate P1): o da SUCESSORA, ou o padrão da obra quando
+ * ela não tem calendário próprio. Fonte: relatos técnicos (Boyle 2018, Trajkovski 2013), sem documentação oficial;
+ * validação final pela Engenharia de planejamento no MS Project real. A regra mora só aqui, para trocar com 1 teste.
+ */
+export function calendarioDoLag(cals: CalendariosCompilados, _pred: Task, succ: Task): CalendarioCompilado {
+  return cals.de(succ.calendarioUid)
 }
 
 /** Expande vínculos que apontam para tarefas-resumo em vínculos para suas folhas. */
@@ -29,7 +56,7 @@ function buildEdges(tasks: Task[], leaves: Task[]): Edge[] {
       if (!pred || p.uid === t.uid) continue
       const targets = leafSet.has(p.uid) ? [p.uid] : pred.isSummary ? leafDescendants(pred) : []
       for (const uid of targets) {
-        if (uid !== t.uid) edges.push({ pred: uid, succ: t.uid, type: p.type, lag: p.lagDays })
+        if (uid !== t.uid) edges.push({ pred: uid, succ: t.uid, type: p.type, lag: p.lag })
       }
     }
   }
@@ -47,8 +74,8 @@ function topoSort(leaves: Task[], edges: Edge[]): { order: number[]; validEdges:
   // Fila estável pela ordem da EAP
   const queue = leaves.filter((t) => indeg.get(t.uid) === 0).map((t) => t.uid)
   const order: number[] = []
-  while (queue.length) {
-    const uid = queue.shift()!
+  for (let head = 0; head < queue.length; head++) {
+    const uid = queue[head]
     order.push(uid)
     for (const e of out.get(uid) ?? []) {
       const n = (indeg.get(e.succ) ?? 0) - 1
@@ -58,24 +85,30 @@ function topoSort(leaves: Task[], edges: Edge[]): { order: number[]; validEdges:
   }
   if (order.length < leaves.length) {
     // Ciclo: adiciona as restantes na ordem da EAP e ignora as arestas problemáticas
-    for (const t of leaves) if (!order.includes(t.uid)) order.push(t.uid)
+    const placed = new Set(order)
+    for (const t of leaves) if (!placed.has(t.uid)) order.push(t.uid)
   }
   const pos = new Map(order.map((uid, i) => [uid, i]))
   const validEdges = edges.filter((e) => (pos.get(e.pred) ?? 0) < (pos.get(e.succ) ?? 0))
   return { order, validEdges }
 }
 
-export function computeSchedule(
-  tasks: Task[],
-  cal: WorkCalendar,
-  opts: ScheduleOptions,
-): ScheduleResult {
+/** Fim de uma tarefa que começa em `inicio` (já normalizado) e dura `dur` minutos úteis. */
+const terminarEm = (cal: CalendarioCompilado, inicio: number, dur: number): number => (dur > 0 ? cal.somarUteis(inicio, dur) : inicio)
+
+/** Início de tarefa: com duração, vai para o próximo momento útil; marco (duração 0) fica onde está. */
+const iniciarEm = (cal: CalendarioCompilado, m: number, dur: number): number => (dur > 0 ? cal.proximoUtil(m) : m)
+
+export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts: ScheduleOptions): ScheduleResult {
   const leaves = tasks.filter((t) => !t.isSummary)
   const byUid = new Map(leaves.map((t) => [t.uid, t]))
   const { order, validEdges } = topoSort(leaves, buildEdges(tasks, leaves))
   const forecast = opts.mode === 'forecast' && !!opts.statusDate
-  const statusIdx = forecast ? cal.indexOnOrBefore(opts.statusDate!) : -1
-  const dataIdx = statusIdx + 1
+  const base = cals.base
+  const mpd = opts.minutosPorDia ?? MINUTOS_POR_DIA_PADRAO
+  const statusDia = forecast ? diaRelativo(base, opts.statusDate!) : 0
+  const calOf = new Map(leaves.map((t) => [t.uid, cals.de(t.calendarioUid)]))
+  const cal = (uid: number) => calOf.get(uid)!
 
   const incoming = new Map<number, Edge[]>()
   const outgoing = new Map<number, Edge[]>()
@@ -85,140 +118,179 @@ export function computeSchedule(
     incoming.get(e.succ)!.push(e)
     outgoing.get(e.pred)!.push(e)
   }
+  const lagCal = (e: Edge) => calendarioDoLag(cals, byUid.get(e.pred)!, byUid.get(e.succ)!)
+  /** Momento depois de somar o lag do vínculo (no calendário do lag). */
+  const maisLag = (m: number, e: Edge) => lagCal(e).somarUteis(m, e.lag.minutos)
+  /** Momento antes de descontar o lag do vínculo (volta). */
+  const menosLag = (m: number, e: Edge) => lagCal(e).somarUteis(m, -e.lag.minutos)
 
   const es = new Map<number, number>()
   const ef = new Map<number, number>()
-  const remaining = new Map<number, number>()
+  const restante = new Map<number, number>()
   const started = (t: Task) => forecast && t.percentComplete > 0
+  const done = (t: Task) => forecast && t.percentComplete >= 100
 
-  const linkDrivenStart = (t: Task, dur: number): number => {
+  /** Início do restante: primeiro momento útil depois do dia da data de status (calendário da tarefa). */
+  const aposStatus = (c: CalendarioCompilado) => c.proximoUtil((statusDia + 1) * MINUTOS_NO_DIA_CORRIDO)
+
+  const linkDrivenStart = (t: Task, dur: number, c: CalendarioCompilado): number => {
     let start = 0
     for (const e of incoming.get(t.uid) ?? []) {
       const pEs = es.get(e.pred) ?? 0
       const pEf = ef.get(e.pred) ?? 0
       switch (e.type) {
-        case 'FS': start = Math.max(start, pEf + e.lag); break
-        case 'SS': start = Math.max(start, pEs + e.lag); break
-        case 'FF': start = Math.max(start, pEf + e.lag - dur); break
-        case 'SF': start = Math.max(start, pEs + e.lag - dur); break
+        case 'FS': start = Math.max(start, maisLag(pEf, e)); break
+        case 'SS': start = Math.max(start, maisLag(pEs, e)); break
+        case 'FF': start = Math.max(start, c.somarUteis(maisLag(pEf, e), -dur)); break
+        case 'SF': start = Math.max(start, c.somarUteis(maisLag(pEs, e), -dur)); break
       }
     }
-    if (t.snet) start = Math.max(start, cal.indexOnOrAfter(t.snet))
+    const r = t.restricao
+    if (r?.tipo === 'SNET') {
+      const dh = lerDataHora(r.data)
+      if (dh) start = Math.max(start, c.proximoUtil(diaRelativo(base, dh.data) * MINUTOS_NO_DIA_CORRIDO + (dh.minuto ?? 0)))
+    }
     return start
   }
 
   // ---------- Passo de ida ----------
   for (const uid of order) {
     const t = byUid.get(uid)!
-    const dur = Math.max(0, Math.round(t.durationDays))
-    if (forecast && t.percentComplete >= 100) {
-      const s = t.actualStart ? cal.indexOnOrAfter(t.actualStart) : Math.min(linkDrivenStart(t, dur), statusIdx)
-      const f = t.actualFinish ? cal.indexOnOrBefore(t.actualFinish) + 1 : Math.min(s + dur, dataIdx)
+    const c = cal(uid)
+    const dur = Math.max(0, Math.round(t.duracaoMin))
+    const inicioReal = t.actualStart ? c.proximoUtil(diaRelativo(base, t.actualStart) * MINUTOS_NO_DIA_CORRIDO) : undefined
+    if (done(t)) {
+      const s = inicioReal ?? Math.min(iniciarEm(c, linkDrivenStart(t, dur, c), dur), c.inicioDoDiaUtilNoOuAntes(statusDia))
+      const f = t.actualFinish
+        ? c.fimUtilAte((diaRelativo(base, t.actualFinish) + 1) * MINUTOS_NO_DIA_CORRIDO)
+        : Math.min(terminarEm(c, s, dur), c.fimUtilAte(aposStatus(c)))
       es.set(uid, s)
       ef.set(uid, Math.max(s, f))
-      remaining.set(uid, 0)
+      restante.set(uid, 0)
     } else if (started(t)) {
-      const s = t.actualStart ? cal.indexOnOrAfter(t.actualStart) : Math.min(linkDrivenStart(t, dur), statusIdx)
-      const rem = Math.max(1, Math.ceil(dur * (1 - t.percentComplete / 100) - 1e-9))
+      const s = inicioReal ?? Math.min(iniciarEm(c, linkDrivenStart(t, dur, c), dur), c.inicioDoDiaUtilNoOuAntes(statusDia))
+      // E1: o restante segue em dias inteiros, ⌈dur × (1 − %)⌉ com mínimo de 1 dia, para não mudar nenhuma data
+      const restDias = Math.max(1, Math.ceil(minutosParaDias(dur, mpd) * (1 - t.percentComplete / 100) - 1e-9))
+      const rem = diasParaMinutos(restDias, mpd)
       es.set(uid, s)
-      ef.set(uid, Math.max(s, dataIdx) + rem)
-      remaining.set(uid, rem)
+      ef.set(uid, terminarEm(c, Math.max(s, aposStatus(c)), rem))
+      restante.set(uid, rem)
     } else {
-      const s = Math.max(linkDrivenStart(t, dur), forecast ? dataIdx : 0)
+      const s = iniciarEm(c, Math.max(linkDrivenStart(t, dur, c), forecast ? aposStatus(c) : 0), dur)
       es.set(uid, s)
-      ef.set(uid, s + dur)
-      remaining.set(uid, dur)
+      ef.set(uid, terminarEm(c, s, dur))
+      restante.set(uid, dur)
     }
   }
 
-  const projectEf = Math.max(0, ...order.map((u) => ef.get(u) ?? 0))
+  const terminoProjeto = order.reduce((m, u) => Math.max(m, ef.get(u) ?? 0), 0)
+
+  // Duração efetiva (do início ao término cedo), em minutos úteis do calendário da tarefa
+  const efetiva = (uid: number) => cal(uid).minutosUteisEntre(es.get(uid)!, ef.get(uid)!)
 
   // ---------- Passo de volta ----------
   const ls = new Map<number, number>()
   const lf = new Map<number, number>()
   for (let i = order.length - 1; i >= 0; i--) {
     const uid = order[i]
-    const d = (ef.get(uid) ?? 0) - (es.get(uid) ?? 0)
-    let late = projectEf
+    const c = cal(uid)
+    const d = efetiva(uid)
+    /** Término tarde que corresponde a um limite de INÍCIO tarde (LF = LS + d). */
+    const doInicio = (limite: number) => terminarEm(c, iniciarEm(c, limite, d), d)
+    let late = terminoProjeto
     for (const e of outgoing.get(uid) ?? []) {
       const succ = byUid.get(e.succ)!
       if (started(succ)) continue // sucessora já iniciada não restringe a predecessora
-      const sLs = ls.get(e.succ) ?? projectEf
-      const sLf = lf.get(e.succ) ?? projectEf
+      const sLs = ls.get(e.succ) ?? terminoProjeto
+      const sLf = lf.get(e.succ) ?? terminoProjeto
       switch (e.type) {
-        case 'FS': late = Math.min(late, sLs - e.lag); break
-        case 'SS': late = Math.min(late, sLs - e.lag + d); break
-        case 'FF': late = Math.min(late, sLf - e.lag); break
-        case 'SF': late = Math.min(late, sLf - e.lag + d); break
+        case 'FS': late = Math.min(late, menosLag(sLs, e)); break
+        case 'SS': late = Math.min(late, doInicio(menosLag(sLs, e))); break
+        case 'FF': late = Math.min(late, menosLag(sLf, e)); break
+        case 'SF': late = Math.min(late, doInicio(menosLag(sLf, e))); break
       }
     }
     lf.set(uid, late)
-    ls.set(uid, late - d)
+    ls.set(uid, c.somarUteis(late, -d))
   }
 
   // ---------- Folgas e datas ----------
   const result = new Map<number, ScheduledTask>()
   for (const uid of order) {
     const t = byUid.get(uid)!
+    const c = cal(uid)
     const s = es.get(uid)!
     const f = ef.get(uid)!
-    const done = forecast && t.percentComplete >= 100
-    const totalFloat = done ? 0 : lf.get(uid)! - f
+    const concluida = done(t)
+    const folgaTotal = concluida ? 0 : c.minutosUteisEntre(f, lf.get(uid)!)
 
-    let freeFloat = projectEf - f
+    let folgaLivre = c.minutosUteisEntre(f, terminoProjeto)
     for (const e of outgoing.get(uid) ?? []) {
       const sEs = es.get(e.succ)!
       const sEf = ef.get(e.succ)!
       let slack: number
       switch (e.type) {
-        case 'FS': slack = sEs - e.lag - f; break
-        case 'SS': slack = sEs - e.lag - s; break
-        case 'FF': slack = sEf - e.lag - f; break
-        case 'SF': slack = sEf - e.lag - s; break
+        case 'FS': slack = c.minutosUteisEntre(f, menosLag(sEs, e)); break
+        case 'SS': slack = c.minutosUteisEntre(s, menosLag(sEs, e)); break
+        case 'FF': slack = c.minutosUteisEntre(f, menosLag(sEf, e)); break
+        case 'SF': slack = c.minutosUteisEntre(s, menosLag(sEf, e)); break
       }
-      freeFloat = Math.min(freeFloat, slack)
+      folgaLivre = Math.min(folgaLivre, slack)
     }
 
-    const isMilestone = f === s
-    let start = cal.dateAt(s)
-    let finish = isMilestone ? (s > 0 ? cal.dateAt(s - 1) : cal.dateAt(0)) : cal.dateAt(f - 1)
-    if (isMilestone) start = finish
+    const marco = f === s
+    const dataTermino = (m: number) => dataDoMomento(base, c.fimUtilAte(m) - 1)
+    const inicioNorm = c.proximoUtil(s)
+    const earlyFinish = marco ? undefined : dataTermino(f)
+    // Marco: data do último trecho útil até o momento (o dia da predecessora); no início do projeto, o 1º dia útil
+    let finish = marco ? (c.uteisAte(s) === 0 ? dataDoMomento(base, inicioNorm) : dataTermino(s)) : dataTermino(f)
+    let start = marco ? finish : dataDoMomento(base, s)
     if (forecast && t.percentComplete > 0 && t.actualStart) start = t.actualStart
-    if (done && t.actualFinish) finish = t.actualFinish
+    if (concluida && t.actualFinish) finish = t.actualFinish
 
+    const folgaLivreMin = concluida ? 0 : Math.max(0, folgaLivre)
     result.set(uid, {
       uid,
-      es: s,
-      ef: f,
-      ls: ls.get(uid)!,
-      lf: lf.get(uid)!,
-      totalFloat,
-      freeFloat: done ? 0 : Math.max(0, freeFloat),
-      critical: !done && totalFloat <= 0,
+      inicioCedoMin: s,
+      terminoCedoMin: f,
+      inicioTardeMin: ls.get(uid)!,
+      terminoTardeMin: lf.get(uid)!,
+      earlyStart: dataDoMomento(base, inicioNorm),
+      earlyFinish: earlyFinish ?? finish,
+      lateStart: dataDoMomento(base, c.proximoUtil(ls.get(uid)!)),
+      lateFinish: dataTermino(lf.get(uid)!),
       start,
       finish,
-      duration: f - s,
-      remaining: remaining.get(uid)!,
+      inicioHora: horaDoMomento(marco ? s : inicioNorm),
+      terminoHora: horaDoMomento(c.fimUtilAte(f)),
+      folgaTotalMin: folgaTotal,
+      folgaLivreMin,
+      totalFloat: minutosParaDias(folgaTotal, mpd),
+      freeFloat: minutosParaDias(folgaLivreMin, mpd),
+      critical: !concluida && folgaTotal <= 0,
+      duracaoMin: c.minutosUteisEntre(s, f),
+      restanteMin: restante.get(uid)!,
     })
   }
 
   const scheduled = [...result.values()]
-  const projectStart = scheduled.reduce((m, x) => (x.start < m ? x.start : m), scheduled[0]?.start ?? cal.baseDate)
-  const projectFinish = scheduled.reduce((m, x) => (x.finish > m ? x.finish : m), scheduled[0]?.finish ?? cal.baseDate)
+  const projectStart = scheduled.reduce((m, x) => (x.start < m ? x.start : m), scheduled[0]?.start ?? base)
+  const projectFinish = scheduled.reduce((m, x) => (x.finish > m ? x.finish : m), scheduled[0]?.finish ?? base)
   const criticalPath = scheduled
     .filter((x) => x.critical)
-    .sort((a, b) => a.es - b.es || a.ef - b.ef)
+    .sort((a, b) => a.inicioCedoMin - b.inicioCedoMin || a.terminoCedoMin - b.terminoCedoMin)
     .map((x) => x.uid)
 
-  return { byUid: result, projectStart, projectFinish, projectEf, criticalPath, order }
+  return { byUid: result, projectStart, projectFinish, terminoProjetoMin: terminoProjeto, criticalPath, order }
 }
 
 /** Grava a linha de base (datas e duração) a partir de um cálculo sem avanço. */
 export function withBaseline(tasks: Task[], baseline: ScheduleResult, onlyMissing = false): Task[] {
   return tasks.map((t) => {
     const s = baseline.byUid.get(t.uid)
-    if (!s || (onlyMissing && t.baselineStart)) return t
-    return { ...t, baselineStart: s.start, baselineFinish: s.finish, baselineDuration: s.duration }
+    // Linha de base incompleta (só início ou só término) é a do arquivo: mantém (CR-12)
+    if (!s || (onlyMissing && (t.baselineStart || t.baselineFinish))) return t
+    return { ...t, baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin }
   })
 }
 

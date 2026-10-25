@@ -3,11 +3,38 @@ import type { RegimeSinapi, UF } from '@/data/ufs'
 
 export type LinkType = 'FS' | 'SS' | 'FF' | 'SF'
 
+/** Faixa de trabalho dentro do dia, em minutos desde 00:00 (0–1440; 1440 = 24:00). */
+export interface IntervaloTrabalho {
+  de: number
+  ate: number
+}
+
+/** Dia com horário próprio (lista vazia = dia não útil). `data` é `yyyy-mm-dd`. */
+export interface ExcecaoCalendario {
+  data: string
+  intervalos: IntervaloTrabalho[]
+}
+
+/** Calendário da obra: semana por intervalo de horário e exceções (ADR 00003). */
+export interface CalendarioObra {
+  /** UID do calendário (no MSPDI, `Calendar/UID`). */
+  uid: number
+  nome: string
+  /** 7 posições: 0 = domingo … 6 = sábado; no máximo 5 intervalos por dia (esquema MSPDI). */
+  semana: IntervaloTrabalho[][]
+  excecoes: ExcecaoCalendario[]
+}
+
+/** Latência do vínculo, em minutos inteiros (negativa = antecipação). `codigoMspdi` guarda o `LagFormat` do arquivo. */
+export type Lag = { tipo: 'util'; minutos: number; codigoMspdi?: number }
+
+/** Restrição de data da tarefa. `data` é `yyyy-mm-dd` (início do expediente) ou `yyyy-mm-ddThh:mm`, hora local sem fuso. */
+export type Restricao = { tipo: 'SNET'; data: string; inferida?: true }
+
 export interface PredecessorLink {
   uid: number
   type: LinkType
-  /** Latência em dias úteis (pode ser negativa = antecipação). */
-  lagDays: number
+  lag: Lag
 }
 
 export const RESOURCE_KINDS = [
@@ -37,8 +64,10 @@ export interface Task {
   name: string
   outlineLevel: number
   isSummary: boolean
-  /** Duração planejada (dias úteis). Para resumo é calculada. */
-  durationDays: number
+  /** Duração planejada em minutos úteis (ADR 00003). Para resumo é calculada. */
+  duracaoMin: number
+  /** Calendário da tarefa (UID em `ProjectState.calendarios`); ausente = padrão da obra. */
+  calendarioUid?: number
   predecessors: PredecessorLink[]
   percentComplete: number
   actualStart?: string
@@ -53,14 +82,15 @@ export interface Task {
   leadTimeDays?: number
   baselineStart?: string
   baselineFinish?: string
-  baselineDuration?: number
-  /** Restrição "Não iniciar antes de" (ISO). */
-  snet?: string
+  baselineDuracaoMin?: number
+  /** Restrição de data (E1: "Não iniciar antes de"). */
+  restricao?: Restricao
   /** Pavimentos atendidos [de, até] — usado pelo match semântico. */
   floors?: [number, number]
   notes?: string
 }
 
+/** Configuração simples de calendário (seg–sex, feriados e dias extras), só para `WorkCalendar` (contas por dia útil). */
 export interface WorkCalendarConfig {
   /** Feriados / dias não úteis (ISO yyyy-mm-dd). */
   holidays: string[]
@@ -85,29 +115,46 @@ export interface ProjectMeta {
   regimeSinapi?: RegimeSinapi
   /** Data-base da tabela SINAPI (AAAA-MM). */
   dataBaseSinapi?: string
+  /** Minutos de trabalho por dia, só para exibir dias (ausente = 480). */
+  minutosPorDia?: number
 }
 
 export interface ScheduledTask {
   uid: number
-  es: number
-  ef: number
-  ls: number
-  lf: number
+  /** Momentos em minutos de relógio desde 00:00 da data-base da obra (início e término são os cedo e os tarde). */
+  inicioCedoMin: number
+  terminoCedoMin: number
+  inicioTardeMin: number
+  terminoTardeMin: number
+  /** Datas (yyyy-mm-dd) dos momentos cedo e tarde. */
+  earlyStart: string
+  earlyFinish: string
+  lateStart: string
+  lateFinish: string
+  /** Início e término da tarefa (datas reais quando houver). */
+  start: string
+  finish: string
+  /** Hora (hh:mm) do início e do término calculados. */
+  inicioHora: string
+  terminoHora: string
+  /** Folgas em minutos úteis do calendário da tarefa. */
+  folgaTotalMin: number
+  folgaLivreMin: number
+  /** Folgas em dias (minutos ÷ minutos por dia da obra; pode ser fracionário). */
   totalFloat: number
   freeFloat: number
   critical: boolean
-  start: string
-  finish: string
-  /** Duração efetiva usada pelo cálculo (dias úteis). */
-  duration: number
-  remaining: number
+  /** Duração efetiva usada pelo cálculo, em minutos úteis. */
+  duracaoMin: number
+  restanteMin: number
 }
 
 export interface ScheduleResult {
   byUid: Map<number, ScheduledTask>
   projectStart: string
   projectFinish: string
-  projectEf: number
+  /** Momento do término do projeto (minutos desde 00:00 da data-base). */
+  terminoProjetoMin: number
   criticalPath: number[]
   /** Ordem topológica (UIDs folha). */
   order: number[]
@@ -204,7 +251,9 @@ export interface RecoveryCost {
 export interface ProjectState {
   meta: ProjectMeta
   tasks: Task[]
-  calendar: WorkCalendarConfig
+  calendarios: CalendarioObra[]
+  /** UID do calendário padrão da obra (o das tarefas sem `calendarioUid`). */
+  calendarioPadraoUid: number
   reports: FieldReport[]
   restrictions: SiteRestriction[]
   materials: MaterialItem[]

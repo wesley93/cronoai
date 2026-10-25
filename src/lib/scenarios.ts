@@ -1,7 +1,18 @@
 // Efeito dominó e simulador de recuperação (Crashing, Fast Tracking e Hora Extra).
-import type { ProjectMeta, ScenarioKind, ScheduleResult, Task, WorkCalendarConfig } from '@/types/domain'
+import type { CalendarioObra, ProjectMeta, ScenarioKind, ScheduleResult, Task } from '@/types/domain'
 import { HOURLY_RATES } from '@/data/seed'
 import { WorkCalendar, diffCalendarDays, nextSaturdays } from './calendar'
+import {
+  MINUTOS_NO_DIA_CORRIDO,
+  MINUTOS_POR_DIA_PADRAO,
+  calendarioDeDias,
+  compilarCalendarios,
+  comDiasExtras,
+  diasExtrasDo,
+  diasParaMinutos,
+  diaRelativo,
+  minutosParaDias,
+} from './calendarioTrabalho'
 import { computeSchedule, downstreamOf } from './cpm'
 import { normalizeText } from './wbs'
 
@@ -56,7 +67,7 @@ export function analyzeDelay(tasks: Task[], forecast: ScheduleResult, baseCal: W
     .sort((a, b) => {
       const pa = a.percentComplete > 0 ? 0 : 1
       const pb = b.percentComplete > 0 ? 0 : 1
-      return pa - pb || forecast.byUid.get(a.uid)!.es - forecast.byUid.get(b.uid)!.es
+      return pa - pb || forecast.byUid.get(a.uid)!.inicioCedoMin - forecast.byUid.get(b.uid)!.inicioCedoMin
     })
   const origin = candidates[0]
 
@@ -64,7 +75,7 @@ export function analyzeDelay(tasks: Task[], forecast: ScheduleResult, baseCal: W
     ? downstreamOf(leaves, origin.uid)
         .map((uid) => ({ uid, shiftDays: late(leaves.find((t) => t.uid === uid)!), critical: !!forecast.byUid.get(uid)?.critical }))
         .filter((a) => a.shiftDays > 0)
-        .sort((a, b) => forecast.byUid.get(a.uid)!.es - forecast.byUid.get(b.uid)!.es)
+        .sort((a, b) => forecast.byUid.get(a.uid)!.inicioCedoMin - forecast.byUid.get(b.uid)!.inicioCedoMin)
     : []
 
   return {
@@ -129,7 +140,8 @@ export interface ScenarioOption {
 
 interface Ctx {
   tasks: Task[]
-  calendar: WorkCalendarConfig
+  calendarios: CalendarioObra[]
+  calendarioPadraoUid: number
   meta: ProjectMeta
   forecast: ScheduleResult
   origin?: Task
@@ -142,14 +154,17 @@ const br = (iso: string) => iso.split('-').reverse().join('/')
 const shortName = (name: string) =>
   name.replace('Alvenaria de vedação bloco cerâmico 14x19x29', 'Alvenaria').replace('Estrutura de concreto armado fck 30', 'Estrutura')
 
-function reschedule(ctx: Ctx, tasks: Task[], calendar: WorkCalendarConfig) {
-  const cal = new WorkCalendar(ctx.meta.startDate, calendar)
-  return { cal, schedule: computeSchedule(tasks, cal, { mode: 'forecast', statusDate: ctx.meta.statusDate }) }
+const minutosPorDiaDe = (ctx: Ctx) => ctx.meta.minutosPorDia ?? MINUTOS_POR_DIA_PADRAO
+
+function reschedule(ctx: Ctx, tasks: Task[], calendarios: CalendarioObra[]) {
+  const cals = compilarCalendarios(ctx.meta.startDate, calendarios, ctx.calendarioPadraoUid)
+  const schedule = computeSchedule(tasks, cals, { mode: 'forecast', statusDate: ctx.meta.statusDate, minutosPorDia: minutosPorDiaDe(ctx) })
+  return { cals, schedule }
 }
 
 function recovered(ctx: Ctx, newFinish: string): number {
-  const cal = new WorkCalendar(ctx.meta.startDate, ctx.calendar)
-  return workingVariance(cal, newFinish, ctx.forecast.projectFinish)
+  const cals = compilarCalendarios(ctx.meta.startDate, ctx.calendarios, ctx.calendarioPadraoUid)
+  return workingVariance(calendarioDeDias(cals.padrao), newFinish, ctx.forecast.projectFinish)
 }
 
 const notApplicable = (kind: ScenarioKind, title: string, reason: string, ctx: Ctx): ScenarioResult => ({
@@ -168,7 +183,8 @@ export function mainTrade(t: Task): { resource: string; units: number } | undefi
 
 /** Tarefas que podem ser comprimidas: não iniciadas e com equipe; críticas e sucessoras da origem do atraso primeiro. */
 export function crashingTargets(ctx: Ctx): ScenarioOption[] {
-  const leaves = ctx.tasks.filter((t) => !t.isSummary && t.percentComplete === 0 && t.durationDays > 1 && mainTrade(t))
+  const mpd = minutosPorDiaDe(ctx)
+  const leaves = ctx.tasks.filter((t) => !t.isSummary && t.percentComplete === 0 && minutosParaDias(t.duracaoMin, mpd) > 1 && mainTrade(t))
   const downstream = new Set(ctx.origin ? downstreamOf(ctx.tasks.filter((t) => !t.isSummary), ctx.origin.uid) : [])
   const crit = (t: Task) => !!ctx.forecast.byUid.get(t.uid)?.critical
   return leaves
@@ -176,7 +192,7 @@ export function crashingTargets(ctx: Ctx): ScenarioOption[] {
       (a, b) =>
         Number(crit(b)) - Number(crit(a)) ||
         Number(downstream.has(b.uid)) - Number(downstream.has(a.uid)) ||
-        ctx.forecast.byUid.get(a.uid)!.es - ctx.forecast.byUid.get(b.uid)!.es,
+        ctx.forecast.byUid.get(a.uid)!.inicioCedoMin - ctx.forecast.byUid.get(b.uid)!.inicioCedoMin,
     )
     .map((t) => {
       const trade = mainTrade(t)!
@@ -199,15 +215,17 @@ export function simulateCrashing(ctx: Ctx, p: ScenarioParams['crashing'] = DEFAU
   const addS = Math.max(0, Math.round(p.addServentes))
   if (add + addS === 0) return notApplicable('crashing', title, 'Informe ao menos 1 profissional adicional.', ctx)
 
-  const raw = (target.durationDays * trade.units) / (trade.units + add)
+  const mpd = minutosPorDiaDe(ctx)
+  const durDias = minutosParaDias(target.duracaoMin, mpd)
+  const raw = (durDias * trade.units) / (trade.units + add)
   const newDuration = Math.max(1, Math.ceil(raw * CONGESTION_FACTOR - 1e-9))
   const resources = target.resources.map((r) =>
     r.resource === trade.resource ? { ...r, units: r.units + add } : r.resource === 'Servente' ? { ...r, units: r.units + addS } : r,
   )
   if (!resources.some((r) => r.resource === 'Servente') && addS > 0) resources.push({ resource: 'Servente', units: addS })
-  const patch: Partial<Task> = { durationDays: newDuration, resources }
+  const patch: Partial<Task> = { duracaoMin: diasParaMinutos(newDuration, mpd), resources }
   const tasks = ctx.tasks.map((t) => (t.uid === target.uid ? { ...t, ...patch } : t))
-  const { schedule } = reschedule(ctx, tasks, ctx.calendar)
+  const { schedule } = reschedule(ctx, tasks, ctx.calendarios)
   const days = recovered(ctx, schedule.projectFinish)
   const critical = !!ctx.forecast.byUid.get(target.uid)?.critical
 
@@ -236,13 +254,13 @@ export function simulateCrashing(ctx: Ctx, p: ScenarioParams['crashing'] = DEFAU
       ? `A equipe passa a ${Math.round(density * 100)}% da original. Acima de ~135% a frente congestiona (perda de ${Math.round((CONGESTION_FACTOR - 1) * 100)}% já considerada).`
       : 'Atenção: a tarefa escolhida não está no caminho crítico — reduzir a duração dela não antecipa a entrega.',
     details: [
-      { label: 'Duração', value: `${target.durationDays} → ${newDuration} dias úteis` },
+      { label: 'Duração', value: `${num(durDias)} → ${newDuration} dias úteis` },
       { label: 'Equipe', value: `${trade.units} → ${trade.units + add} ${trade.resource.toLowerCase()}(s)` },
       { label: 'Mão de obra extra', value: fmt(labor) },
       { label: 'Mobilização/EPI', value: fmt(mobilization) },
     ],
     memory: [
-      `Duração nova = ⌈${target.durationDays} × ${trade.units} ÷ (${trade.units} + ${add}) × ${num(CONGESTION_FACTOR)}⌉ = ⌈${num(raw * CONGESTION_FACTOR)}⌉ = ${newDuration} d.u.`,
+      `Duração nova = ⌈${num(durDias)} × ${trade.units} ÷ (${trade.units} + ${add}) × ${num(CONGESTION_FACTOR)}⌉ = ⌈${num(raw * CONGESTION_FACTOR)}⌉ = ${newDuration} d.u.`,
       `Mão de obra extra = (${add} × ${fmtRate(rateO)}/h + ${addS} × ${fmtRate(rateS)}/h) × 8 h × ${newDuration} d = ${fmt(labor)}`,
       `Mobilização = ${add + addS} × ${fmt(MOBILIZATION_PER_WORKER)} = ${fmt(mobilization)}`,
       `CPM recalculado: entrega ${br(ctx.forecast.projectFinish)} → ${br(schedule.projectFinish)} (${days} d.u.)`,
@@ -264,7 +282,7 @@ export function fastTrackOptions(ctx: Ctx): ScenarioOption[] {
     .filter((t) => t.percentComplete === 0)
     .flatMap((succ) =>
       succ.predecessors
-        .filter((l) => l.type === 'FS' && (byUid.get(l.uid)?.durationDays ?? 0) > 0)
+        .filter((l) => l.type === 'FS' && (byUid.get(l.uid)?.duracaoMin ?? 0) > 0)
         .map((l) => ({ pred: byUid.get(l.uid)!, succ })),
     )
     .sort(
@@ -289,16 +307,20 @@ export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking']
     return notApplicable('fast-tracking', title, 'Não há vínculo Término-Início (FS) disponível para paralelizar.', ctx)
   }
 
+  const mpd = minutosPorDiaDe(ctx)
   const lag = Math.max(0, Math.round(p.lagDays))
-  const oldLag = succ.predecessors.find((l) => l.uid === pred.uid)?.lagDays ?? 0
-  const predecessors = succ.predecessors.map((l) => (l.uid === pred.uid ? { ...l, type: 'SS' as const, lagDays: lag } : l))
+  const antigo = succ.predecessors.find((l) => l.uid === pred.uid)?.lag
+  const oldLag = antigo ? minutosParaDias(antigo.minutos, mpd) : 0
+  const predecessors = succ.predecessors.map((l) =>
+    l.uid === pred.uid ? { ...l, type: 'SS' as const, lag: { tipo: 'util' as const, minutos: diasParaMinutos(lag, mpd) } } : l,
+  )
   const patch: Partial<Task> = { predecessors }
   const tasks = ctx.tasks.map((t) => (t.uid === succ.uid ? { ...t, ...patch } : t))
-  const { schedule } = reschedule(ctx, tasks, ctx.calendar)
+  const { schedule } = reschedule(ctx, tasks, ctx.calendarios)
   const days = recovered(ctx, schedule.projectFinish)
 
   const predSched = ctx.forecast.byUid.get(pred.uid)!
-  const predDur = Math.max(1, predSched.ef - predSched.es)
+  const predDur = Math.max(1, minutosParaDias(predSched.duracaoMin, mpd))
   const overlap = Math.max(0, Math.min(1, (predDur - lag) / predDur))
   const risk: RiskLevel = overlap > 0.6 ? 'Alto' : overlap > 0.3 ? 'Médio' : 'Baixo'
   const contingency = succ.bac * REWORK_CONTINGENCY * overlap
@@ -340,25 +362,31 @@ export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking']
 export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAULT_SCENARIO_PARAMS.overtime): ScenarioResult {
   const title = 'Hora Extra (Sábados)'
   const wanted = Math.max(1, Math.min(8, Math.round(p.saturdays)))
-  const days = nextSaturdays(ctx.meta.statusDate, wanted + ctx.calendar.extraWorkingDays.length + 4)
-    .filter((d) => !ctx.calendar.extraWorkingDays.includes(d) && !ctx.calendar.holidays.includes(d))
+  const padrao = ctx.calendarios.find((c) => c.uid === ctx.calendarioPadraoUid)
+  if (!padrao) return notApplicable('overtime', title, 'O calendário padrão da obra não existe.', ctx)
+  const extras = diasExtrasDo(padrao)
+  const feriados = padrao.excecoes.filter((ex) => ex.intervalos.length === 0).map((ex) => ex.data)
+  const days = nextSaturdays(ctx.meta.statusDate, wanted + extras.length + 4)
+    .filter((d) => !extras.includes(d) && !feriados.includes(d))
     .slice(0, wanted)
   if (!days.length) return notApplicable('overtime', title, 'Os próximos sábados já estão no calendário de trabalho.', ctx)
 
-  const calendar = { ...ctx.calendar, extraWorkingDays: [...ctx.calendar.extraWorkingDays, ...days].sort() }
-  const { cal, schedule } = reschedule(ctx, ctx.tasks, calendar)
-  const gained = recovered(ctx, schedule.projectFinish)
-  const dataIdx = cal.indexOnOrBefore(ctx.meta.statusDate) + 1
+  // Hora extra = dia útil extra (exceção útil) no calendário padrão, com o expediente de um dia útil comum
+  const calendarios = ctx.calendarios.map((c) => (c.uid === padrao.uid ? comDiasExtras(c, days) : c))
+  const { cals, schedule } = reschedule(ctx, ctx.tasks, calendarios)
+  const gained = recovered({ ...ctx, calendarios }, schedule.projectFinish)
+  const aposStatus = cals.padrao.proximoUtil((diaRelativo(cals.base, ctx.meta.statusDate) + 1) * MINUTOS_NO_DIA_CORRIDO)
 
   // Custo de HE: todas as equipes com frente ativa nos sábados convocados
   let overtimeCost = 0
   let workers = 0
   const byTask = new Map<string, number>()
   for (const day of days) {
-    const idx = cal.indexOnOrAfter(day)
+    const inicioDia = diaRelativo(cals.base, day) * MINUTOS_NO_DIA_CORRIDO
     for (const t of ctx.tasks.filter((x) => !x.isSummary)) {
       const s = schedule.byUid.get(t.uid)
-      if (!s || idx < Math.max(s.es, dataIdx) || idx >= s.ef) continue
+      // Frente ativa no dia: o restante já começou (nunca antes da data de status) e ainda não terminou
+      if (!s || Math.max(s.inicioCedoMin, aposStatus) >= inicioDia + MINUTOS_NO_DIA_CORRIDO || s.terminoCedoMin <= inicioDia) continue
       for (const r of t.resources) {
         const c = r.units * 8 * rateOf(r.resource) * (1 + OVERTIME_PREMIUM)
         overtimeCost += c

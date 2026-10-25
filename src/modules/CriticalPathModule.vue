@@ -8,7 +8,7 @@ import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import GanttChart from '@/components/gantt/GanttChart.vue'
 import ScenarioCard from './critical/ScenarioCard.vue'
-import { fmtBRL, fmtDate, fmtDateLong } from '@/lib/format'
+import { fmtBRL, fmtDate, fmtDateLong, fmtDiasUteis } from '@/lib/format'
 import { describeLink, formatPredecessors } from '@/lib/wbs'
 
 const project = useProjectStore()
@@ -60,8 +60,8 @@ const network = computed(() =>
     return {
       t,
       s,
-      lateStart: project.calendar.dateAt(s.ls),
-      lateFinish: s.lf > s.ls ? project.calendar.dateAt(s.lf - 1) : project.calendar.dateAt(Math.max(0, s.lf - 1)),
+      lateStart: s.lateStart,
+      lateFinish: s.lateFinish,
       variance: project.finishVarianceDays(t),
     }
   }),
@@ -234,21 +234,21 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
             <td class="mono">{{ row.t.uid }}</td>
             <td class="mono">{{ row.t.wbs }}</td>
             <td class="max-w-[280px] truncate" :title="row.t.name">{{ shortName(row.t.name) }}</td>
-            <td class="text-right tabular-nums">{{ row.t.durationDays }}d</td>
-            <td class="mono" :title="row.t.predecessors.map((p) => `${p.uid}: ${describeLink(p.type)}`).join('\n')">{{ formatPredecessors(row.t) || '—' }}</td>
+            <td class="text-right tabular-nums">{{ fmtDiasUteis(row.t.duracaoMin, project.minutosPorDia) }}d</td>
+            <td class="mono" :title="row.t.predecessors.map((p) => `${p.uid}: ${describeLink(p.type)}`).join('\n')">{{ formatPredecessors(row.t, project.minutosPorDia) || '—' }}</td>
             <td class="tabular-nums">{{ fmtDate(row.s.start) }}</td>
             <td class="tabular-nums">{{ fmtDate(row.s.finish) }}</td>
             <td class="tabular-nums text-zinc-500">{{ row.t.percentComplete >= 100 ? '—' : fmtDate(row.lateStart) }}</td>
             <td class="tabular-nums text-zinc-500">{{ row.t.percentComplete >= 100 ? '—' : fmtDate(row.lateFinish) }}</td>
-            <td class="text-right font-semibold tabular-nums" :class="row.s.critical ? 'text-coral-600 dark:text-coral-400' : ''">{{ row.t.percentComplete >= 100 ? '—' : `${row.s.totalFloat}d` }}</td>
-            <td class="text-right tabular-nums">{{ row.t.percentComplete >= 100 ? '—' : `${row.s.freeFloat}d` }}</td>
+            <td class="text-right font-semibold tabular-nums" :class="row.s.critical ? 'text-coral-600 dark:text-coral-400' : ''">{{ row.t.percentComplete >= 100 ? '—' : `${fmtDiasUteis(row.s.folgaTotalMin, project.minutosPorDia)}d` }}</td>
+            <td class="text-right tabular-nums">{{ row.t.percentComplete >= 100 ? '—' : `${fmtDiasUteis(row.s.folgaLivreMin, project.minutosPorDia)}d` }}</td>
             <td class="text-right tabular-nums" :class="row.variance > 0 ? 'text-coral-600 dark:text-coral-400' : row.variance < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-500'">
               {{ row.variance > 0 ? `+${row.variance}` : row.variance }}d
             </td>
             <td>
               <span v-if="row.t.percentComplete >= 100" class="chip-neutral">Concluída</span>
               <span v-else-if="row.s.critical" class="chip-critical">Crítica</span>
-              <span v-else class="chip-ok">Folga {{ row.s.totalFloat }}d</span>
+              <span v-else class="chip-ok">Folga {{ fmtDiasUteis(row.s.folgaTotalMin, project.minutosPorDia) }}d</span>
             </td>
           </tr>
         </tbody>

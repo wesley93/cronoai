@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildSeedState } from '@/stores/useProjectStore'
-import { WorkCalendar, easterSunday } from './calendar'
+import { easterSunday } from './calendar'
+import { calendarioDeDias, compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
 import { computeEvm } from './evm'
 import { interpretReport } from './fieldAi'
@@ -10,8 +11,9 @@ import { analyzeSupplies } from './supplies'
 import { durationFromTeam } from './sinapi'
 
 const seed = buildSeedState()
-const cal = new WorkCalendar(seed.meta.startDate, seed.calendar)
-const forecast = computeSchedule(seed.tasks, cal, { mode: 'forecast', statusDate: seed.meta.statusDate })
+const cals = compilarCalendarios(seed.meta.startDate, seed.calendarios, seed.calendarioPadraoUid)
+const cal = calendarioDeDias(cals.padrao)
+const forecast = computeSchedule(seed.tasks, cals, { mode: 'forecast', statusDate: seed.meta.statusDate })
 
 describe('calendário', () => {
   it('calcula a Páscoa', () => {
@@ -27,7 +29,7 @@ describe('calendário', () => {
 
 describe('CPM', () => {
   it('linha de base: caminho crítico passa por alvenaria, reboco, gesso e pintura', () => {
-    const base = computeSchedule(seed.tasks, cal, { mode: 'baseline' })
+    const base = computeSchedule(seed.tasks, cals, { mode: 'baseline' })
     for (const uid of [201, 202, 203, 301, 103, 104, 105, 401, 501, 502, 701, 801, 802]) {
       expect(base.byUid.get(uid)?.critical, `UID ${uid}`).toBe(true)
     }
@@ -44,7 +46,7 @@ describe('CPM', () => {
 
 describe('EVM', () => {
   it('SPI e CPI abaixo de 1 no seed', () => {
-    const e = computeEvm(seed.tasks, cal, seed.meta.statusDate)
+    const e = computeEvm(seed.tasks, cals, seed.meta.statusDate)
     expect(e.spi).toBeLessThan(1)
     expect(e.cpi).toBeLessThan(1)
     expect(e.eac).toBeGreaterThan(e.bac)
@@ -74,7 +76,7 @@ describe('IA de canteiro', () => {
 describe('cenários', () => {
   it('os três cenários recuperam prazo', () => {
     const d = analyzeDelay(seed.tasks, forecast, cal)
-    const s = simulateAll({ tasks: seed.tasks, calendar: seed.calendar, meta: seed.meta, forecast, origin: d.origin })
+    const s = simulateAll({ tasks: seed.tasks, calendarios: seed.calendarios, calendarioPadraoUid: seed.calendarioPadraoUid, meta: seed.meta, forecast, origin: d.origin })
     expect(s.crashing.targetUid).toBe(105)
     expect(s.crashing.daysRecovered).toBeGreaterThan(0)
     expect(s['fast-tracking'].targetUid).toBe(401)
@@ -103,7 +105,7 @@ describe('MSPDI', () => {
     expect(fromDuration('PT80H0M0S')).toBe(10)
   })
   it('exporta e reimporta sem perda', () => {
-    const xml = buildMspdiXml({ meta: seed.meta, tasks: seed.tasks, calendar: seed.calendar, schedule: forecast })
+    const xml = buildMspdiXml({ meta: seed.meta, tasks: seed.tasks, calendarios: seed.calendarios, calendarioPadraoUid: seed.calendarioPadraoUid, schedule: forecast })
     expect(xml).toContain('<Project xmlns="http://schemas.microsoft.com/project">')
     expect(xml).toContain('<PredecessorLink>')
     const back = parseMspdiXml(xml)
@@ -116,10 +118,10 @@ describe('MSPDI', () => {
     expect(t104.bac).toBe(168000)
     expect(t104.resources).toEqual([{ resource: 'Pedreiro', units: 4 }, { resource: 'Servente', units: 2 }])
     const t402 = back.tasks.find((t) => t.uid === 402)!
-    expect(t402.predecessors).toEqual([{ uid: 401, type: 'SS', lagDays: 10 }])
+    expect(t402.predecessors).toEqual([{ uid: 401, type: 'SS', lag: { tipo: 'util', minutos: 4800 } }])
     expect(back.meta.statusDate).toBe('2026-10-23')
-    expect(back.calendar.holidays).toContain('2026-09-07')
-    const reCal = new WorkCalendar(seed.meta.startDate, back.calendar)
+    expect(back.calendarios[0].excecoes).toContainEqual({ data: '2026-09-07', intervalos: [] })
+    const reCal = compilarCalendarios(seed.meta.startDate, back.calendarios, back.calendarioPadraoUid)
     const re = computeSchedule(back.tasks, reCal, { mode: 'forecast', statusDate: '2026-10-23' })
     expect(re.projectFinish).toBe(forecast.projectFinish)
   })

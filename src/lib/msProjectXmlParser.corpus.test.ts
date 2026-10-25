@@ -6,7 +6,8 @@
 import { lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { WorkCalendar, addCalendarDays } from './calendar'
+import { addCalendarDays } from './calendar'
+import { calendarioPadrao, compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
 import type { ProjectMeta } from '@/types/domain'
 import { MAX_MSPDI_CHARS, buildMspdiXml, parseMspdiXml, validateMspdi } from './msProjectXmlParser'
@@ -16,6 +17,11 @@ const CORPUS_DIR = REF_DIR ? join(REF_DIR, 'mpxj-mspdi') : ''
 const SEM_TAREFA = 'Nenhuma tarefa encontrada no XML.'
 const TIMEOUT = 30_000
 const LINK_CODE = { FF: '0', FS: '1', SF: '2', SS: '3' } as const
+
+type ComCalendarios = { calendarios: { excecoes: { data: string; intervalos: unknown[] }[] }[] }
+/** Feriados e dias úteis extras do calendário padrão importado (exceções não úteis e úteis). */
+const feriadosDe = (r: ComCalendarios) => r.calendarios[0].excecoes.filter((ex) => ex.intervalos.length === 0).map((ex) => ex.data)
+const extrasDe = (r: ComCalendarios) => r.calendarios[0].excecoes.filter((ex) => ex.intervalos.length > 0).map((ex) => ex.data)
 
 // ---------------------------------------------------------------------------
 // Auxiliares (varredura, leitura estática do arquivo e relatório)
@@ -343,7 +349,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       }
       confere(est.tarefasLb1a10, `Linhas de base 1 a 10 não importadas em ${est.tarefasLb1a10} tarefa(s): o CronoAI usa só a linha de base 0.`, /^Linhas de base 1 a 10/)
       confere(est.lb0SemTermino, `${est.lb0SemTermino} tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.`, /linha de base 0 sem término/)
-      confere(est.lb0SemInicio, `${est.lb0SemInicio} tarefa(s) com linha de base 0 sem início: a linha de base delas será recalculada pelo cronograma ao importar.`, /linha de base 0 sem início/)
+      confere(est.lb0SemInicio, `${est.lb0SemInicio} tarefa(s) com linha de base 0 sem início: o término do arquivo é mantido e o valor planejado (PV) delas fica zero.`, /linha de base 0 sem início/)
       confere(est.elapsed, `${est.elapsed} tarefa(s) com duração em tempo corrido convertida como horas úteis: revise as durações.`, /tempo corrido/)
       confere(est.curtas, `${est.curtas} tarefa(s) com menos de meio dia de duração importada(s) como marco (0 dia).`, /menos de meio dia/)
       confere(est.fracionarias, `${est.fracionarias} duração(ões) fracionária(s) arredondada(s) para dias úteis inteiros.`, /fracionária/)
@@ -354,9 +360,9 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       confere(est.semanaDiff, `Calendário do projeto com ${est.semanaDiff} dia(s) da semana diferente(s) de segunda a sexta: o CronoAI usa só segunda a sexta; confira os dias úteis.`, /^Calendário do projeto com/)
       confere(est.lagOutroFormato, `${est.lagOutroFormato} vínculo(s) com lag em formato diferente de dias úteis: serão exportados em dias úteis.`, /formato diferente de dias úteis/)
       // Calendário lido = o do arquivo (lista legada + exceções simples); arquivo sem feriado nenhum recebe os nacionais, com aviso
-      if (est.folgas.length) expect(r.calendar.holidays).toEqual(est.folgas)
+      if (est.folgas.length) expect(feriadosDe(r)).toEqual(est.folgas)
       else expect(w.some((a) => a.startsWith('Calendário sem feriados'))).toBe(true)
-      expect(r.calendar.extraWorkingDays).toEqual(est.extras)
+      expect(extrasDe(r)).toEqual(est.extras)
       const informativo = [
         est.timephased && `${est.timephased} registro(s) distribuído(s) no tempo (TimephasedData)`,
         est.valoresPersonalizados && `${est.valoresPersonalizados} valor(es) de ${est.camposPersonalizados} campo(s) personalizado(s)`,
@@ -374,14 +380,14 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
         name: r.meta.name || 'Obra', company: r.meta.company ?? '', manager: r.meta.manager ?? '',
         startDate: inicio, statusDate: r.meta.statusDate ?? inicio, dailyIndirectCost: 0,
       }
-      const schedule = computeSchedule(r.tasks, new WorkCalendar(inicio, r.calendar), { mode: 'forecast', statusDate: meta.statusDate })
-      const xml = buildMspdiXml({ meta, tasks: r.tasks, calendar: r.calendar, schedule })
+      const schedule = computeSchedule(r.tasks, compilarCalendarios(inicio, r.calendarios, r.calendarioPadraoUid), { mode: 'forecast', statusDate: meta.statusDate })
+      const xml = buildMspdiXml({ meta, tasks: r.tasks, calendarios: r.calendarios, calendarioPadraoUid: r.calendarioPadraoUid, schedule })
       expect(validateMspdi(xml, { strictOrder: true }).errors).toEqual([])
 
       const back = parseMspdiXml(xml)
       // Calendário na ida e volta: feriados e dias úteis extras iguais antes e depois
-      expect(back.calendar.holidays).toEqual(r.calendar.holidays)
-      expect(back.calendar.extraWorkingDays).toEqual(r.calendar.extraWorkingDays)
+      expect(feriadosDe(back)).toEqual(feriadosDe(r))
+      expect(extrasDe(back)).toEqual(extrasDe(r))
       const volta = new Map(back.tasks.map((t) => [t.uid, t]))
       expect(volta.size).toBe(r.tasks.length)
       const diferencas: string[] = []
@@ -394,11 +400,11 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
         const campos: [string, unknown, unknown][] = [
           ['nome', b.name, t.name],
           ['vínculos (UID e tipo)', b.predecessors.map((p) => [p.uid, p.type]), t.predecessors.map((p) => [p.uid, p.type])],
-          ['lag', b.predecessors.map((p) => p.lagDays), t.predecessors.map((p) => p.lagDays)],
+          ['lag', b.predecessors.map((p) => p.lag), t.predecessors.map((p) => p.lag)],
           ['% concluído', b.percentComplete, Math.round(t.percentComplete)],
           ['início real', b.actualStart, t.actualStart],
           ['término real', b.actualFinish, t.actualFinish],
-          ['duração', b.durationDays, t.durationDays],
+          ['duração', b.duracaoMin, t.duracaoMin],
           ['início da LB0', b.baselineStart, t.baselineStart],
           ['término da LB0', b.baselineFinish, t.baselineFinish],
         ]
@@ -416,8 +422,8 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       const inicio = r.meta.startDate ?? '2026-01-05'
       const semFeriadosNoArquivo = r.warnings.some((a) => a.startsWith('Calendário sem feriados'))
       const calcular = (holidays: string[]) =>
-        computeSchedule(r.tasks, new WorkCalendar(inicio, { holidays, extraWorkingDays: r.calendar.extraWorkingDays }), { mode: 'baseline', statusDate: r.meta.statusDate ?? inicio })
-      const comImportado = calcular(r.calendar.holidays)
+        computeSchedule(r.tasks, compilarCalendarios(inicio, [calendarioPadrao(holidays, extrasDe(r))], 1), { mode: 'baseline', statusDate: r.meta.statusDate ?? inicio })
+      const comImportado = calcular(feriadosDe(r))
       // Sem os feriados nacionais que o import aplica quando o arquivo não traz nenhum
       const semNacionais = semFeriadosNoArquivo ? calcular([]) : comImportado
       const diferencas: string[] = []
@@ -459,9 +465,9 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       const recorrentes = kids(kid(cal, 'Exceptions'), 'Exception').filter((e) => Number(txt(e, 'Occurrences') ?? 1) > 1).length
 
       const r = parseMspdiXml(injetado)
-      calendarios.push({ arquivo: rel, recorrentes, legadoFeriados: legado.folga.size, legadoExtras: legado.extra.size, lidosFeriados: r.calendar.holidays.length, lidosExtras: r.calendar.extraWorkingDays.length })
-      if (legado.folga.size) expect(r.calendar.holidays).toEqual([...legado.folga].sort())
-      expect(r.calendar.extraWorkingDays).toEqual([...legado.extra].sort())
+      calendarios.push({ arquivo: rel, recorrentes, legadoFeriados: legado.folga.size, legadoExtras: legado.extra.size, lidosFeriados: feriadosDe(r).length, lidosExtras: extrasDe(r).length })
+      if (legado.folga.size) expect(feriadosDe(r)).toEqual([...legado.folga].sort())
+      expect(extrasDe(r)).toEqual([...legado.extra].sort())
       if (recorrentes && legado.folga.size + legado.extra.size) {
         expect(r.warnings.filter((a) => /recorrente/.test(a))).toEqual([])
       }

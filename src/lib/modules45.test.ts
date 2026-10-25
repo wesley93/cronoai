@@ -61,8 +61,8 @@ describe('Geração em lote na EAP', () => {
     const porcelanato = created.find((t) => t.sinapi === '87263')!
     // 1ª linha do grupo 06: FS na última tarefa do grupo anterior; 2ª: SS com 40% da anterior
     expect(contrapiso.predecessors[0].type).toBe('FS')
-    expect(porcelanato.predecessors).toEqual([{ uid: contrapiso.uid, type: 'SS', lagDays: Math.round(contrapiso.durationDays * 0.4) }])
-    expect(porcelanato.durationDays).toBe(lineDuration(lines.find((l) => l.code === '87263')!))
+    expect(porcelanato.predecessors).toEqual([{ uid: contrapiso.uid, type: 'SS', lag: { tipo: 'util', minutos: Math.round((contrapiso.duracaoMin / 480) * 0.4) * 480 } }])
+    expect(porcelanato.duracaoMin).toBe(lineDuration(lines.find((l) => l.code === '87263')!) * 480)
     expect(porcelanato.wbs.startsWith('06.')).toBe(true)
     expect(store.taskByUid.get(porcelanato.uid)!.baselineStart).toBeTruthy()
   })
@@ -71,7 +71,7 @@ describe('Geração em lote na EAP', () => {
     const store = useProjectStore()
     const created = store.generateFromBudget({ mode: 'FS', overlapPct: 40 })
     const porcelanato = created.find((t) => t.sinapi === '87263')!
-    expect(porcelanato.predecessors[0]).toMatchObject({ type: 'FS', lagDays: 0 })
+    expect(porcelanato.predecessors[0]).toMatchObject({ type: 'FS', lag: { tipo: 'util', minutos: 0 } })
   })
 })
 

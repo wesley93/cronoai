@@ -69,14 +69,20 @@ export class WorkCalendar {
   private readonly indexByDate = new Map<string, number>()
   private readonly holidays: Set<string>
   private readonly extra: Set<string>
+  private readonly isWorking?: (iso: string) => boolean
 
+  /**
+   * `config` simples (seg–sex com feriados e dias extras) ou uma função que diz se a data é dia útil
+   * (calendário compilado, ver `calendarioDeDias` em calendarioTrabalho.ts).
+   */
   constructor(
     readonly baseDate: string,
-    config: WorkCalendarConfig,
+    config: WorkCalendarConfig | ((iso: string) => boolean),
     private readonly horizon = 1600,
   ) {
-    this.holidays = new Set(config.holidays)
-    this.extra = new Set(config.extraWorkingDays)
+    if (typeof config === 'function') this.isWorking = config
+    this.holidays = new Set(typeof config === 'function' ? [] : config.holidays)
+    this.extra = new Set(typeof config === 'function' ? [] : config.extraWorkingDays)
     let cursor = parseISO(baseDate)
     while (this.dates.length < this.horizon) {
       const iso = toISO(cursor)
@@ -89,6 +95,7 @@ export class WorkCalendar {
   }
 
   isWorkingDay(iso: string): boolean {
+    if (this.isWorking) return this.isWorking(iso)
     if (this.extra.has(iso)) return true
     const dow = parseISO(iso).getUTCDay()
     if (dow === 0 || dow === 6) return false
@@ -116,7 +123,8 @@ export class WorkCalendar {
 
   /** Índice do dia útil em `iso`; se não for útil, o dia útil anterior. */
   indexOnOrBefore(iso: string): number {
-    if (iso < this.baseDate) return -this.countWorkingBetween(iso, this.baseDate) - 1
+    // Dias úteis em (iso, base) + 1 = distância até a base; se `iso` é útil, o resultado é o próprio índice (CR-11)
+    if (iso < this.baseDate) return -this.countWorkingBetween(addCalendarDays(iso, 1), this.baseDate) - 1
     let cursor = iso
     for (let guard = 0; guard < 30; guard++) {
       const idx = this.indexByDate.get(cursor)

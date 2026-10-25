@@ -11,7 +11,7 @@ const task: Task = {
   name: 'Fundação',
   outlineLevel: 1,
   isSummary: false,
-  durationDays: 5,
+  duracaoMin: 2400,
   predecessors: [],
   percentComplete: 0,
   bac: 0,
@@ -22,11 +22,19 @@ const task: Task = {
 
 const schedule: ScheduleResult = {
   byUid: new Map([
-    [1, { uid: 1, es: 0, ef: 5, ls: 0, lf: 5, totalFloat: 0, freeFloat: 0, critical: false, start: START, finish: '2026-11-06', duration: 5, remaining: 5 }],
+    [
+      1,
+      {
+        uid: 1, inicioCedoMin: 480, terminoCedoMin: 8160, inicioTardeMin: 480, terminoTardeMin: 8160,
+        earlyStart: START, earlyFinish: '2026-11-06', lateStart: START, lateFinish: '2026-11-06',
+        start: START, finish: '2026-11-06', inicioHora: '08:00', terminoHora: '17:00',
+        folgaTotalMin: 0, folgaLivreMin: 0, totalFloat: 0, freeFloat: 0, critical: false, duracaoMin: 2400, restanteMin: 2400,
+      },
+    ],
   ]),
   projectStart: START,
   projectFinish: '2026-11-06',
-  projectEf: 5,
+  terminoProjetoMin: 8160,
   criticalPath: [],
   order: [1],
 }

@@ -8,6 +8,7 @@ import { useUiStore } from '@/stores/ui'
 import { downloadText } from '@/lib/download'
 import SectionCard from '@/components/common/SectionCard.vue'
 import { fmtBRL, fmtDate, fmtNum } from '@/lib/format'
+import { formatPredecessors } from '@/lib/wbs'
 
 const project = useProjectStore()
 const ui = useUiStore()
@@ -113,7 +114,7 @@ const cell =
             <td class="text-right tabular-nums">{{ fmtBRL(l.quantity * l.unitCost) }}</td>
             <td class="mono text-[10.5px]">
               <template v-if="previewByName.get(lineName(l))">
-                {{ previewByName.get(lineName(l))!.task.predecessors.map((p) => `${p.uid}${p.type}${p.lagDays ? '+' + p.lagDays : ''}`).join('; ') || '—' }}
+                {{ formatPredecessors(previewByName.get(lineName(l))!.task, project.minutosPorDia) || '—' }}
               </template>
             </td>
             <td class="whitespace-nowrap text-[11px] tabular-nums">

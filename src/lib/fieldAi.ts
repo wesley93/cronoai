@@ -136,7 +136,7 @@ export function interpretReport(text: string, tasks: Task[]): AiInterpretation {
   })).filter((x) => x.hits.length > 0)
 
   const candidates: MatchCandidate[] = []
-  for (const t of tasks.filter((x) => !x.isSummary && x.durationDays > 0)) {
+  for (const t of tasks.filter((x) => !x.isSummary && x.duracaoMin > 0)) {
     const name = normalizeText(t.name)
     const reasons: string[] = []
     let score = 0

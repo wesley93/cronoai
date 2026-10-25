@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import type {
+  CalendarioObra,
   DecisionLogEntry,
   DetectedRestriction,
   FieldReport,
@@ -28,7 +29,18 @@ import {
   type BatchOptions,
   type BudgetLine,
 } from '@/lib/sinapiBudget'
-import { WorkCalendar, addCalendarDays } from '@/lib/calendar'
+import { addCalendarDays } from '@/lib/calendar'
+import {
+  MINUTOS_POR_DIA_PADRAO,
+  UID_CALENDARIO_PADRAO,
+  calendarioDeDias,
+  calendarioPadrao,
+  comDiasExtras,
+  compilarCalendarios,
+  diasParaMinutos,
+  minutosParaDias,
+  semDiasExtras,
+} from '@/lib/calendarioTrabalho'
 import { computeSchedule, withBaseline } from '@/lib/cpm'
 import { computeEvm, computePackageEvm, computeSCurve, eacVariants, forecastFinishBySpi, plannedFraction } from '@/lib/evm'
 import { interpretReport } from '@/lib/fieldAi'
@@ -66,14 +78,16 @@ function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
 }
 
-function baselineFor(tasks: Task[], meta: ProjectState['meta'], holidays: string[], onlyMissing = false): Task[] {
-  const cal = new WorkCalendar(meta.startDate, { holidays, extraWorkingDays: [] })
-  return withBaseline(tasks, computeSchedule(tasks, cal, { mode: 'baseline' }), onlyMissing)
+/** Linha de base: cálculo sem avanço e sem dias úteis extras (hora extra não entra na linha de base). */
+function baselineFor(tasks: Task[], meta: ProjectState['meta'], calendarios: CalendarioObra[], padraoUid: number, onlyMissing = false): Task[] {
+  const cals = compilarCalendarios(meta.startDate, calendarios, padraoUid, { semExcecoesUteis: true })
+  return withBaseline(tasks, computeSchedule(tasks, cals, { mode: 'baseline', minutosPorDia: meta.minutosPorDia }), onlyMissing)
 }
 
 export function buildSeedState(): PersistedState {
   const meta = clone(SEED_META)
-  const tasks = baselineFor(clone(SEED_TASKS), meta, SEED_HOLIDAYS)
+  const calendarios = [calendarioPadrao(SEED_HOLIDAYS)]
+  const tasks = baselineFor(clone(SEED_TASKS), meta, calendarios, UID_CALENDARIO_PADRAO)
   const materials = clone(SEED_MATERIALS).map((m) => {
     if (m.id !== 'm-porcelanato') return m
     const t = tasks.find((x) => x.uid === m.taskUid)
@@ -82,7 +96,8 @@ export function buildSeedState(): PersistedState {
   return {
     meta,
     tasks,
-    calendar: { holidays: [...SEED_HOLIDAYS], extraWorkingDays: [] },
+    calendarios,
+    calendarioPadraoUid: UID_CALENDARIO_PADRAO,
     reports: clone(SEED_REPORTS),
     restrictions: [],
     materials,
@@ -422,16 +437,26 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   // ---------------------------------------------------------------- derivados
-  const calendar = computed(() => new WorkCalendar(state.meta.startDate, state.calendar))
-  const baseCalendar = computed(() => new WorkCalendar(state.meta.startDate, { holidays: state.calendar.holidays, extraWorkingDays: [] }))
-  const schedule = computed(() => computeSchedule(state.tasks, calendar.value, { mode: 'forecast', statusDate: state.meta.statusDate }))
+  const minutosPorDia = computed(() => state.meta.minutosPorDia ?? MINUTOS_POR_DIA_PADRAO)
+  /** Calendários compilados (cálculo em minutos úteis, com os dias extras de hora extra). */
+  const calendarios = computed(() => compilarCalendarios(state.meta.startDate, state.calendarios, state.calendarioPadraoUid))
+  /** Calendários do valor planejado (PV): sem as exceções úteis, como a linha de base (CR-2d). */
+  const calendariosPv = computed(() => compilarCalendarios(state.meta.startDate, state.calendarios, state.calendarioPadraoUid, { semExcecoesUteis: true }))
+  /** Contas por dia útil ("+16 d.u."): o calendário padrão, com dias extras. */
+  const calendar = computed(() => calendarioDeDias(calendarios.value.padrao))
+  const baseCalendar = computed(() => calendarioDeDias(calendariosPv.value.padrao))
+  /** Cronograma previsto de uma lista de tarefas (a da obra ou uma hipótese: apontamento, inclusão, planilha). */
+  function agendar(tasks: Task[]) {
+    return computeSchedule(tasks, calendarios.value, { mode: 'forecast', statusDate: state.meta.statusDate, minutosPorDia: minutosPorDia.value })
+  }
+  const schedule = computed(() => agendar(state.tasks))
   const rollups = computed(() => rollupSummaries(state.tasks, schedule.value))
   const tasksByWbs = computed(() => sortByWbs(state.tasks))
   const leaves = computed(() => tasksByWbs.value.filter((t) => !t.isSummary))
   const taskByUid = computed(() => new Map(state.tasks.map((t) => [t.uid, t])))
-  const evm = computed(() => computeEvm(state.tasks, baseCalendar.value, state.meta.statusDate))
-  const packageEvm = computed(() => computePackageEvm(state.tasks, baseCalendar.value, state.meta.statusDate))
-  const sCurve = computed(() => computeSCurve(state.tasks, baseCalendar.value, state.meta.statusDate, schedule.value, fmtMonth))
+  const evm = computed(() => computeEvm(state.tasks, calendariosPv.value, state.meta.statusDate))
+  const packageEvm = computed(() => computePackageEvm(state.tasks, calendariosPv.value, state.meta.statusDate))
+  const sCurve = computed(() => computeSCurve(state.tasks, calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth))
   const delay = computed(() => analyzeDelay(state.tasks, schedule.value, baseCalendar.value))
   /** Menor data de início real entre as tarefas (indefinida enquanto a obra não tem avanço). */
   const primeiroInicioReal = computed(() => state.tasks.map((t) => t.actualStart).filter((d): d is string => !!d).sort()[0])
@@ -447,10 +472,10 @@ export const useProjectStore = defineStore('project', () => {
     return wbs ? state.tasks.filter((t) => t.wbs === wbs || t.wbs.startsWith(wbs + '.')) : state.tasks
   }
   function sCurveFor(wbs?: string) {
-    return wbs ? computeSCurve(tasksOf(wbs), baseCalendar.value, state.meta.statusDate, schedule.value, fmtMonth) : sCurve.value
+    return wbs ? computeSCurve(tasksOf(wbs), calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth) : sCurve.value
   }
   function evmFor(wbs?: string) {
-    return wbs ? computeEvm(tasksOf(wbs), baseCalendar.value, state.meta.statusDate) : evm.value
+    return wbs ? computeEvm(tasksOf(wbs), calendariosPv.value, state.meta.statusDate) : evm.value
   }
   /** EAC por três premissas + término previsto pelo SPI comparado ao CPM. */
   const evmForecast = computed(() => {
@@ -467,7 +492,14 @@ export const useProjectStore = defineStore('project', () => {
   const recoveryTotal = computed(() => state.recoveryCosts.reduce((a, c) => a + c.amount, 0))
   /** Parâmetros do simulador "E se?" (ajustados pelo engenheiro na tela; não são persistidos). */
   const scenarioParams = reactive<ScenarioParams>(clone(DEFAULT_SCENARIO_PARAMS))
-  const scenarioCtx = computed(() => ({ tasks: state.tasks, calendar: state.calendar, meta: state.meta, forecast: schedule.value, origin: delay.value.origin }))
+  const scenarioCtx = computed(() => ({
+    tasks: state.tasks,
+    calendarios: state.calendarios,
+    calendarioPadraoUid: state.calendarioPadraoUid,
+    meta: state.meta,
+    forecast: schedule.value,
+    origin: delay.value.origin,
+  }))
   const scenarios = computed(() => simulateAll(scenarioCtx.value, scenarioParams))
   const scenarioOptions = computed(() => ({ crashing: crashingTargets(scenarioCtx.value), fastTracking: fastTrackOptions(scenarioCtx.value) }))
   const recommendation = computed(() => recommendScenario(scenarios.value, state.appliedScenarios))
@@ -479,7 +511,7 @@ export const useProjectStore = defineStore('project', () => {
   /** Tarefas no formato MS Project (folhas + resumos), sempre coerentes com o CPM e o EVM atuais. */
   const msProjectTasks = computed<MSProjectTask[]>(() => {
     const status = state.meta.statusDate
-    const pvOf = (t: Task) => t.bac * plannedFraction(t, baseCalendar.value, status)
+    const pvOf = (t: Task) => t.bac * plannedFraction(t, calendariosPv.value, status)
     return tasksByWbs.value.map((t): MSProjectTask => {
       if (t.isSummary) {
         const r = rollups.value.get(t.uid)
@@ -496,7 +528,7 @@ export const useProjectStore = defineStore('project', () => {
           Start: start,
           Finish: finish,
           PercentComplete: Math.round((r?.percentComplete ?? 0) * 10) / 10,
-          Predecessors: t.predecessors.map((p) => ({ PredecessorUID: p.uid, Type: p.type, LagDays: p.lagDays })),
+          Predecessors: t.predecessors.map((p) => ({ PredecessorUID: p.uid, Type: p.type, LagDays: minutosParaDias(p.lag.minutos, minutosPorDia.value) })),
           IsCritical: !!r?.critical,
           TotalSlack: null,
           BudgetAtCompletion: r?.bac ?? 0,
@@ -518,11 +550,11 @@ export const useProjectStore = defineStore('project', () => {
         Name: t.name,
         OutlineLevel: t.outlineLevel,
         Summary: false,
-        Duration: t.durationDays,
+        Duration: minutosParaDias(t.duracaoMin, minutosPorDia.value),
         Start: s?.start ?? state.meta.startDate,
         Finish: s?.finish ?? state.meta.startDate,
         PercentComplete: t.percentComplete,
-        Predecessors: t.predecessors.map((p) => ({ PredecessorUID: p.uid, Type: p.type, LagDays: p.lagDays })),
+        Predecessors: t.predecessors.map((p) => ({ PredecessorUID: p.uid, Type: p.type, LagDays: minutosParaDias(p.lag.minutos, minutosPorDia.value) })),
         IsCritical: !!s?.critical,
         TotalSlack: done || !s ? null : s.totalFloat,
         BudgetAtCompletion: t.bac,
@@ -591,7 +623,7 @@ export const useProjectStore = defineStore('project', () => {
   /** Simula o impacto de um apontamento no término da obra antes de aprovar. */
   function previewProgress(taskUid: number, pct: number, reportDate = state.meta.statusDate) {
     const tasks = state.tasks.map((t) => (t.uid === taskUid ? { ...t, ...progressPatch(t, pct, reportDate) } : t))
-    const s = computeSchedule(tasks, calendar.value, { mode: 'forecast', statusDate: state.meta.statusDate })
+    const s = agendar(tasks)
     return { finish: s.projectFinish, deltaDays: workingVariance(calendar.value, schedule.value.projectFinish, s.projectFinish) }
   }
 
@@ -600,10 +632,11 @@ export const useProjectStore = defineStore('project', () => {
     const current = taskByUid.value.get(taskUid)
     if (!current) return undefined
     const tasks = state.tasks.map((t) => (t.uid === taskUid ? { ...t, ...progressPatch(t, pct, reportDate) } : t))
-    const after = computeSchedule(tasks, calendar.value, { mode: 'forecast', statusDate: state.meta.statusDate })
+    const after = agendar(tasks)
+    const comum = { meta: state.meta, calendarios: state.calendarios, calendarioPadraoUid: state.calendarioPadraoUid }
     return {
-      before: buildTaskXml(current, { meta: state.meta, tasks: state.tasks, calendar: state.calendar, schedule: schedule.value }),
-      after: buildTaskXml(tasks.find((t) => t.uid === taskUid)!, { meta: state.meta, tasks, calendar: state.calendar, schedule: after }),
+      before: buildTaskXml(current, { ...comum, tasks: state.tasks, schedule: schedule.value }),
+      after: buildTaskXml(tasks.find((t) => t.uid === taskUid)!, { ...comum, tasks, schedule: after }),
     }
   }
 
@@ -662,6 +695,11 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   // ---------------------------------------------------------------- Módulo 2
+  /** Troca o calendário padrão da obra por uma versão transformada (hora extra: dias úteis extras). */
+  function atualizarCalendarioPadrao(transformar: (c: CalendarioObra) => CalendarioObra) {
+    state.calendarios = state.calendarios.map((c) => (c.uid === state.calendarioPadraoUid ? transformar(c) : c))
+  }
+
   function applyScenario(result: ScenarioResult) {
     if (!result.applicable || state.appliedScenarios.includes(result.kind)) return
     const costId = uid('cost')
@@ -676,7 +714,7 @@ export const useProjectStore = defineStore('project', () => {
     }
     if (result.addedWorkingDays?.length) {
       undo.addedDays = [...result.addedWorkingDays]
-      state.calendar.extraWorkingDays = [...new Set([...state.calendar.extraWorkingDays, ...result.addedWorkingDays])].sort()
+      atualizarCalendarioPadrao((c) => comDiasExtras(c, result.addedWorkingDays!))
     }
     const amount = Math.round(result.extraCost)
     state.recoveryCosts.push({ id: costId, scenario: result.kind, label: result.title, amount })
@@ -694,7 +732,7 @@ export const useProjectStore = defineStore('project', () => {
     if (idx < 0) return
     const u = state.undo[idx]
     if (u.taskUid !== undefined && u.before) patchTask(u.taskUid, clone(u.before))
-    if (u.addedDays) state.calendar.extraWorkingDays = state.calendar.extraWorkingDays.filter((d) => !u.addedDays!.includes(d))
+    if (u.addedDays) atualizarCalendarioPadrao((c) => semDiasExtras(c, u.addedDays!))
     state.recoveryCosts = state.recoveryCosts.filter((c) => c.id !== u.costId)
     state.appliedScenarios = state.appliedScenarios.filter((k) => k !== kind)
     state.undo.splice(idx, 1)
@@ -782,7 +820,7 @@ export const useProjectStore = defineStore('project', () => {
     state.tasks.push(task)
     // Linha de base da inclusão de escopo = datas calculadas no momento da inclusão
     const s = schedule.value.byUid.get(task.uid)
-    if (s) patchTask(task.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuration: s.duration })
+    if (s) patchTask(task.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin })
     log('sinapi', `Pacote incluído na EAP: [UID ${task.uid}] ${task.wbs}`, `${input.name} — ${input.durationDays} dias úteis, BAC ${fmtBRL(task.bac)}.`)
     return task
   }
@@ -794,7 +832,7 @@ export const useProjectStore = defineStore('project', () => {
       const topLevels = tasks.filter((t) => t.outlineLevel === 1).map((t) => Number(t.wbs))
       parentWbs = String((topLevels.length ? Math.max(...topLevels) : 0) + 1).padStart(2, '0')
       group = {
-        uid: nextUid(tasks), wbs: parentWbs, name: input.newGroupName, outlineLevel: 1, isSummary: true, durationDays: 0,
+        uid: nextUid(tasks), wbs: parentWbs, name: input.newGroupName, outlineLevel: 1, isSummary: true, duracaoMin: 0,
         predecessors: [], percentComplete: 0, bac: 0, actualCost: 0, resources: [],
       }
     }
@@ -806,8 +844,10 @@ export const useProjectStore = defineStore('project', () => {
       name: input.name,
       outlineLevel: wbs.split('.').length,
       isSummary: false,
-      durationDays: input.durationDays,
-      predecessors: input.predecessorUid ? [{ uid: input.predecessorUid, type: input.linkType, lagDays: input.lagDays }] : [],
+      duracaoMin: diasParaMinutos(input.durationDays, minutosPorDia.value),
+      predecessors: input.predecessorUid
+        ? [{ uid: input.predecessorUid, type: input.linkType, lag: { tipo: 'util', minutos: diasParaMinutos(input.lagDays, minutosPorDia.value) } }]
+        : [],
       percentComplete: 0,
       bac: Math.round(input.quantity * input.unitCost),
       actualCost: 0,
@@ -823,7 +863,7 @@ export const useProjectStore = defineStore('project', () => {
   function previewSinapiTask(input: SinapiInsert) {
     const { task, group } = buildSinapiTask(input, state.tasks)
     const tasks = [...state.tasks, ...(group ? [group] : []), task]
-    const s = computeSchedule(tasks, calendar.value, { mode: 'forecast', statusDate: state.meta.statusDate })
+    const s = agendar(tasks)
     const sched = s.byUid.get(task.uid)
     return {
       uid: task.uid,
@@ -854,7 +894,7 @@ export const useProjectStore = defineStore('project', () => {
     const idx = groups.indexOf(groupWbs)
     for (let i = (idx < 0 ? groups.length : idx) - 1; i >= 0; i--) {
       const leaves = tasks.filter((t) => !t.isSummary && t.wbs.startsWith(groups[i] + '.'))
-      if (leaves.length) return leaves.reduce((best, t) => ((sched.byUid.get(t.uid)?.ef ?? 0) > (sched.byUid.get(best.uid)?.ef ?? 0) ? t : best)).uid
+      if (leaves.length) return leaves.reduce((best, t) => ((sched.byUid.get(t.uid)?.terminoCedoMin ?? 0) > (sched.byUid.get(best.uid)?.terminoCedoMin ?? 0) ? t : best)).uid
     }
     return undefined
   }
@@ -901,10 +941,10 @@ export const useProjectStore = defineStore('project', () => {
       const days = lineDuration(l)
       let parentWbs = existingGroups.has(l.group) ? l.group : extraGroup
       const prev = lastInGroup.get(parentWbs ?? '__novo__')
-      const sched = computeSchedule(tasks, calendar.value, { mode: 'forecast', statusDate: state.meta.statusDate })
+      const sched = agendar(tasks)
       const predecessorUid = prev?.uid ?? suggestPredecessorFor(parentWbs ?? '99', tasks, sched)
       const linkType: LinkType = prev && opts.mode === 'SS' ? 'SS' : 'FS'
-      const lagDays = prev && opts.mode === 'SS' ? Math.max(1, Math.round((prev.durationDays * opts.overlapPct) / 100)) : 0
+      const lagDays = prev && opts.mode === 'SS' ? Math.max(1, Math.round((minutosParaDias(prev.duracaoMin, minutosPorDia.value) * opts.overlapPct) / 100)) : 0
       const { task, group } = buildSinapiTask(
         {
           name: lineName(l),
@@ -937,7 +977,7 @@ export const useProjectStore = defineStore('project', () => {
   function previewBudgetBatch(opts: BatchOptions = DEFAULT_BATCH_OPTIONS) {
     if (!state.budget.length) return undefined
     const { tasks, created } = buildBudgetBatch(state.budget, opts)
-    const s = computeSchedule(tasks, calendar.value, { mode: 'forecast', statusDate: state.meta.statusDate })
+    const s = agendar(tasks)
     return {
       created: created.map((t) => ({ task: t, sched: s.byUid.get(t.uid)! })),
       projectFinish: s.projectFinish,
@@ -953,7 +993,7 @@ export const useProjectStore = defineStore('project', () => {
     state.tasks = tasks
     for (const t of created) {
       const s = schedule.value.byUid.get(t.uid)
-      if (s) patchTask(t.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuration: s.duration })
+      if (s) patchTask(t.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin })
     }
     const bac = created.reduce((a, t) => a + t.bac, 0)
     log('sinapi', `Cronograma gerado da planilha SINAPI (${created.length} pacotes)`, `Vínculos ${opts.mode === 'SS' ? `SS com defasagem de ${opts.overlapPct}%` : 'FS em série'} · BAC +${fmtBRL(bac)}.`)
@@ -975,7 +1015,7 @@ export const useProjectStore = defineStore('project', () => {
   function saveBaseline() {
     state.tasks = state.tasks.map((t) => {
       const s = schedule.value.byUid.get(t.uid)
-      return s ? { ...t, baselineStart: s.start, baselineFinish: s.finish, baselineDuration: s.duration } : t
+      return s ? { ...t, baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin } : t
     })
     log('sistema', 'Nova linha de base salva', `Linha de base substituída pelo cronograma reprogramado em ${state.meta.statusDate.split('-').reverse().join('/')}.`)
   }
@@ -987,7 +1027,13 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Gera o .xml MSPDI do estado atual e valida estrutura e ordem dos elementos antes de entregar. */
   function exportXml(): { filename: string; xml: string; validation: MspdiValidation } {
-    const xml = buildMspdiXml({ meta: state.meta, tasks: state.tasks, calendar: state.calendar, schedule: schedule.value })
+    const xml = buildMspdiXml({
+      meta: state.meta,
+      tasks: state.tasks,
+      calendarios: state.calendarios,
+      calendarioPadraoUid: state.calendarioPadraoUid,
+      schedule: schedule.value,
+    })
     const validation = validateMspdi(xml, { strictOrder: true })
     const safe = state.meta.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '')
     if (validation.valid) {
@@ -1003,11 +1049,12 @@ export const useProjectStore = defineStore('project', () => {
       ...state.meta,
       ...Object.fromEntries(Object.entries(result.meta).filter(([, v]) => v !== undefined && v !== '')),
     }
-    const tasks = baselineFor(result.tasks, meta, result.calendar.holidays, true)
+    const tasks = baselineFor(result.tasks, meta, result.calendarios, result.calendarioPadraoUid, true)
     const uids = new Set(tasks.map((t) => t.uid))
     state.meta = meta
     state.tasks = tasks
-    state.calendar = result.calendar
+    state.calendarios = result.calendarios
+    state.calendarioPadraoUid = result.calendarioPadraoUid
     state.materials = state.materials.filter((m) => uids.has(m.taskUid))
     state.reports = state.reports.map((r) => (r.approvedUid !== undefined && !uids.has(r.approvedUid) ? { ...r, approvedUid: undefined } : r))
     state.restrictions = state.restrictions.filter((r) => r.taskUid === undefined || uids.has(r.taskUid))
@@ -1197,6 +1244,8 @@ export const useProjectStore = defineStore('project', () => {
     state,
     calendar,
     baseCalendar,
+    calendarios,
+    minutosPorDia,
     schedule,
     rollups,
     tasksByWbs,

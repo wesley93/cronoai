@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { UFS } from '@/data/ufs'
-import { WorkCalendar } from './calendar'
+import { compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
 import { avaliarCota, dataLocalISO, descreverTabelaSinapi, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, validarIndice, type DadosObra } from './obras'
 
@@ -123,8 +123,10 @@ describe('estadoObraVazia', () => {
       regimeSinapi: 'desonerado',
       dataBaseSinapi: '2026-09',
     })
-    expect(e.calendar.holidays).toContain('2026-12-25')
-    expect(e.calendar.extraWorkingDays).toEqual([])
+    expect(e.calendarioPadraoUid).toBe(1)
+    expect(e.calendarios).toHaveLength(1)
+    expect(e.calendarios[0].excecoes).toContainEqual({ data: '2026-12-25', intervalos: [] })
+    expect(e.calendarios[0].excecoes.filter((ex) => ex.intervalos.length > 0)).toEqual([]) // sem dias extras
   })
 
   it('sem UF, município, regime e data-base, esses campos não existem', () => {
@@ -135,7 +137,7 @@ describe('estadoObraVazia', () => {
 
   it('o cronograma da obra em branco termina no início (0 tarefas)', () => {
     const e = estadoObraVazia(valido, 9850)
-    const s = computeSchedule(e.tasks, new WorkCalendar(e.meta.startDate, e.calendar), { mode: 'forecast', statusDate: e.meta.statusDate })
+    const s = computeSchedule(e.tasks, compilarCalendarios(e.meta.startDate, e.calendarios, e.calendarioPadraoUid), { mode: 'forecast', statusDate: e.meta.statusDate })
     expect(s.projectFinish).toBe('2026-11-03')
   })
 })

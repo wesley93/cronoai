@@ -32,3 +32,22 @@ describe('calendário: bordas', () => {
     expect(c.dateAt(6)).toBe('2026-05-12')
   })
 })
+
+// CR-11: data útil (ou não) anterior à data-base. Antes da correção: -2, -2 e -1 (um dia a menos nas duas úteis).
+describe('indexOnOrBefore antes da data-base (CR-11)', () => {
+  it('quinta útil antes de um feriado e da data-base (01/05 é feriado)', () => {
+    expect(cal().indexOnOrBefore('2026-04-30')).toBe(-1)
+  })
+
+  it('sexta útil e sábado antes da data-base de 26/10/2026', () => {
+    const c = new WorkCalendar('2026-10-26', { holidays: brazilianHolidays(2026), extraWorkingDays: [] })
+    expect(c.indexOnOrBefore('2026-10-23')).toBe(-1)
+    expect(c.indexOnOrBefore('2026-10-24')).toBe(-1)
+  })
+
+  it('é coerente com dateAt: o índice devolvido aponta para o dia útil pedido', () => {
+    const c = new WorkCalendar('2026-10-26', { holidays: brazilianHolidays(2026), extraWorkingDays: [] })
+    expect(c.dateAt(c.indexOnOrBefore('2026-10-21'))).toBe('2026-10-21')
+    expect(c.indexOnOrBefore('2026-10-21')).toBe(-3)
+  })
+})

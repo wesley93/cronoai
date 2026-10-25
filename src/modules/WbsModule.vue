@@ -8,7 +8,8 @@ import { useMsProject } from '@/lib/useMsProject'
 import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import ProgressBar from '@/components/common/ProgressBar.vue'
-import { fmtBRL, fmtDate } from '@/lib/format'
+import { fmtBRL, fmtDate, fmtNum } from '@/lib/format'
+import { diasParaMinutos, minutosParaDias } from '@/lib/calendarioTrabalho'
 import { formatPredecessors } from '@/lib/wbs'
 
 const project = useProjectStore()
@@ -32,9 +33,14 @@ function edit(t: Task, field: 'percentComplete' | 'durationDays' | 'bac' | 'actu
   const limits = { percentComplete: [0, 100], durationDays: [0, 2000], bac: [0, 1e10], actualCost: [0, 1e10] } as const
   const v = clampNumber(raw, limits[field][0], limits[field][1])
   if (v === undefined) return
-  const value = field === 'durationDays' ? Math.round(v) : v
-  if (value === t[field]) return
-  project.updateTask(t.uid, { [field]: value })
+  if (field === 'durationDays') {
+    // A tela edita a duração em dias inteiros; o estado guarda minutos
+    const minutos = diasParaMinutos(Math.round(v), project.minutosPorDia)
+    if (minutos !== t.duracaoMin) project.updateTask(t.uid, { duracaoMin: minutos })
+    return
+  }
+  if (v === t[field]) return
+  project.updateTask(t.uid, { [field]: v })
 }
 
 function saveBaseline() {
@@ -108,7 +114,7 @@ const ac = (t: Task) => (t.isSummary ? (project.rollups.get(t.uid)?.actualCost ?
               <span :class="!t.isSummary && project.schedule.byUid.get(t.uid)?.critical ? 'text-coral-600 dark:text-coral-400' : ''">{{ t.name }}</span>
             </td>
             <td class="text-right">
-              <input v-if="!t.isSummary" :value="t.durationDays" class="w-14 rounded border border-transparent bg-transparent px-1 text-right tabular-nums hover:border-zinc-300 focus:border-amber-400 focus:outline-none dark:hover:border-zinc-700" aria-label="Duração" @change="edit(t, 'durationDays', ($event.target as HTMLInputElement).value)" />
+              <input v-if="!t.isSummary" :value="minutosParaDias(t.duracaoMin, project.minutosPorDia)" class="w-14 rounded border border-transparent bg-transparent px-1 text-right tabular-nums hover:border-zinc-300 focus:border-amber-400 focus:outline-none dark:hover:border-zinc-700" aria-label="Duração" @change="edit(t, 'durationDays', ($event.target as HTMLInputElement).value)" />
               <span v-else class="text-zinc-500">—</span>
             </td>
             <td class="tabular-nums">{{ fmtDate(sched(t)?.start) }}</td>
@@ -130,11 +136,11 @@ const ac = (t: Task) => (t.isSummary ? (project.rollups.get(t.uid)?.actualCost ?
               <input v-if="!t.isSummary" :value="Math.round(t.actualCost)" class="w-28 rounded border border-transparent bg-transparent px-1 text-right tabular-nums hover:border-zinc-300 focus:border-amber-400 focus:outline-none dark:hover:border-zinc-700" aria-label="Custo real" @change="edit(t, 'actualCost', ($event.target as HTMLInputElement).value)" />
               <span v-else class="tabular-nums">{{ fmtBRL(ac(t)) }}</span>
             </td>
-            <td class="mono">{{ formatPredecessors(t) }}</td>
+            <td class="mono">{{ formatPredecessors(t, project.minutosPorDia) }}</td>
             <td class="max-w-[180px] truncate text-[11px] text-zinc-500" :title="t.resources.map((r) => `${r.units} ${r.resource}`).join(', ')">{{ t.resources.map((r) => `${r.units} ${r.resource}`).join(', ') }}</td>
             <td class="mono">{{ t.sinapi }}</td>
             <td class="text-right tabular-nums">
-              <template v-if="!t.isSummary && t.percentComplete < 100">{{ project.schedule.byUid.get(t.uid)?.totalFloat }}d</template>
+              <template v-if="!t.isSummary && t.percentComplete < 100">{{ fmtNum(project.schedule.byUid.get(t.uid)?.totalFloat ?? 0) }}d</template>
             </td>
           </tr>
         </tbody>

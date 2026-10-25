@@ -51,7 +51,7 @@ const rows = computed<Row[]>(() =>
         bFinish: t.isSummary ? r?.baselineFinish : t.baselineFinish,
         pct: t.isSummary ? (r?.percentComplete ?? 0) : t.percentComplete,
         critical: t.isSummary ? false : !!s?.critical,
-        milestone: !t.isSummary && t.durationDays === 0,
+        milestone: !t.isSummary && t.duracaoMin === 0,
         y: i * ROW,
       }
     })

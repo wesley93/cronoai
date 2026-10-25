@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildSeedState } from '@/stores/useProjectStore'
-import { WorkCalendar, addCalendarDays } from './calendar'
+import { addCalendarDays } from './calendar'
+import { compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
 import {
   MAX_CALENDAR_DAYS,
@@ -14,9 +15,15 @@ import {
 } from './msProjectXmlParser'
 
 const seed = buildSeedState()
-const cal = new WorkCalendar(seed.meta.startDate, seed.calendar)
-const schedule = computeSchedule(seed.tasks, cal, { mode: 'forecast', statusDate: seed.meta.statusDate })
-const input = { meta: seed.meta, tasks: seed.tasks, calendar: seed.calendar, schedule }
+const cals = compilarCalendarios(seed.meta.startDate, seed.calendarios, seed.calendarioPadraoUid)
+const schedule = computeSchedule(seed.tasks, cals, { mode: 'forecast', statusDate: seed.meta.statusDate })
+const input = { meta: seed.meta, tasks: seed.tasks, calendarios: seed.calendarios, calendarioPadraoUid: seed.calendarioPadraoUid, schedule }
+
+/** Feriados e dias úteis extras do calendário padrão importado (as exceções não úteis e as úteis). */
+const feriados = (r: { calendarios: { excecoes: { data: string; intervalos: unknown[] }[] }[] }) =>
+  r.calendarios[0].excecoes.filter((ex) => ex.intervalos.length === 0).map((ex) => ex.data)
+const diasExtras = (r: { calendarios: { excecoes: { data: string; intervalos: unknown[] }[] }[] }) =>
+  r.calendarios[0].excecoes.filter((ex) => ex.intervalos.length > 0).map((ex) => ex.data)
 
 describe('buildMspdiXml', () => {
   const xml = buildMspdiXml(input)
@@ -108,13 +115,13 @@ describe('parseMspdiXml (arquivos vindos do MS Project)', () => {
 </Project>`
     const r = parseMspdiXml(xml)
     expect(r.tasks.map((t) => t.uid)).toEqual([10, 11, 12])
-    expect(r.tasks[0].durationDays).toBe(10) // 90 h / 9 h
-    expect(r.tasks[0].snet).toBe('2026-03-02') // sem vínculo: mantém a data do arquivo
+    expect(r.tasks[0].duracaoMin).toBe(4800) // 90 h / 9 h = 10 dias × 480 min
+    expect(r.tasks[0].restricao).toEqual({ tipo: 'SNET', data: '2026-03-02' }) // sem vínculo: mantém a data do arquivo
     expect(r.tasks[1].predecessors).toEqual([
-      { uid: 10, type: 'SS', lagDays: 3 }, // 16200 / 10 / 540
-      { uid: 12, type: 'FS', lagDays: 5 }, // 7 dias corridos ≈ 5 úteis
+      { uid: 10, type: 'SS', lag: { tipo: 'util', minutos: 1440 } }, // 16200 / 10 / 540 = 3 dias × 480 min
+      { uid: 12, type: 'FS', lag: { tipo: 'util', minutos: 2400 } }, // 7 dias corridos ≈ 5 úteis (o E2 passa a lag exato)
     ])
-    expect(r.calendar.holidays).toEqual(['2026-04-03'])
+    expect(feriados(r)).toEqual(['2026-04-03'])
     expect(r.meta.statusDate).toBe('2026-03-20')
     expect(r.warnings.join(' ')).toMatch(/inativa/)
     expect(r.warnings.join(' ')).toMatch(/9 h\/dia/)
@@ -158,7 +165,7 @@ describe('parseMspdiXml: exceções recorrentes do calendário (A1)', () => {
     })
     const r = parseMspdiXml(xml)
     // Antes: 400 datas seguidas, de 2026-12-25 a 2028-01-28 (limite do expandRange)
-    expect(r.calendar.holidays).toEqual(natal)
+    expect(feriados(r)).toEqual(natal)
     expect(r.warnings.join(' ')).not.toMatch(/recorrente/)
   })
 
@@ -167,7 +174,7 @@ describe('parseMspdiXml: exceções recorrentes do calendário (A1)', () => {
       head: calendario(`<Exceptions>${excecao('2026-12-25', '2028-12-25', { ocorrencias: 3 })}${excecao('2026-11-20', '2026-11-20')}</Exceptions>`),
     })
     const r = parseMspdiXml(xml)
-    expect(r.calendar.holidays).toEqual(['2026-11-20'])
+    expect(feriados(r)).toEqual(['2026-11-20'])
     expect(r.warnings).toContain('1 exceção(ões) recorrente(s) do calendário não aplicada(s): confira feriados e dias úteis extras.')
   })
 
@@ -176,7 +183,7 @@ describe('parseMspdiXml: exceções recorrentes do calendário (A1)', () => {
       head: calendario(`${legado(['2026-12-25'])}<Exceptions>${excecao('2027-06-01', '2028-06-01', { ocorrencias: 3 })}</Exceptions>`),
     })
     const r = parseMspdiXml(xml)
-    expect(r.calendar.holidays).toEqual(['2026-12-25'])
+    expect(feriados(r)).toEqual(['2026-12-25'])
     expect(r.warnings).toContain('1 exceção(ões) recorrente(s) do calendário não aplicada(s): confira feriados e dias úteis extras.')
   })
 
@@ -187,7 +194,7 @@ describe('parseMspdiXml: exceções recorrentes do calendário (A1)', () => {
     })
     const r = parseMspdiXml(xml)
     // Antes: 64 dias úteis extras (o intervalo inteiro)
-    expect(r.calendar.extraWorkingDays).toEqual(sabados)
+    expect(diasExtras(r)).toEqual(sabados)
     expect(r.warnings.join(' ')).not.toMatch(/recorrente/)
   })
 })
@@ -214,9 +221,9 @@ describe('parseMspdiXml: limites de segurança (S-1, S-2, S-3)', () => {
   it('S-3: exceção de 3 anos lê só 400 dias e avisa', () => {
     const xml = projeto({ head: calendario(`<Exceptions>${excecao('2026-01-01', '2028-12-31')}</Exceptions>`) })
     const r = parseMspdiXml(xml)
-    expect(r.calendar.holidays).toHaveLength(400)
-    expect(r.calendar.holidays[0]).toBe('2026-01-01')
-    expect(r.calendar.holidays[399]).toBe('2027-02-04')
+    expect(feriados(r)).toHaveLength(400)
+    expect(feriados(r)[0]).toBe('2026-01-01')
+    expect(feriados(r)[399]).toBe('2027-02-04')
     expect(r.warnings).toContain('1 exceção(ões) do calendário com mais de 400 dias: lidas apenas nos primeiros 400 dias.')
   })
 
@@ -225,7 +232,7 @@ describe('parseMspdiXml: limites de segurança (S-1, S-2, S-3)', () => {
     // Os dias inseridos ficam em 400, mas o orçamento conta os PERCORRIDOS: acaba na 25ª exceção (25 × 400 = 10.000) e o resto é ignorado.
     const blocos = Array.from({ length: 3000 }, (_, i) => excecao('2000-01-01', addCalendarDays('2099-12-31', -i)))
     const r = parseMspdiXml(projeto({ head: calendario(`<Exceptions>${blocos.join('')}</Exceptions>`) }))
-    expect(r.calendar.holidays).toHaveLength(400)
+    expect(feriados(r)).toHaveLength(400)
     expect(r.warnings).toContain('Calendário com mais de 10000 dias de exceção: o excedente não foi importado; confira feriados e dias úteis extras.')
     // as 25 primeiras são cortadas em 400 dias; a mesma exceção repetida em legado e <Exceptions> conta uma vez (teste abaixo)
     expect(r.warnings).toContain('25 exceção(ões) do calendário com mais de 400 dias: lidas apenas nos primeiros 400 dias.')
@@ -235,7 +242,7 @@ describe('parseMspdiXml: limites de segurança (S-1, S-2, S-3)', () => {
     const periodoLongo = periodo('2026-01-01', '2028-12-31')
     const legadoLongo = `<WeekDays><WeekDay><DayType>0</DayType><DayWorking>0</DayWorking>${periodoLongo}</WeekDay></WeekDays>`
     const r = parseMspdiXml(projeto({ head: calendario(`${legadoLongo}<Exceptions>${excecao('2026-01-01', '2028-12-31')}</Exceptions>`) }))
-    expect(r.calendar.holidays).toHaveLength(400)
+    expect(feriados(r)).toHaveLength(400)
     expect(r.warnings).toContain('1 exceção(ões) do calendário com mais de 400 dias: lidas apenas nos primeiros 400 dias.')
   })
 
@@ -246,7 +253,7 @@ describe('parseMspdiXml: limites de segurança (S-1, S-2, S-3)', () => {
       return excecao(de, addCalendarDays(de, 399)) // 400 dias cada, sem sobreposição
     })
     const r = parseMspdiXml(projeto({ head: calendario(`<Exceptions>${blocos.join('')}</Exceptions>`) }))
-    expect(r.calendar.holidays).toHaveLength(10_000) // 30 × 400 = 12.000 pedidos
+    expect(feriados(r)).toHaveLength(10_000) // 30 × 400 = 12.000 pedidos
     expect(r.warnings).toContain('Calendário com mais de 10000 dias de exceção: o excedente não foi importado; confira feriados e dias úteis extras.')
   })
 
@@ -280,12 +287,12 @@ describe('parseMspdiXml: avisos do que o import não preserva', () => {
     expect(volta.baselineFinish).toBeUndefined()
   })
 
-  it('C-4b: LB0 só com término é mantida, avisa (recalculada pelo cronograma) e faz ida e volta com strictOrder', () => {
+  it('C-4b: LB0 só com término é mantida, avisa (PV zero) e faz ida e volta com strictOrder', () => {
     const lb = '<Baseline><Number>0</Number><Finish>2026-04-30T17:00:00</Finish></Baseline>'
     const r = parseMspdiXml(projeto({ tasks: tarefa(1, { extra: lb }) }))
     expect(r.tasks[0].baselineStart).toBeUndefined()
     expect(r.tasks[0].baselineFinish).toBe('2026-04-30')
-    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem início: a linha de base delas será recalculada pelo cronograma ao importar.')
+    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem início: o término do arquivo é mantido e o valor planejado (PV) delas fica zero.')
     expect(r.warnings.join(' ')).not.toMatch(/sem término/)
 
     const tasks = seed.tasks.map((t) => (t.uid === 104 ? { ...t, baselineStart: undefined, baselineFinish: '2026-04-30' } : t))
@@ -324,7 +331,7 @@ describe('parseMspdiXml: avisos do que o import não preserva', () => {
       tarefa(3, { duration: 'PT12H0M0S', extra: '<DurationFormat>7</DurationFormat>' })
     const r = parseMspdiXml(projeto({ tasks }))
     // Valores iguais aos de antes: 24 h ÷ 8 h = 3 dias; 1 h vira marco; 12 h ÷ 8 h = 1,5 arredondado para 2
-    expect(r.tasks.map((t) => t.durationDays)).toEqual([3, 0, 2])
+    expect(r.tasks.map((t) => t.duracaoMin)).toEqual([1440, 0, 960])
     expect(r.warnings).toContain('1 tarefa(s) com duração em tempo corrido convertida como horas úteis: revise as durações.')
     expect(r.warnings).toContain('1 tarefa(s) com menos de meio dia de duração importada(s) como marco (0 dia).')
     expect(r.warnings).toContain('1 duração(ões) fracionária(s) arredondada(s) para dias úteis inteiros.')
@@ -332,7 +339,7 @@ describe('parseMspdiXml: avisos do que o import não preserva', () => {
 
   it('durações inteiras em dias úteis não geram aviso de duração', () => {
     const r = parseMspdiXml(projeto({ tasks: tarefa(1, { duration: 'PT16H0M0S', extra: '<DurationFormat>7</DurationFormat>' }) }))
-    expect(r.tasks[0].durationDays).toBe(2)
+    expect(r.tasks[0].duracaoMin).toBe(960)
     expect(r.warnings.join(' ')).not.toMatch(/duração|marco/)
   })
 
@@ -409,7 +416,7 @@ describe('parseMspdiXml: rodada 03 (chaves do protótipo, datas inválidas, ocor
       ),
     })
     const r = parseMspdiXml(xml)
-    expect(r.calendar.holidays).toEqual(['2026-11-20'])
+    expect(feriados(r)).toEqual(['2026-11-20'])
     expect(r.warnings).toContain('2 exceção(ões) do calendário com data inválida ignorada(s).')
     expect(r.warnings.join(' ')).not.toMatch(/abcdefghij|Invalid/)
   })
@@ -424,7 +431,7 @@ describe('parseMspdiXml: rodada 03 (chaves do protótipo, datas inválidas, ocor
     const exc = `<Exceptions>${excecao('2026-12-25', '2028-12-25', { ocorrencias: 3 })}</Exceptions>`
     const duas = parseMspdiXml(projeto({ head: calendario(`${legado(['2026-12-25', '2027-12-25'])}${exc}`) }))
     expect(duas.warnings).toContain('1 exceção(ões) recorrente(s) do calendário não aplicada(s): confira feriados e dias úteis extras.')
-    expect(duas.calendar.holidays).toEqual(['2026-12-25', '2027-12-25']) // o que a lista legada trouxe segue lido
+    expect(feriados(duas)).toEqual(['2026-12-25', '2027-12-25']) // o que a lista legada trouxe segue lido
     const tres = parseMspdiXml(projeto({ head: calendario(`${legado(['2026-12-25', '2027-12-25', '2028-12-25'])}${exc}`) }))
     expect(tres.warnings.join(' ')).not.toMatch(/recorrente/)
   })

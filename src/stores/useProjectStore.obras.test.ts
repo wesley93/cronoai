@@ -3,6 +3,8 @@ import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import aurora from '@/lib/__fixtures__/estado-v1-aurora.json?raw'
 import aurora75 from '@/lib/__fixtures__/estado-v1-aurora-75.json?raw'
+import auroraCenarios from '@/lib/__fixtures__/estado-v2-aurora-cenarios.json?raw'
+import { lerEstadoV1 } from '@/lib/migracaoEstado'
 import type { DadosObra } from '@/lib/obras'
 import { criarArmazenamentoMemoria, usarArmazenamento, type ArmazenamentoMemoria } from './armazenamentoObras'
 import { useProjectStore } from './useProjectStore'
@@ -57,14 +59,51 @@ describe('useProjectStore · multiobra', () => {
       expect(store.evm.cpi).toBeCloseTo(0.9349, 4)
       expect(store.state.tasks).toHaveLength(29)
       expect(store.state.tasks.filter((t) => !t.isSummary)).toHaveLength(20)
-      expect(estadoDe(store)).toEqual(JSON.parse(aurora))
+      // O estado agora é o da v1 levado ao esquema 3 (minutos e calendários); os números são os mesmos
+      const migrado = lerEstadoV1(aurora, 2026)
+      if (migrado.tipo !== 'ok') throw new Error('fixture inválida')
+      expect(estadoDe(store)).toEqual(JSON.parse(JSON.stringify(migrado.estado)))
+      expect(store.state.tasks.find((t) => t.uid === 104)?.duracaoMin).toBe(5760)
       expect(store.migracaoV1?.resultado).toBe('migrado')
       expect(store.avisosCarga).toEqual([])
       expect(store.estadoGravacao).toBe('salvo')
-      // gravada como a mesma string da v1 e com a v1 intocada
-      expect(adaptador.obras.get(store.obraAtivaId)?.json).toBe(aurora)
+      // gravada no esquema 3 e com a v1 intocada
+      expect(adaptador.obras.get(store.obraAtivaId)?.versaoEsquema).toBe(3)
+      expect(JSON.parse(adaptador.obras.get(store.obraAtivaId)!.json)).toEqual(JSON.parse(JSON.stringify(migrado.estado)))
       expect(adaptador.v1).toBe(aurora)
       expect(adaptador.indice?.migracaoV1?.resultado).toBe('migrado')
+    })
+
+    it('P-2: obra salva no esquema 2 com os 3 cenários abre com o mesmo cronograma e desfazer devolve o Aurora', async () => {
+      const adaptador = criarArmazenamentoMemoria(null)
+      const em = '2026-10-25T10:00:00.000Z'
+      adaptador.obras.set('o2', { id: 'o2', versaoEsquema: 2, json: auroraCenarios, atualizadoEm: em })
+      adaptador.indice = { versaoIndice: 1, obraAtivaId: 'o2', obras: [{ id: 'o2', nome: NOME_AURORA, atualizadoEm: em }] }
+      const store = await recarregar(adaptador)
+      expect(store.avisosCarga).toEqual([])
+      expect(store.state.appliedScenarios).toEqual(['crashing', 'fast-tracking', 'overtime'])
+      expect(store.schedule.projectFinish).toBe('2027-06-02') // entrega gravada com a fixture (motor antigo)
+      expect(store.taskByUid.get(105)!.duracaoMin).toBe(6240) // 13 dias
+      for (const k of ['crashing', 'fast-tracking', 'overtime'] as const) store.undoScenario(k)
+      expect(store.taskByUid.get(105)!.duracaoMin).toBe(7680) // volta aos 16 dias
+      expect(store.taskByUid.get(401)!.predecessors).toEqual([{ uid: 105, type: 'FS', lag: { tipo: 'util', minutos: 0 } }])
+      expect(store.state.calendarios[0].excecoes.filter((x) => x.intervalos.length > 0)).toEqual([]) // sem 24/10 e 31/10
+      expect(store.schedule.projectFinish).toBe('2027-06-23')
+      expect(store.state.undo).toEqual([])
+      // A próxima gravação já é no esquema 3
+      expect(await store.salvarAgora()).toBe(true)
+      expect(adaptador.obras.get('o2')?.versaoEsquema).toBe(3)
+    })
+
+    it('hora extra aplicada e desfeita deixa o calendário padrão exatamente como estava', async () => {
+      const { store } = await carregarCom(aurora)
+      const antes = JSON.parse(JSON.stringify(store.state.calendarios))
+      store.applyScenario(store.scenarios.overtime)
+      const extras = store.state.calendarios[0].excecoes.filter((x) => x.intervalos.length > 0)
+      expect(extras.map((x) => x.data)).toEqual(['2026-10-24', '2026-10-31'])
+      expect(extras[0].intervalos).toEqual([{ de: 480, ate: 720 }, { de: 780, ate: 1020 }])
+      store.undoScenario('overtime')
+      expect(JSON.parse(JSON.stringify(store.state.calendarios))).toEqual(antes)
     })
 
     it('N-5: migra a v1 com apontamento aprovado (16/06/27, +11 d.u., UID 104 em 75%)', async () => {
@@ -610,6 +649,21 @@ describe('useProjectStore · multiobra', () => {
       expect(store.delay.delayDays).toBe(16)
       expect(store.evm.spi).toBeCloseTo(0.8883, 4)
       expect(store.evm.cpi).toBeCloseTo(0.9349, 4)
+    })
+
+    it('CR-12: importar .xml com LB0 só de término mantém o término do arquivo e o PV da tarefa é zero', async () => {
+      const { store } = await carregarCom(aurora)
+      const xml = store.exportXml().xml
+      // Na tarefa 303, remove o <Start> da linha de base 0 (o MS Project grava LB0 incompleta assim)
+      const i = xml.indexOf('<UID>303</UID>')
+      const j = xml.indexOf('<Baseline>', i)
+      const fim = xml.indexOf('</Baseline>', j)
+      const bloco = xml.slice(j, fim).replace(/\s*<Start>[^<]*<\/Start>/, '').replace(/<Finish>[^<]*<\/Finish>/, '<Finish>2027-01-29T17:00:00</Finish>')
+      store.importXml(xml.slice(0, j) + bloco + xml.slice(fim))
+      const t = store.taskByUid.get(303)!
+      expect(t.baselineStart).toBeUndefined()
+      expect(t.baselineFinish).toBe('2027-01-29')
+      expect(store.msProjectTask(303)!.PlannedValue).toBe(0)
     })
 
     it('adiar o início de uma obra NÃO iniciada, mantendo a data de status, desloca a entrega 19 d.u. e o atraso fica em +20 d.u.', async () => {

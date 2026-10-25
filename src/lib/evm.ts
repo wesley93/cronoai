@@ -1,6 +1,7 @@
 // Gerenciamento do Valor Agregado (EVM / PMBOK) e Curva S físico-financeira.
 import type { ScheduleResult, Task } from '@/types/domain'
 import { addCalendarDays, parseISO, toISO, type WorkCalendar } from './calendar'
+import { MINUTOS_NO_DIA_CORRIDO, diaRelativo, type CalendarioCompilado, type CalendariosCompilados } from './calendarioTrabalho'
 
 export interface EvmMetrics {
   bac: number
@@ -35,27 +36,31 @@ export interface SCurvePoint {
 
 const safeDiv = (a: number, b: number, fallback = 1) => (b === 0 ? fallback : a / b)
 
-/** Fração (0..1) do intervalo [start, finish] (inclusive, dias úteis) decorrida até `date`. */
-function elapsedFraction(cal: WorkCalendar, start: string, finish: string, date: string): number {
+/**
+ * Fração (0..1) do intervalo [start, finish] (inclusive) decorrida até `date`, em minutos úteis do calendário da tarefa.
+ * PV usa o calendário sem as exceções úteis (regra de hoje: sábado de hora extra não entra no valor planejado, CR-2d).
+ */
+function elapsedFraction(cal: CalendarioCompilado, start: string, finish: string, date: string): number {
   if (date < start) return 0
   if (date >= finish) return 1
-  const total = cal.countWorkingBetween(start, addCalendarDays(finish, 1))
+  const ini = diaRelativo(cal.base, start) * MINUTOS_NO_DIA_CORRIDO
+  const total = cal.minutosUteisEntre(ini, (diaRelativo(cal.base, finish) + 1) * MINUTOS_NO_DIA_CORRIDO)
   if (total <= 0) return 1
-  const done = cal.countWorkingBetween(start, addCalendarDays(date, 1))
+  const done = cal.minutosUteisEntre(ini, (diaRelativo(cal.base, date) + 1) * MINUTOS_NO_DIA_CORRIDO)
   return Math.min(1, Math.max(0, done / total))
 }
 
-export function plannedFraction(task: Task, cal: WorkCalendar, date: string): number {
+export function plannedFraction(task: Task, cals: CalendariosCompilados, date: string): number {
   if (!task.baselineStart || !task.baselineFinish) return 0
-  return elapsedFraction(cal, task.baselineStart, task.baselineFinish, date)
+  return elapsedFraction(cals.de(task.calendarioUid), task.baselineStart, task.baselineFinish, date)
 }
 
 /** Fração do avanço físico atual que já havia sido realizada em `date` (distribuição linear no período real). */
-function earnedShareAt(task: Task, cal: WorkCalendar, date: string, statusDate: string): number {
+function earnedShareAt(task: Task, cals: CalendariosCompilados, date: string, statusDate: string): number {
   if (task.percentComplete <= 0 || !task.actualStart) return 0
   const end = task.percentComplete >= 100 && task.actualFinish ? task.actualFinish : statusDate
   if (end < task.actualStart) return date >= task.actualStart ? 1 : 0
-  return elapsedFraction(cal, task.actualStart, end, date)
+  return elapsedFraction(cals.de(task.calendarioUid), task.actualStart, end, date)
 }
 
 function metrics(bac: number, pv: number, ev: number, ac: number): EvmMetrics {
@@ -80,7 +85,7 @@ function metrics(bac: number, pv: number, ev: number, ac: number): EvmMetrics {
   }
 }
 
-export function computeEvm(tasks: Task[], cal: WorkCalendar, statusDate: string): EvmMetrics {
+export function computeEvm(tasks: Task[], cal: CalendariosCompilados, statusDate: string): EvmMetrics {
   const leaves = tasks.filter((t) => !t.isSummary)
   let bac = 0, pv = 0, ev = 0, ac = 0
   for (const t of leaves) {
@@ -93,7 +98,7 @@ export function computeEvm(tasks: Task[], cal: WorkCalendar, statusDate: string)
 }
 
 /** EVM por pacote de 1º nível da EAP (01, 02, ...). */
-export function computePackageEvm(tasks: Task[], cal: WorkCalendar, statusDate: string): PackageEvm[] {
+export function computePackageEvm(tasks: Task[], cal: CalendariosCompilados, statusDate: string): PackageEvm[] {
   const groups = tasks.filter((t) => t.isSummary && t.outlineLevel === 1)
   return groups.map((g) => {
     const kids = tasks.filter((t) => !t.isSummary && t.wbs.startsWith(g.wbs + '.'))
@@ -122,7 +127,7 @@ function monthEnds(fromIso: string, toIso: string): string[] {
  */
 export function computeSCurve(
   tasks: Task[],
-  cal: WorkCalendar,
+  cal: CalendariosCompilados,
   statusDate: string,
   forecast: ScheduleResult,
   monthLabel: (iso: string) => string,
@@ -152,7 +157,7 @@ export function computeSCurve(
         const remainingValue = t.bac - earnedNow
         // Saldo distribuído no período previsto restante
         const restStart = s.start > statusDate ? s.start : addCalendarDays(statusDate, 1)
-        const frac = s.finish < restStart ? (cut >= s.finish ? 1 : 0) : elapsedFraction(cal, restStart, s.finish, cut)
+        const frac = s.finish < restStart ? (cut >= s.finish ? 1 : 0) : elapsedFraction(cal.de(t.calendarioUid), restStart, s.finish, cut)
         fc += earnedNow + remainingValue * (cut > statusDate ? frac : 0)
       }
     }

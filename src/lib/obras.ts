@@ -3,6 +3,7 @@ import type { IndiceObras, PersistedState, ResumoObra } from '@/types/obra'
 import type { ProjectMeta } from '@/types/domain'
 import { REGIMES_SINAPI, ROTULO_REGIME_SINAPI, UFS, type RegimeSinapi, type UF } from '@/data/ufs'
 import { defaultHolidays, parseISO, toISO } from './calendar'
+import { UID_CALENDARIO_PADRAO, calendarioPadrao } from './calendarioTrabalho'
 
 export const MAX_NOME_OBRA = 120
 export const MAX_MUNICIPIO = 80
@@ -102,7 +103,8 @@ export function estadoObraVazia(d: DadosObra, custoIndiretoDiario: number): Pers
   return {
     meta,
     tasks: [],
-    calendar: { holidays: defaultHolidays(ano, ano + 3), extraWorkingDays: [] },
+    calendarios: [calendarioPadrao(defaultHolidays(ano, ano + 3))],
+    calendarioPadraoUid: UID_CALENDARIO_PADRAO,
     reports: [],
     restrictions: [],
     materials: [],

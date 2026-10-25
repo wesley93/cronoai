@@ -11,7 +11,7 @@ import BudgetSheet from './sinapi/BudgetSheet.vue'
 import { SINAPI_CATALOG, SINAPI_REFERENCE_URL } from '@/data/sinapiCatalog'
 import { HOURS_PER_DAY, durationFromTeam, scheduleDays, teamFromDuration, totalManHours } from '@/lib/sinapi'
 import { rateOf } from '@/lib/scenarios'
-import { fmtBRL, fmtDate, fmtNum } from '@/lib/format'
+import { fmtBRL, fmtDate, fmtDiasUteis, fmtNum } from '@/lib/format'
 import { descreverTabelaSinapi } from '@/lib/obras'
 
 const project = useProjectStore()
@@ -109,7 +109,7 @@ function add() {
     return
   }
   const t = project.addSinapiTask(input.value)
-  ui.notify('success', `Pacote adicionado: [UID ${t.uid}] ${t.wbs}`, `${t.durationDays} dias úteis · ${officials.value} ${item.professional.toLowerCase()}(s) + ${helpers.value} servente(s) · vínculo ${linkType.value}.`)
+  ui.notify('success', `Pacote adicionado: [UID ${t.uid}] ${t.wbs}`, `${fmtDiasUteis(t.duracaoMin, project.minutosPorDia)} dias úteis · ${officials.value} ${item.professional.toLowerCase()}(s) + ${helpers.value} servente(s) · vínculo ${linkType.value}.`)
 }
 </script>
 
@@ -256,7 +256,7 @@ function add() {
                 <span v-if="preview.deltaDays > 0" class="chip-critical">+{{ preview.deltaDays }} dias úteis</span>
                 <span v-else class="chip-ok">sem impacto</span>
                 <span v-if="preview.critical" class="chip-critical">Entra no caminho crítico</span>
-                <span v-else class="chip-neutral">Folga {{ preview.totalFloat }}d</span>
+                <span v-else class="chip-neutral">Folga {{ fmtNum(preview.totalFloat) }}d</span>
               </div>
             </div>
 
@@ -271,7 +271,7 @@ function add() {
               <div class="min-w-0 flex-1">
                 <div class="font-mono text-[11.5px] font-semibold">[UID {{ t.uid }}] {{ t.wbs }}</div>
                 <div class="truncate text-[12px]">{{ t.name }}</div>
-                <div class="text-[11px] text-zinc-500">{{ t.durationDays }} d.u. · {{ fmtBRL(t.bac) }} · {{ t.resources.map((r) => `${r.units} ${r.resource}`).join(' + ') }}</div>
+                <div class="text-[11px] text-zinc-500">{{ fmtDiasUteis(t.duracaoMin, project.minutosPorDia) }} d.u. · {{ fmtBRL(t.bac) }} · {{ t.resources.map((r) => `${r.units} ${r.resource}`).join(' + ') }}</div>
               </div>
               <button class="btn-ghost px-2 py-1" title="Remover da EAP" @click="project.removeTask(t.uid)"><Trash2 class="h-3.5 w-3.5" /></button>
             </li>

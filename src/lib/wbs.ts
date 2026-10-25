@@ -1,5 +1,6 @@
 // Utilitários de EAP: hierarquia, consolidação (rollup) de tarefas-resumo e leitura de pavimentos.
-import type { ScheduleResult, Task } from '@/types/domain'
+import type { Lag, ScheduleResult, Task } from '@/types/domain'
+import { MINUTOS_POR_DIA_PADRAO, minutosParaDias } from './calendarioTrabalho'
 
 export interface SummaryRollup {
   uid: number
@@ -44,8 +45,8 @@ export function rollupSummaries(tasks: Task[], schedule: ScheduleResult): Map<nu
     if (!scheduled.length) continue
     const bac = kids.reduce((acc, k) => acc + k.bac, 0)
     const earned = kids.reduce((acc, k) => acc + (k.bac * k.percentComplete) / 100, 0)
-    const durTotal = kids.reduce((acc, k) => acc + k.durationDays, 0)
-    const pct = bac > 0 ? (earned / bac) * 100 : durTotal > 0 ? kids.reduce((a, k) => a + k.durationDays * k.percentComplete, 0) / durTotal : 0
+    const durTotal = kids.reduce((acc, k) => acc + k.duracaoMin, 0)
+    const pct = bac > 0 ? (earned / bac) * 100 : durTotal > 0 ? kids.reduce((a, k) => a + k.duracaoMin * k.percentComplete, 0) / durTotal : 0
     const bStarts = kids.map((k) => k.baselineStart).filter((x): x is string => !!x)
     const bFinishes = kids.map((k) => k.baselineFinish).filter((x): x is string => !!x)
     out.set(s.uid, {
@@ -132,11 +133,17 @@ export function nextUid(tasks: Task[]): number {
 
 const LINK_PT: Record<string, string> = { FS: 'Término-Início', SS: 'Início-Início', FF: 'Término-Término', SF: 'Início-Término' }
 
+/** Rótulo do lag no estilo MS Project, em dias da obra: "+10", "-2", "+0,5"; vazio quando é zero. */
+export function rotuloLag(lag: Lag, minutosPorDia = MINUTOS_POR_DIA_PADRAO): string {
+  const dias = Math.round(minutosParaDias(lag.minutos, minutosPorDia) * 100) / 100
+  if (!dias) return ''
+  const texto = String(dias).replace('.', ',')
+  return dias > 0 ? `+${texto}` : texto
+}
+
 /** Predecessoras no estilo MS Project: "104FS; 401SS+10". */
-export function formatPredecessors(task: Task): string {
-  return task.predecessors
-    .map((p) => `${p.uid}${p.type}${p.lagDays ? (p.lagDays > 0 ? `+${p.lagDays}` : p.lagDays) : ''}`)
-    .join('; ')
+export function formatPredecessors(task: Task, minutosPorDia = MINUTOS_POR_DIA_PADRAO): string {
+  return task.predecessors.map((p) => `${p.uid}${p.type}${rotuloLag(p.lag, minutosPorDia)}`).join('; ')
 }
 
 export function describeLink(type: string): string {

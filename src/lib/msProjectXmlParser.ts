@@ -1,8 +1,17 @@
 // Conversor MS Project Data Interchange (MSPDI): estado da store <-> arquivo .xml do MS Project.
 // Referência do esquema: https://learn.microsoft.com/office-project/xml-data-interchange/project-xml-data-interchange-schema-reference
 // A ordem dos elementos segue as sequências (xs:sequence) do esquema MSPDI; o validador abaixo confere essa ordem.
-import type { LinkType, ProjectMeta, ScheduleResult, Task, WorkCalendarConfig } from '@/types/domain'
+import type { CalendarioObra, IntervaloTrabalho, Lag, LinkType, ProjectMeta, ScheduleResult, Task } from '@/types/domain'
 import { WorkCalendar, addCalendarDays, defaultHolidays } from './calendar'
+import {
+  UID_CALENDARIO_PADRAO,
+  calendarioDeDias,
+  calendarioPadrao,
+  compilarCalendarios,
+  diasParaMinutos,
+  minutosParaDias,
+  type CalendariosCompilados,
+} from './calendarioTrabalho'
 import { compareWbs, normalizeText, parseFloorRange, rollupSummaries, type SummaryRollup } from './wbs'
 
 export const MSPDI_NAMESPACE = 'http://schemas.microsoft.com/project'
@@ -165,22 +174,57 @@ const money = (v: number) => (Math.round(v * 100) / 100).toFixed(2)
 export interface MspdiExportInput {
   meta: ProjectMeta
   tasks: Task[]
-  calendar: WorkCalendarConfig
+  calendarios: CalendarioObra[]
+  calendarioPadraoUid: number
   schedule: ScheduleResult
 }
 
 interface TaskContext {
   schedule: ScheduleResult
   rollups: Map<number, SummaryRollup>
+  /** Dia útil do calendário padrão: só para a duração das tarefas-resumo (contagem de dias úteis). */
   cal: WorkCalendar
+  cals: CalendariosCompilados
 }
 
 function createContext(input: MspdiExportInput): TaskContext {
+  const cals = compilarCalendarios(input.meta.startDate, input.calendarios, input.calendarioPadraoUid)
   return {
     schedule: input.schedule,
     rollups: rollupSummaries(input.tasks, input.schedule),
-    cal: new WorkCalendar(input.meta.startDate, input.calendar),
+    cal: calendarioDeDias(cals.padrao),
+    cals,
   }
+}
+
+/** Minutos do dia → hh:mm:ss do MSPDI (24:00 vira 00:00:00, como o MS Project grava). */
+function horaMspdi(minutos: number): string {
+  const m = minutos >= 1440 ? 0 : minutos
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}:00`
+}
+
+const workingTimesNode = (intervalos: readonly IntervaloTrabalho[]): XNode | null =>
+  x('WorkingTimes', intervalos.map((iv) => x('WorkingTime', [x('FromTime', horaMspdi(iv.de)), x('ToTime', horaMspdi(iv.ate))])))
+
+const periodNode = (d: string): XNode | null => x('TimePeriod', [x('FromDate', `${d}T00:00:00`), x('ToDate', `${d}T23:59:00`)])
+
+function calendarNode(cal: CalendarioObra): XNode | null {
+  const naoUteis = cal.excecoes.filter((ex) => ex.intervalos.length === 0)
+  const uteis = cal.excecoes.filter((ex) => ex.intervalos.length > 0)
+  return x('Calendar', [
+    x('UID', cal.uid),
+    x('Name', cal.nome),
+    x('IsBaseCalendar', 1),
+    x('BaseCalendarUID', -1),
+    x('WeekDays', [
+      ...[1, 2, 3, 4, 5, 6, 7].map((day) => {
+        const intervalos = cal.semana[day - 1] // DayType 1 = domingo … 7 = sábado
+        return x('WeekDay', [x('DayType', day), x('DayWorking', intervalos.length > 0), intervalos.length > 0 && workingTimesNode(intervalos)])
+      }),
+      ...naoUteis.map((ex) => x('WeekDay', [x('DayType', 0), x('DayWorking', 0), periodNode(ex.data)])),
+      ...uteis.map((ex) => x('WeekDay', [x('DayType', 0), x('DayWorking', 1), periodNode(ex.data), workingTimesNode(ex.intervalos)])),
+    ]),
+  ])
 }
 
 function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
@@ -190,7 +234,7 @@ function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
   const finish = t.isSummary ? r?.finish : s?.finish
   const duration = t.isSummary
     ? start && finish ? ctx.cal.countWorkingBetween(start, addCalendarDays(finish, 1)) : 0
-    : t.durationDays
+    : minutosParaDias(t.duracaoMin)
   const milestone = !t.isSummary && duration === 0
   const pct = Math.round(t.isSummary ? (r?.percentComplete ?? 0) : t.percentComplete)
   const cost = t.isSummary ? (r?.bac ?? 0) : t.bac
@@ -199,7 +243,6 @@ function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
   const startTime = milestone ? '17:00:00' : '08:00:00'
   const slackUnits = (days: number) => Math.round(days * DEFAULT_MINUTES_PER_DAY * 10)
   const leaf = !t.isSummary
-  const lateFinishIdx = s ? Math.max(s.ls, s.lf - 1) : 0
   const bStart = t.isSummary ? r?.baselineStart : t.baselineStart
   const bFinish = t.isSummary ? r?.baselineFinish : t.baselineFinish
 
@@ -220,10 +263,10 @@ function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
     x('Milestone', milestone),
     x('Summary', t.isSummary),
     x('Critical', critical),
-    leaf && s && x('EarlyStart', dt(ctx.cal.dateAt(s.es), startTime)),
-    leaf && s && x('EarlyFinish', dt(milestone ? finish : ctx.cal.dateAt(Math.max(s.es, s.ef - 1)), '17:00:00')),
-    leaf && s && x('LateStart', dt(ctx.cal.dateAt(s.ls), startTime)),
-    leaf && s && x('LateFinish', dt(milestone ? ctx.cal.dateAt(Math.max(0, s.lf - 1)) : ctx.cal.dateAt(lateFinishIdx), '17:00:00')),
+    leaf && s && x('EarlyStart', dt(s.earlyStart, startTime)),
+    leaf && s && x('EarlyFinish', dt(s.earlyFinish, '17:00:00')),
+    leaf && s && x('LateStart', dt(s.lateStart, startTime)),
+    leaf && s && x('LateFinish', dt(s.lateFinish, '17:00:00')),
     leaf && s && x('FreeSlack', slackUnits(s.freeFloat)),
     leaf && s && x('TotalSlack', slackUnits(s.totalFloat)),
     x('FixedCost', money(leaf ? t.bac : 0)),
@@ -235,15 +278,15 @@ function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
     leaf && x('ActualDuration', toDuration((duration * t.percentComplete) / 100)),
     x('ActualCost', money(actualCost)),
     leaf && x('RemainingDuration', toDuration((duration * (100 - t.percentComplete)) / 100)),
-    x('ConstraintType', t.snet ? 4 : 0), // 4 = Não iniciar antes de
-    t.snet && x('ConstraintDate', dt(t.snet, '08:00:00')),
+    x('ConstraintType', t.restricao ? 4 : 0), // 4 = Não iniciar antes de
+    t.restricao && x('ConstraintDate', dt(t.restricao.data, '08:00:00')),
     x('Notes', t.notes),
     ...t.predecessors.map((p) =>
       x('PredecessorLink', [
         x('PredecessorUID', p.uid),
         x('Type', LINK_TO_CODE[p.type]),
         x('CrossProject', 0),
-        x('LinkLag', Math.round(p.lagDays * DEFAULT_MINUTES_PER_DAY * 10)),
+        x('LinkLag', p.lag.minutos * 10),
         x('LagFormat', 7),
       ]),
     ),
@@ -256,7 +299,7 @@ function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
         x('Number', 0),
         x('Start', dt(bStart, startTime)),
         x('Finish', dt(bFinish, '17:00:00')),
-        bStart && bFinish && x('Duration', toDuration(t.isSummary ? 0 : (t.baselineDuration ?? duration))),
+        bStart && bFinish && x('Duration', toDuration(t.isSummary ? 0 : t.baselineDuracaoMin !== undefined ? minutosParaDias(t.baselineDuracaoMin) : duration)),
         bStart && bFinish && x('DurationFormat', 7),
         x('Cost', money(cost)),
       ]),
@@ -270,18 +313,12 @@ export function buildTaskXml(task: Task, input: MspdiExportInput): string {
 }
 
 export function buildMspdiXml(input: MspdiExportInput): string {
-  const { meta, tasks, calendar, schedule } = input
+  const { meta, tasks, calendarios, calendarioPadraoUid, schedule } = input
   const ctx = createContext(input)
   const now = new Date().toISOString().slice(0, 19)
   const sorted = [...tasks].sort((a, b) => compareWbs(a.wbs, b.wbs))
   const resourceNames = [...new Set(tasks.flatMap((t) => t.resources.map((r) => r.resource)))]
   const totalBac = tasks.filter((t) => !t.isSummary).reduce((a, t) => a + t.bac, 0)
-  const workingTimes = x('WorkingTimes', [
-    x('WorkingTime', [x('FromTime', '08:00:00'), x('ToTime', '12:00:00')]),
-    x('WorkingTime', [x('FromTime', '13:00:00'), x('ToTime', '17:00:00')]),
-  ])
-  const period = (d: string) => x('TimePeriod', [x('FromDate', `${d}T00:00:00`), x('ToDate', `${d}T23:59:00`)])
-
   const project: XNode = {
     tag: 'Project',
     attrs: { xmlns: MSPDI_NAMESPACE },
@@ -302,7 +339,7 @@ export function buildMspdiXml(input: MspdiExportInput): string {
       x('CurrencySymbol', 'R$'),
       x('CurrencyCode', 'BRL'),
       x('CurrencySymbolPosition', 2),
-      x('CalendarUID', 1),
+      x('CalendarUID', calendarioPadraoUid),
       x('DefaultStartTime', '08:00:00'),
       x('DefaultFinishTime', '17:00:00'),
       x('MinutesPerDay', DEFAULT_MINUTES_PER_DAY),
@@ -319,22 +356,7 @@ export function buildMspdiXml(input: MspdiExportInput): string {
         x('ExtendedAttribute', [x('FieldID', FIELD_SINAPI), x('FieldName', 'Text1'), x('Alias', 'Código SINAPI')]),
         x('ExtendedAttribute', [x('FieldID', FIELD_LEAD_TIME), x('FieldName', 'Number1'), x('Alias', 'Lead Time Insumo (dias)')]),
       ]),
-      x('Calendars', [
-        x('Calendar', [
-          x('UID', 1),
-          x('Name', 'Padrão Obra (seg-sex, 8h)'),
-          x('IsBaseCalendar', 1),
-          x('BaseCalendarUID', -1),
-          x('WeekDays', [
-            ...[1, 2, 3, 4, 5, 6, 7].map((day) => {
-              const working = day >= 2 && day <= 6
-              return x('WeekDay', [x('DayType', day), x('DayWorking', working), working && workingTimes])
-            }),
-            ...calendar.holidays.map((h) => x('WeekDay', [x('DayType', 0), x('DayWorking', 0), period(h)])),
-            ...calendar.extraWorkingDays.map((d) => x('WeekDay', [x('DayType', 0), x('DayWorking', 1), period(d), workingTimes])),
-          ]),
-        ]),
-      ]),
+      x('Calendars', calendarios.map(calendarNode)),
       x('Tasks', [
         x('Task', [
           x('UID', 0), x('ID', 0), x('Name', meta.name), x('Type', 1), x('IsNull', 0), x('WBS', 0), x('OutlineNumber', 0),
@@ -501,9 +523,13 @@ export function validateMspdi(xml: string, options: { strictOrder?: boolean } = 
 export interface MspdiImportResult {
   meta: Partial<ProjectMeta>
   tasks: Task[]
-  calendar: WorkCalendarConfig
+  calendarios: CalendarioObra[]
+  calendarioPadraoUid: number
   warnings: string[]
 }
+
+/** Restrição "Não iniciar antes de" a partir da data do arquivo (E1: só SNET). */
+const snetDe = (data: string | undefined): Task['restricao'] => (data ? { tipo: 'SNET', data } : undefined)
 
 export function parseMspdiXml(xmlText: string): MspdiImportResult {
   if (xmlText.length > MAX_MSPDI_CHARS) throw new Error('Arquivo muito grande: o limite para importação é de 15 MB.')
@@ -708,7 +734,8 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
           percentLags++
           lagDays = 0
         } else if ((num(l, 'LinkLag') ?? 0) !== 0 && ![7, 39].includes(num(l, 'LagFormat') ?? 7)) lagOtherFormat++ // o export regrava em dias úteis (LagFormat 7)
-        return { uid: num(l, 'PredecessorUID') ?? -1, type: linkTypeOf(text(l, 'Type') ?? '1') ?? 'FS', lagDays }
+        const lag: Lag = { tipo: 'util', minutos: diasParaMinutos(lagDays) }
+        return { uid: num(l, 'PredecessorUID') ?? -1, type: linkTypeOf(text(l, 'Type') ?? '1') ?? 'FS', lag }
       })
       .filter((p) => p.uid > 0 && p.uid !== uid)
     const pct = Math.min(100, Math.max(0, num(node, 'PercentComplete') ?? 0))
@@ -738,7 +765,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
       name,
       outlineLevel: level,
       isSummary,
-      durationDays,
+      duracaoMin: diasParaMinutos(durationDays),
       predecessors: preds,
       percentComplete: isSummary ? 0 : pct,
       actualStart: pct > 0 ? (isoDate(text(node, 'ActualStart')) ?? start) : undefined,
@@ -750,13 +777,14 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
       leadTimeDays: lead !== undefined && lead !== '' && !Number.isNaN(Number(lead)) ? Number(lead) : undefined,
       baselineStart,
       baselineFinish,
-      baselineDuration: baseline ? Math.round(fromDuration(text(baseline, 'Duration'), minutesPerDay)) : undefined,
-      snet:
+      baselineDuracaoMin: baseline ? diasParaMinutos(Math.round(fromDuration(text(baseline, 'Duration'), minutesPerDay))) : undefined,
+      restricao: snetDe(
         text(node, 'ConstraintType') === '4'
           ? isoDate(text(node, 'ConstraintDate'))
           : !isSummary && preds.length === 0 && pct === 0
             ? start // sem vínculos: preserva a data do arquivo
             : undefined,
+      ),
       floors: parseFloorRange(name),
       notes: text(node, 'Notes'),
     })
@@ -767,9 +795,9 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   if (percentLags) warnings.push(`${percentLags} vínculo(s) com latência em % ou formato desconhecido importados com latência zero.`)
   if (lagOtherFormat) warnings.push(`${lagOtherFormat} vínculo(s) com lag em formato diferente de dias úteis: serão exportados em dias úteis.`)
   if (otherBaselines) warnings.push(`Linhas de base 1 a 10 não importadas em ${otherBaselines} tarefa(s): o CronoAI usa só a linha de base 0.`)
-  // Sem término, evm.ts devolve PV zero. Sem início, a store (withBaseline onlyMissing olha só baselineStart) recalcula a LB pelo cronograma.
+  // Sem término ou sem início, evm.ts devolve PV zero: a store mantém a LB0 incompleta do arquivo (withBaseline onlyMissing, CR-12).
   if (baselineNoFinish) warnings.push(`${baselineNoFinish} tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.`)
-  if (baselineNoStart) warnings.push(`${baselineNoStart} tarefa(s) com linha de base 0 sem início: a linha de base delas será recalculada pelo cronograma ao importar.`)
+  if (baselineNoStart) warnings.push(`${baselineNoStart} tarefa(s) com linha de base 0 sem início: o término do arquivo é mantido e o valor planejado (PV) delas fica zero.`)
   if (elapsedDurations) warnings.push(`${elapsedDurations} tarefa(s) com duração em tempo corrido convertida como horas úteis: revise as durações.`)
   if (milestoneFromShort) warnings.push(`${milestoneFromShort} tarefa(s) com menos de meio dia de duração importada(s) como marco (0 dia).`)
   if (fractionalDurations) warnings.push(`${fractionalDurations} duração(ões) fracionária(s) arredondada(s) para dias úteis inteiros.`)
@@ -795,10 +823,8 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   return {
     meta,
     tasks,
-    calendar: {
-      holidays: holidays.size ? [...holidays].sort() : defaultHolidays(fromYear, fromYear + 4),
-      extraWorkingDays: [...extra].sort(),
-    },
+    calendarios: [calendarioPadrao(holidays.size ? [...holidays].sort() : defaultHolidays(fromYear, fromYear + 4), [...extra].sort())],
+    calendarioPadraoUid: UID_CALENDARIO_PADRAO,
     warnings,
   }
 }
