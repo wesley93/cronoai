@@ -5,8 +5,9 @@ ciclo: .claude/ciclos/00001-e2e-cobertura.md
 branch: feat/00001-e2e-cobertura
 base: master
 faixa: 3
-status: rascunho
+status: aprovado
 data: 2026-10-25
+aprovado-em: 2026-10-25
 ---
 
 > Adaptado de Sophia.Escolar.Hibrido / SophIA (`.claude/templates/TEMPLATE-PLANO.md`) para o CronoAI em 25/10/2026.
@@ -17,8 +18,8 @@ data: 2026-10-25
 - **O que é:** testes de ponta a ponta (Playwright, Chromium) dos fluxos principais do CronoAI, rodando localmente e num job novo do CI, e cobertura de testes (`@vitest/coverage-v8`) com mínimo de 80% em `src/lib`, bloqueando o CI. Nenhum código de produção em `src/` muda.
 - **Risco que justifica a faixa 3:** T5, com duas dependências novas (`@playwright/test`, `@vitest/coverage-v8`) e download de navegador no CI. Também T7 (`ci.yml`, `.dockerignore`).
 - **Por que primeiro:** é a rede de proteção para o multiobra (00002, que reestrutura a store), para a robustez do import com o corpus MSPDI (00003) e para o motor em minutos (00004). Ver `docs/specs/PLANO-FASE-1.md`.
-- **O que você precisa fazer:** responder à **P1** (métrica do limiar; seção 12), aprovar o plano e validar com **Jurídico** (licenças) e **Segurança da Informação** (dependências e download do navegador no CI) antes do uso em produção. O merge não depende disso: são só dependências de desenvolvimento.
-- **Estado:** rascunho, **bloqueado na P1**. As tarefas que dependem da resposta estão marcadas.
+- **O que você precisa fazer:** nada no gate (plano aprovado em 25/10/2026, com P1 = (B)). Validar com **Jurídico** (licenças) e **Segurança da Informação** (dependências e download do navegador no CI) antes do uso em produção. O merge não depende disso: são só dependências de desenvolvimento.
+- **Estado:** **aprovado em 25/10/2026**. Decisão do usuário na P1: "80% nas 4 métricas", ou seja, limiar global de 80% em linhas, instruções, funções e ramos de `src/lib` (sem `download.ts`/`useMsProject.ts`), com os testes de borda da tarefa 3.
 
 ## 01. Pedido e objetivo
 SPEC-00, §9 item 2 (incremento 0.2): "Playwright E2E, cobertura de testes (`@vitest/coverage-v8`) com mínimo de 80% em `src/lib`". Critério da §7: "Playwright E2E cobrindo o fluxo 'aprovar apontamento → exportar XML' e 'aplicar cenário'". RNF afetados: RNF-00.1 (só actions oficiais), RNF-00.2 (`permissions` mínimas), RNF-00.3 (CI em menos de 5 min), RNF-00.5 (Node do `.nvmrc`).
@@ -45,7 +46,7 @@ SPEC-00, §9 item 2 (incremento 0.2): "Playwright E2E, cobertura de testes (`@vi
 
 ## 02. Triagem
 - **T1 NÃO:** nenhum arquivo de `cpm.ts`/`calendar.ts` muda.
-- **T2 NÃO:** `evm.ts`, `scenarios.ts`, `supplies.ts`, `sinapi*.ts` e `progressPatch` não mudam. Os testes novos de ramos (opção B/C da P1) não alteram cálculo.
+- **T2 NÃO:** `evm.ts`, `scenarios.ts`, `supplies.ts`, `sinapi*.ts` e `progressPatch` não mudam. Os testes novos de ramos (tarefa 3, P1 = B) só leem as funções; nenhum cálculo muda.
 - **T3 NÃO:** `msProjectXmlParser.ts` não muda. O E2E só exercita o export e o import existentes.
 - **T4 NÃO:** o formato do estado salvo não muda.
 - **T5 SIM:** dependências novas `@playwright/test` (Apache-2.0) e `@vitest/coverage-v8` (MIT, com transitivas istanbul etc.); o CI passa a baixar o Chromium e os pacotes de sistema do Playwright (`--with-deps` usa `apt` com `sudo` no runner).
@@ -68,7 +69,7 @@ SPEC-00, §9 item 2 (incremento 0.2): "Playwright E2E, cobertura de testes (`@vi
 | Export: `page.waitForEvent('download')`, `saveAs` em `testInfo.outputPath()`; toast "XML do MS Project gerado e validado" + checagem textual do arquivo | Novo parser XML em Node para revalidar | O toast só aparece se `validateMspdi` com `strictOrder` passou (`useMsProject.ts:13-19`). A validação estrutural já tem teste unitário (`msProjectXmlParser.test.ts`). Uma dependência a mais só para isso não se paga |
 | Import: clicar "Importar .xml" no `banner` e usar `page.waitForEvent('filechooser')` → `setFiles` | `setInputFiles` direto no `input` oculto | Há dois `input type=file` (topo e EAP); o filechooser segue o caminho do usuário sem depender de seletor de `input` |
 | Console: falha em `console` do tipo `error` e em `pageerror`; avisos não falham | Falhar em qualquer mensagem | O build de produção do Vue não emite avisos de dev; avisos de biblioteca (Chart.js) gerariam falso positivo |
-| Cobertura v8 no bloco `test.coverage` do `vite.config.ts`: `include: ['src/lib/**/*.ts']`; `exclude: ['src/lib/**/*.test.ts', 'src/lib/download.ts', 'src/lib/useMsProject.ts']`; `reporter: ['text', 'text-summary', 'html']`; `reportsDirectory: 'coverage'`; `thresholds` conforme a P1 | `vitest.config.ts` separado; incluir os dois arquivos de DOM/store | Dois arquivos de configuração divergem. `download.ts` e `useMsProject.ts` são as exceções de DOM/store do `CLAUDE.md` e ficam cobertos pelo E2E (export/import) |
+| Cobertura v8 no bloco `test.coverage` do `vite.config.ts`: `include: ['src/lib/**/*.ts']`; `exclude: ['src/lib/**/*.test.ts', 'src/lib/download.ts', 'src/lib/useMsProject.ts']`; `reporter: ['text', 'text-summary', 'html']`; `reportsDirectory: 'coverage'`; `thresholds: { lines: 80, statements: 80, functions: 80, branches: 80 }` (global, sem `perFile`; P1 = B) | `vitest.config.ts` separado; incluir os dois arquivos de DOM/store | Dois arquivos de configuração divergem. `download.ts` e `useMsProject.ts` são as exceções de DOM/store do `CLAUDE.md` e ficam cobertos pelo E2E (export/import) |
 | `@vitest/coverage-v8` na **mesma versão** do `vitest` (3.2.x; o pacote exige a versão exata como peer) | Versão "mais nova" | Versões diferentes não carregam. Na migração para o `vitest` 5 (dívida conhecida) os dois sobem juntos; o grupo de dev do Dependabot já os agrupa |
 | Scripts: `test:coverage` = `vitest run --coverage`; `e2e` = `playwright test`; `e2e:instalar` = `playwright install chromium`; `ci` = lint + typecheck + `test:coverage` + build | E2E dentro do `npm run ci` | O `ci` é o mesmo do Release (`release.yml`), que não precisa de navegador. Com a cobertura dentro do `ci`, o limiar bloqueia local, CI e Release igualmente |
 | CI: **job novo** `e2e` (nome "Testes E2E (Playwright)") no `ci.yml`, paralelo ao `verify` (sem `needs`), herdando `permissions: contents: read` do topo (sem bloco `permissions` no job) | Passo dentro do `verify` | Em paralelo o CI fica abaixo de 5 min (RNF-00.3) e a falha de E2E aparece separada. Não entra nos checks obrigatórios agora: depois da 1ª execução verde, **você** decide incluí-lo na proteção da `master` (`docs/devops.md` §3) |
@@ -124,14 +125,14 @@ Não se aplica: sem backend.
 |---|---|---|---|---|
 | 1 | E2E + cobertura + CI | Configuração, testes e workflow, sem código de produção | AC-1 a AC-12 | `test(e2e): Playwright nos fluxos principais e cobertura mínima em src/lib` |
 
-Cerca de 13 arquivos, abaixo do limite de quebra (~25). Se a P1 for **(C)**, os testes de cobertura viram um 2º entregável (`test(lib): …`) antes do 1º.
+Cerca de 13 arquivos, mais 4 de teste da tarefa 3: abaixo do limite de quebra (~25). Um entregável só (P1 = B).
 
 ## 10. Tarefas
 | # | Entregável | Tarefa | Agente | Arquivos | Depende de |
 |---|---|---|---|---|---|
 | 1 | 1 | Instalar `@playwright/test` (estável atual) e `@vitest/coverage-v8` na versão exata do `vitest` como dev; scripts `test:coverage`, `e2e`, `e2e:instalar`; `ci` com `test:coverage` | dev-frontend | `package.json`, `package-lock.json` | — |
-| 2 | 1 | `test.include` + bloco `coverage` (limiar conforme a P1) no `vite.config.ts`; rodar `npm run test:coverage` e registrar o resumo no checkpoint | dev-frontend | `vite.config.ts` | 1, **P1** |
-| 3 | 1 | **Só se P1 = B ou C:** testes de borda nos arquivos com ramos abaixo do limiar, sem mudar cálculo, com valor explícito (`toBe`/`toBeCloseTo`), imitando `scenarios.test.ts` | dev-frontend | `src/lib/*.test.ts` (novos ou vizinhos de `supplies`, `sinapi`, `calendar`, `format`; com C, também `diagnosis`, `textDiff`) | 2 |
+| 2 | 1 | `test.include` + bloco `coverage` no `vite.config.ts`, com `thresholds` de 80 nas 4 métricas (global); rodar `npm run test:coverage` e registrar o resumo no checkpoint. É esperado que **falhe em ramos** (77,76%) até a tarefa 3 | dev-frontend | `vite.config.ts` | 1 |
+| 3 | 1 | Testes de borda da seção 11 › "Testes de borda (tarefa 3)", sem mudar cálculo, com valor explícito (`toBe`/`toBeCloseTo`), imitando `scenarios.test.ts`, até os ramos passarem de 80% | dev-frontend | `src/lib/calendar.test.ts`, `src/lib/sinapi.test.ts`, `src/lib/format.test.ts`, `src/lib/supplies.test.ts` (novos) | 2 |
 | 4 | 1 | `playwright.config.ts` (webServer de preview em 4173, Chromium, viewport 1440×900, `locale` pt-BR, reporters, trace/screenshot, retries) | dev-frontend | `playwright.config.ts` | 1 |
 | 5 | 1 | Fixture de console (falha em `error`/`pageerror`) e helpers de seletor com escopo; E2E de navegação (C-6) | dev-frontend | `e2e/fixtures.ts`, `e2e/navegacao.spec.ts` | 4 |
 | 6 | 1 | E2E de fluxos: C-1, C-2, C-3, C-7 | dev-frontend | `e2e/fluxos.spec.ts` | 5 |
@@ -144,7 +145,7 @@ Cerca de 13 arquivos, abaixo do limite de quebra (~25). Se a P1 for **(C)**, os 
 Checkpoint após a tarefa 2 (arquivos e resumo da cobertura), conferido contra este plano antes de seguir. **`CLAUDE.md`:** há alterações não commitadas de outro trabalho nesta máquina (ADR 00001); a tarefa 11 edita só as linhas citadas, sem reverter nada.
 
 ### Grafo
-`1 → 2 → 3*` · `1 → 4 → 5 → 6 → 7` · `1 → 8` · `4 → 9 → 10 → 11`. As tarefas 3, 5–7 e 8 podem andar em paralelo depois das dependências. (*) só com P1 = B ou C.
+`1 → 2 → 3` · `1 → 4 → 5 → 6 → 7` · `1 → 8` · `4 → 9 → 10 → 11`. As tarefas 3, 5–7 e 8 podem andar em paralelo depois das dependências.
 
 ### Como rodar
 - **Local (Windows/Git Bash ou PowerShell):** `npm ci` → `npm run e2e:instalar` (uma vez; baixa o Chromium para o perfil do usuário) → `npm run e2e` (gera o build, sobe o preview em 4173 e roda). Relatório: `npx playwright show-report`. Um teste: `npx playwright test e2e/fluxos.spec.ts -g "crashing"`. Cobertura: `npm run test:coverage` (HTML em `coverage/index.html`).
@@ -164,21 +165,40 @@ Checkpoint após a tarefa 2 (arquivos e resumo da cobertura), conferido contra e
 | N-1 | seed | `src/stores/useProjectStore.test.ts` | `schedule.projectFinish` `'2027-06-23'`; `delay.delayDays` 16; `evm.spi` `toBeCloseTo(0.8883, 4)`; `evm.cpi` `toBeCloseTo(0.9349, 4)` |
 | N-2 | aprovar r-tiao 75% | idem | retorno `{ delta: -5 }`; `projectFinish` `'2027-06-16'` |
 | N-3 | crashing no seed | idem | `daysRecovered` 3; `extraCost` `toBeCloseTo(12616.8, 1)`; `projectFinish` `'2027-06-18'` |
-| AC-8 | limiar de cobertura | `npm run test:coverage` | sai com 0 e o resumo mostra as métricas da P1 ≥ 80%; baixar um limiar acima do valor atual faz sair ≠ 0 (prova negativa feita uma vez e registrada) |
+| AC-8 | limiar de cobertura | `npm run test:coverage` | sai com 0 e o resumo mostra linhas, instruções, funções **e ramos** ≥ 80%; baixar um limiar acima do valor atual faz sair ≠ 0 (prova negativa feita uma vez e registrada) |
 | AC-9 | Vitest não roda E2E | `npm test` | não lista nenhum arquivo de `e2e/` |
+
+### Testes de borda (tarefa 3)
+Faltam cerca de 22 ramos para os 80% (hoje 745/958, ou 77,76%). Os testes abaixo cobrem os trechos sem cobertura apontados pelo relatório: `calendar.ts`, `sinapi.ts:15-18`, `supplies.ts:50-59, 86-95, 109` e `format.ts:18-24, 32-35`. Os valores foram conferidos em 25/10/2026 contra o código atual, e todos os dados são fictícios.
+
+Se o relatório ainda mostrar ramos abaixo de 80%, o dev completa com o próximo arquivo de maior lacuna (`sinapiBudget.ts` 60%, `cpm.ts` 73%), sempre só com teste, e registra no checkpoint.
+
+| Arquivo | Teste (`it`, em português) | O que cobre | Valor esperado |
+|---|---|---|---|
+| `src/lib/calendar.test.ts` | volta antes da data-base pulando feriado e fim de semana | `dateAt` com índice negativo (`walkBack`) | `new WorkCalendar('2026-05-04', { holidays: brazilianHolidays(2026), extraWorkingDays: ['2026-05-09'] })`: `dateAt(-1)` = `'2026-04-30'` (01/05 é feriado; 02 e 03/05, fim de semana) |
+| idem | índices de datas anteriores à data-base | `indexOnOrAfter`/`indexOnOrBefore` com `iso < baseDate` | `indexOnOrAfter('2026-04-30')` = `-1`; `indexOnOrBefore('2026-05-01')` = `-1` |
+| idem | sábado convertido em dia útil e o domingo seguinte | `extraWorkingDays` e `indexOnOrBefore` em dia não útil | `isWorkingDay('2026-05-09')` = `true`; `isWorkingDay('2026-05-10')` = `false`; `indexOnOrBefore('2026-05-10')` = `5` |
+| idem | intervalo invertido | `countWorkingBetween` com `to <= from` | `countWorkingBetween('2026-05-08', '2026-05-04')` = `0` |
+| idem | além do horizonte | `dateAt` acima do horizonte (`walkForward`) | `new WorkCalendar('2026-05-04', { holidays: [], extraWorkingDays: [] }, 5)`: `dateAt(5)` = `'2026-05-11'`; `dateAt(6)` = `'2026-05-12'` |
+| `src/lib/sinapi.test.ts` | equipe a partir da duração | `teamFromDuration` | `teamFromDuration(100, 0.8, 5)` = `2`; `teamFromDuration(100, 0.8, 0)` = `Infinity` |
+| idem | divisor zero e arredondamento para o cronograma | `durationFromTeam` com equipe 0; `scheduleDays` | `durationFromTeam(100, 0.8, 0)` = `Infinity`; `scheduleDays(Infinity)` = `0`; `scheduleDays(0.2)` = `1`; `scheduleDays(2.0000000001)` = `2` |
+| `src/lib/format.test.ts` | valores compactos | `fmtBRLCompact` nas faixas mi, mil, abaixo de mil e negativo | `fmtBRLCompact(21_100_000)` = `'R$ 21,10 mi'`; `fmtBRLCompact(-820_000)` = `'-R$ 820 mil'`; `fmtBRLCompact(950)` igual a `fmtBRL(950)` (o `Intl` põe um espaço não separável `\u00a0` depois do "R$": comparar com `fmtBRL` ou com `\u00a0`) |
+| idem | dias no singular e no plural; data ausente | `fmtDays`, `fmtDate` sem valor | `fmtDays(1)` = `'1 dia útil'`; `fmtDays(-3)` = `'3 dias úteis'`; `fmtDate(undefined)` = `'—'` |
+| `src/lib/supplies.test.ts` | ruptura reportada no canteiro | ramo `fieldAlert && !m.ordered` | Caso mínimo: data de status `2026-10-23`; tarefa não iniciada, com início previsto em `2026-11-02`; insumo "Cimento CP-II" não pedido, lead time de 14 dias; restrição aberta com `material: 'cimento'` → `status` `'ruptura'` e `stopDays` `4` (chegada em 06/11 × necessidade em 02/11) |
+| idem | entrega programada depois da necessidade | ramo `deliveryDate > needDate` | Mesmo caso, com o pedido emitido e entrega em `2026-11-06` → `'entrega-tardia'`, `stopDays` `4`, `recommendedDelivery` `'2026-10-31'` |
+| idem | pedido em dia | retorno final `'ok'` | Pedido emitido com entrega em `2026-10-30` e linha de base igual ao início previsto (sem deslocamento de frente) → `status` `'ok'`, `headline` `'Pedido em dia'` |
+
+Nos casos de `supplies`, a margem da DLP é a padrão (`SAFETY_MARGIN_DAYS` = 3). O `ScheduleResult` mínimo é montado no próprio teste (só `byUid` com o `start` da tarefa), sem o seed.
 
 ## 12. Critérios de aceite e escopo fechado
 - **AC-1 a AC-7:** os 7 fluxos E2E da seção 11 passam localmente e no job `e2e` do CI.
-- **AC-8:** `npm run test:coverage` aplica o limiar de 80% em `src/lib` (sem `download.ts`/`useMsProject.ts`) nas métricas da **P1** e quebra o `npm run ci` e o CI quando ele não é atingido.
+- **AC-8:** `npm run test:coverage` aplica o limiar global de 80% em `src/lib` (sem `download.ts`/`useMsProject.ts`) em **linhas, instruções, funções e ramos** e quebra o `npm run ci` e o CI quando ele não é atingido.
 - **AC-9:** `npm test` continua rodando só `src/**/*.test.ts`.
 - **AC-10:** job "Testes E2E (Playwright)" no `ci.yml`, paralelo, só com actions oficiais, sem `permissions` novas, com cache de navegador medido (com e sem cache, tempos registrados no ciclo) e artefatos na falha; o CI total continua abaixo de 5 min (RNF-00.3) e o job "Lint, tipos, testes e build" mantém o nome.
 - **AC-11:** imagem Docker inalterada: `docker build` + smoke test de `docs/devops.md` verdes; `actionlint` sem erro no `ci.yml`.
 - **AC-12:** documentação atualizada (tarefa 11).
 
-**P1 — PERGUNTA EM ABERTO (bloqueia as tarefas 2 e 3):** qual métrica entra no limiar de 80%? Hoje, sem `download.ts`/`useMsProject.ts`: linhas/instruções 89,98%, funções 87,40%, ramos 77,76%.
-- **(A)** linhas, instruções e funções (global); ramos medidos sem bloquear. Sem testes novos.
-- **(B)** as 4 métricas (global). Cerca de 22 ramos a mais cobertos, com testes de borda (tarefa 3). Recomendação (opinião).
-- **(C)** as 4 métricas por arquivo. Muitos testes novos (`diagnosis.ts` e `textDiff.ts` em 0%); vira 2 entregáveis.
+**P1, decidida em 25/10/2026:** "80% nas 4 métricas", a opção (B). Limiar **global** (sem `perFile`) de 80% em linhas, instruções, funções e ramos. Medição antes do ciclo: linhas e instruções 89,98%, funções 87,40%, ramos 77,76%; os testes de borda da tarefa 3 levam os ramos acima de 80%. O limiar por arquivo (opção C) ficou fora.
 
 Itens previstos na matriz: `AC-1`…`AC-12`, `N-1`…`N-3`, `S-1` (licenças e `npm audit` das dependências novas), `S-2` (workflow sem permissão nova nem action de terceiro, `actionlint`), `S-3` (artefatos sem PII), `R-1` (nenhum arquivo de produção em `src/` alterado: `git diff --stat master -- src` só com `*.test.ts`), `V-1` (relatório HTML do Playwright anexado no PR de forma resumida).
 
@@ -191,6 +211,8 @@ Itens previstos na matriz: `AC-1`…`AC-12`, `N-1`…`N-3`, `S-1` (licenças e `
 - Publicar o relatório de cobertura em serviço externo, ou badge.
 - Actions de terceiros, segredos e mudanças em `release.yml`, `docker.yml`, `codeql.yml` e `dependabot.yml`.
 - Atualizar o `vitest` para a versão 5 (dívida conhecida; PR próprio).
+- Limiar de cobertura por arquivo (`perFile`) e testes para `diagnosis.ts`/`textDiff.ts` (opção C da P1, não escolhida).
+- Mudar qualquer valor de cálculo para atingir a cobertura: a tarefa 3 só acrescenta testes.
 
 ## 13. Validações com outras áreas
 | Tema | Área | Antes de quê |
