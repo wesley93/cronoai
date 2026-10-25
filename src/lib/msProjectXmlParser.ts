@@ -10,9 +10,34 @@ export const MSPDI_NAMESPACE = 'http://schemas.microsoft.com/project'
 export const FIELD_SINAPI = '188743731'
 export const FIELD_LEAD_TIME = '188743767'
 const DEFAULT_MINUTES_PER_DAY = 480
+/** Limite de tamanho do texto do MSPDI aceito pelo import (defesa em profundidade; o limite de bytes fica em useMsProject.ts). */
+export const MAX_MSPDI_CHARS = 15 * 1024 * 1024
+/** Dias de uma única exceção de calendário expandidos pelo import. */
+const MAX_EXCEPTION_DAYS = 400
+/**
+ * Orçamento de dias PERCORRIDOS (não só inseridos) na expansão de todas as exceções do calendário importado (≈ 27 anos de dias
+ * corridos). Limita o trabalho de CPU: milhares de exceções repetidas de intervalo longo não travam a aba. Como cada dia inserido
+ * foi percorrido, também limita o total de feriados + dias úteis extras.
+ */
+export const MAX_CALENDAR_DAYS = 10_000
+/**
+ * DurationFormat em tempo corrido (elapsed): 4 min, 6 h, 8 dia, 10 sem, 12 mês; +32 = estimado.
+ * Fora de propósito: 19/20 (percentual; 20 = e%) e 51/52 (estimados) não são duração em tempo.
+ */
+const ELAPSED_FORMATS = new Set(['4', '6', '8', '10', '12', '36', '38', '40', '42', '44'])
 
 const LINK_TO_CODE: Record<LinkType, number> = { FF: 0, FS: 1, SF: 2, SS: 3 }
 const CODE_TO_LINK: Record<string, LinkType> = { '0': 'FF', '1': 'FS', '2': 'SF', '3': 'SS' }
+/** Tipo de vínculo pelo código do arquivo. `Object.hasOwn`: `in`/índice aceitariam `constructor`, `toString`… (chave vinda do XML). */
+const linkTypeOf = (code: string): LinkType | undefined => (Object.hasOwn(CODE_TO_LINK, code) ? CODE_TO_LINK[code] : undefined)
+/** Data ISO `yyyy-mm-dd` existente no calendário (rejeita texto livre e dias inexistentes como 2026-02-30). */
+function isValidIsoDate(v: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v)
+  if (!m) return false
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const date = new Date(Date.UTC(y, mo - 1, d))
+  return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d
+}
 
 // Subsequências do esquema MSPDI para os elementos que geramos/lemos (usadas na validação de ordem).
 export const SCHEMA_ORDER = {
@@ -105,13 +130,19 @@ export function toDuration(days: number, minutesPerDay = DEFAULT_MINUTES_PER_DAY
   return `PT${Math.floor(totalMinutes / 60)}H${totalMinutes % 60}M0S`
 }
 
+/** PT80H0M0S / P2DT4H -> minutos brutos (sem arredondar); `undefined` se o texto não é uma duração ISO 8601. */
+function durationMinutes(value: string | undefined, minutesPerDay: number): number | undefined {
+  if (!value) return undefined
+  const m = value.match(/^-?P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
+  if (!m) return undefined
+  const [, d, h, min, sec] = m.map((v) => (v ? Number(v) : 0)) as number[]
+  return d * minutesPerDay + h * 60 + min + sec / 60
+}
+
 /** PT80H0M0S / P2DT4H -> dias úteis, considerando os minutos por dia do projeto. */
 export function fromDuration(value: string | undefined, minutesPerDay = DEFAULT_MINUTES_PER_DAY): number {
-  if (!value) return 0
-  const m = value.match(/^-?P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
-  if (!m) return 0
-  const [, d, h, min, sec] = m.map((v) => (v ? Number(v) : 0)) as number[]
-  const minutes = d * minutesPerDay + h * 60 + min + sec / 60
+  const minutes = durationMinutes(value, minutesPerDay)
+  if (minutes === undefined) return 0
   return Math.round((minutes / minutesPerDay) * 100) / 100
 }
 
@@ -218,14 +249,15 @@ function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
     ),
     t.sinapi && x('ExtendedAttribute', [x('FieldID', FIELD_SINAPI), x('Value', t.sinapi)]),
     t.leadTimeDays !== undefined && x('ExtendedAttribute', [x('FieldID', FIELD_LEAD_TIME), x('Value', t.leadTimeDays)]),
-    bStart &&
-      bFinish &&
+    // LB0 incompleta (só início ou só término, como o MS Project grava) é preservada com a(s) data(s) presente(s);
+    // a duração só vai quando há as duas datas. Todos os filhos de <Baseline> são opcionais no esquema.
+    (bStart || bFinish) &&
       x('Baseline', [
         x('Number', 0),
         x('Start', dt(bStart, startTime)),
         x('Finish', dt(bFinish, '17:00:00')),
-        x('Duration', toDuration(t.isSummary ? 0 : (t.baselineDuration ?? duration))),
-        x('DurationFormat', 7),
+        bStart && bFinish && x('Duration', toDuration(t.isSummary ? 0 : (t.baselineDuration ?? duration))),
+        bStart && bFinish && x('DurationFormat', 7),
         x('Cost', money(cost)),
       ]),
   ])!
@@ -362,7 +394,11 @@ const isoDate = (v: string | undefined) => (v ? v.slice(0, 10) : undefined)
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/
 const DURATION = /^-?P(\d+(\.\d+)?D)?(T(\d+(\.\d+)?H)?(\d+(\.\d+)?M)?(\d+(\.\d+)?S)?)?$/
 
+const ERRO_DOCTYPE = 'Arquivo XML com declaração DOCTYPE/ENTITY não é aceito (o MS Project não gera esse conteúdo).'
+
 function parseXml(xml: string): Document {
+  // Recusa antes do DOMParser: o tratamento de entidade varia entre motores e abre XXE / "billion laughs".
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error(ERRO_DOCTYPE)
   const doc = new DOMParser().parseFromString(xml, 'application/xml')
   if (doc.getElementsByTagName('parsererror').length) throw new Error('Arquivo XML inválido ou corrompido (não está bem formado).')
   return doc
@@ -451,7 +487,8 @@ export function validateMspdi(xml: string, options: { strictOrder?: boolean } = 
       const type = text(l, 'Type') ?? '1'
       if (pred === undefined || !uids.has(pred)) errors.push(`Tarefa UID ${uid}: predecessora ${pred ?? '?'} não existe.`)
       if (pred === uid) errors.push(`Tarefa UID ${uid}: vínculo com ela mesma.`)
-      if (!(type in CODE_TO_LINK)) errors.push(`Tarefa UID ${uid}: tipo de vínculo ${type} inválido (0–3).`)
+      // Só número do arquivo na mensagem: texto livre do XML não vai para o aviso
+      if (!linkTypeOf(type)) errors.push(`Tarefa UID ${uid}: tipo de vínculo ${/^\d{1,6}$/.test(type) ? type : '(não numérico)'} inválido (0–3).`)
     }
   }
   return { valid: errors.length === 0, errors, warnings, taskCount: tasks.length, linkCount }
@@ -468,17 +505,8 @@ export interface MspdiImportResult {
   warnings: string[]
 }
 
-function expandRange(from: string, to: string): string[] {
-  const out: string[] = []
-  let cursor = from
-  for (let guard = 0; cursor <= to && guard < 400; guard++) {
-    out.push(cursor)
-    cursor = addCalendarDays(cursor, 1)
-  }
-  return out
-}
-
 export function parseMspdiXml(xmlText: string): MspdiImportResult {
+  if (xmlText.length > MAX_MSPDI_CHARS) throw new Error('Arquivo muito grande: o limite para importação é de 15 MB.')
   const doc = parseXml(xmlText)
   const project = doc.documentElement
   if (project.localName !== 'Project') throw new Error('O arquivo não é um XML do MS Project (MSPDI): raiz <Project> ausente.')
@@ -503,30 +531,114 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   // Campos personalizados: SINAPI e lead time pelo FieldID padrão ou pelo apelido
   let sinapiField = FIELD_SINAPI
   let leadField = FIELD_LEAD_TIME
+  let sinapiAlias = false
+  let leadAlias = false
   for (const ea of kids(kid(project, 'ExtendedAttributes'), 'ExtendedAttribute')) {
     const alias = normalizeText(text(ea, 'Alias') ?? '')
     const id = text(ea, 'FieldID')
-    if (id && alias.includes('sinapi')) sinapiField = id
-    if (id && alias.includes('lead')) leadField = id
+    if (id && alias.includes('sinapi')) {
+      sinapiField = id
+      sinapiAlias = true
+    }
+    if (id && alias.includes('lead')) {
+      leadField = id
+      leadAlias = true
+    }
   }
 
   // Calendário do projeto: exceções legadas (WeekDay DayType=0) e <Exceptions> (Project 2007+)
   const calUid = text(project, 'CalendarUID') ?? '1'
   const calendars = kids(kid(project, 'Calendars'), 'Calendar')
   const cal = calendars.find((c) => text(c, 'UID') === calUid) ?? calendars[0]
+  const projectCalUid = text(cal, 'UID') // calendário realmente usado (o CalendarUID do projeto pode não existir)
   const holidays = new Set<string>()
   const extra = new Set<string>()
-  let recurring = 0
+  let truncatedRanges = 0
+  let invalidRanges = 0
+  let overLimit = false
+  let walked = 0 // dias percorridos no calendário inteiro (orçamento MAX_CALENDAR_DAYS)
+  const seenRanges = new Set<string>() // a mesma exceção aparece no legado e em <Exceptions>: expande e conta uma vez
   const collect = (node: Element, working: boolean) => {
+    if (overLimit) return
     const p = kid(node, 'TimePeriod')
     const from = isoDate(text(p, 'FromDate'))
     const to = isoDate(text(p, 'ToDate'))
-    if ((num(node, 'Occurrences') ?? 1) > 1) recurring++
-    if (from && to) for (const d of expandRange(from, to)) (working ? extra : holidays).add(d)
+    if (!from || !to) return
+    const key = `${working ? 1 : 0}|${from}|${to}`
+    if (seenRanges.has(key)) return // dedupe antes de validar: a data inválida presente no legado e em <Exceptions> conta uma vez
+    seenRanges.add(key)
+    if (!isValidIsoDate(from) || !isValidIsoDate(to)) {
+      invalidRanges++
+      return
+    }
+    const target = working ? extra : holidays
+    let cursor = from
+    let days = 0
+    while (cursor <= to) {
+      if (days >= MAX_EXCEPTION_DAYS) {
+        truncatedRanges++
+        break
+      }
+      if (walked >= MAX_CALENDAR_DAYS) {
+        overLimit = true
+        break
+      }
+      target.add(cursor)
+      walked++
+      days++
+      cursor = addCalendarDays(cursor, 1)
+    }
   }
-  for (const wd of kids(kid(cal, 'WeekDays'), 'WeekDay')) if (text(wd, 'DayType') === '0') collect(wd, text(wd, 'DayWorking') === '1')
-  for (const ex of kids(kid(cal, 'Exceptions'), 'Exception')) collect(ex, text(ex, 'DayWorking') === '1')
-  if (recurring) warnings.push(`${recurring} exceção(ões) recorrente(s) do calendário lidas apenas pelo período informado (sem expandir as repetições).`)
+  // O MS Project 2007–2016 (corpus; 2019 a confirmar) grava cada exceção em dois lugares: <Exceptions> (com a regra de recorrência)
+  // e os WeekDay DayType=0 legados, já expandidos ocorrência por ocorrência. Expandir FromDate..ToDate de uma recorrente marcaria o
+  // intervalo inteiro; as datas certas estão na lista legada. A recorrente só é considerada aplicada se a lista legada (do mesmo tipo,
+  // feriado ou dia útil extra) tem ao menos `Occurrences` datas distintas dentro de FromDate..ToDate dela; senão vira aviso. (Exigir o FromDate exato dava
+  // falso aviso em 14 das 27 recorrentes do corpus: o FromDate nem sempre é uma ocorrência.) A expansão pela regra fica para a SPEC-05.
+  const legacyDays = kids(kid(cal, 'WeekDays'), 'WeekDay').filter((wd) => text(wd, 'DayType') === '0')
+  for (const wd of legacyDays) collect(wd, text(wd, 'DayWorking') === '1')
+  const legacyHolidays = [...holidays].sort()
+  const legacyExtra = [...extra].sort()
+  // Busca binária: primeiro índice com data >= alvo; a contagem em [from, to] é a diferença entre dois deles
+  const lowerBound = (sorted: string[], target: string) => {
+    let lo = 0
+    let hi = sorted.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (sorted[mid] < target) lo = mid + 1
+      else hi = mid
+    }
+    return lo
+  }
+  const countWithin = (sorted: string[], from: string, to: string) => {
+    const end = lowerBound(sorted, to)
+    return (end < sorted.length && sorted[end] === to ? end + 1 : end) - lowerBound(sorted, from)
+  }
+  let recurringNotApplied = 0
+  for (const ex of kids(kid(cal, 'Exceptions'), 'Exception')) {
+    if ((num(ex, 'Occurrences') ?? 1) > 1) {
+      const period = kid(ex, 'TimePeriod')
+      const first = isoDate(text(period, 'FromDate'))
+      const last = isoDate(text(period, 'ToDate'))
+      // Condição necessária: ao menos `Occurrences` datas legadas distintas do mesmo tipo dentro do período
+      const inLegacy =
+        first !== undefined && last !== undefined && isValidIsoDate(first) && isValidIsoDate(last) &&
+        countWithin(text(ex, 'DayWorking') === '1' ? legacyExtra : legacyHolidays, first, last) >= (num(ex, 'Occurrences') ?? 1)
+      if (!inLegacy) recurringNotApplied++
+      continue
+    }
+    collect(ex, text(ex, 'DayWorking') === '1')
+  }
+  if (recurringNotApplied) warnings.push(`${recurringNotApplied} exceção(ões) recorrente(s) do calendário não aplicada(s): confira feriados e dias úteis extras.`)
+  if (invalidRanges) warnings.push(`${invalidRanges} exceção(ões) do calendário com data inválida ignorada(s).`)
+  // Semana do calendário: o CronoAI só usa segunda a sexta (DayType 1 = domingo … 7 = sábado)
+  const weekDiffs = kids(kid(cal, 'WeekDays'), 'WeekDay').filter((wd) => {
+    const day = Number(text(wd, 'DayType'))
+    const working = text(wd, 'DayWorking')
+    return day >= 1 && day <= 7 && working !== undefined && (working === '1') !== (day >= 2 && day <= 6)
+  }).length
+  if (weekDiffs) warnings.push(`Calendário do projeto com ${weekDiffs} dia(s) da semana diferente(s) de segunda a sexta: o CronoAI usa só segunda a sexta; confira os dias úteis.`)
+  if (truncatedRanges) warnings.push(`${truncatedRanges} exceção(ões) do calendário com mais de ${MAX_EXCEPTION_DAYS} dias: lidas apenas nos primeiros ${MAX_EXCEPTION_DAYS} dias.`)
+  if (overLimit) warnings.push(`Calendário com mais de ${MAX_CALENDAR_DAYS} dias de exceção: o excedente não foi importado; confira feriados e dias úteis extras.`)
 
   // Recursos e atribuições
   const resources = new Map<string, string>()
@@ -546,11 +658,31 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
 
   let inactive = 0
   let percentLags = 0
+  let lagOtherFormat = 0
+  // Contadores dos avisos "o que o import não trouxe" (só números no texto: conteúdo do arquivo nunca vai para o aviso)
+  let nullRows = 0
+  let ownCalendar = 0
+  let otherBaselines = 0
+  let baselineNoFinish = 0
+  let baselineNoStart = 0
+  let elapsedDurations = 0
+  let milestoneFromShort = 0
+  let fractionalDurations = 0
+  let sinapiNoAlias = 0
+  let leadNoAlias = 0
+  let customValues = 0
+  const customFields = new Set<string>()
   const tasks: Task[] = []
   for (const node of kids(kid(project, 'Tasks'), 'Task')) {
     const uid = num(node, 'UID')
     const level = num(node, 'OutlineLevel') ?? 1
-    if (uid === undefined || uid === 0 || level === 0 || text(node, 'IsNull') === '1') continue
+    if (uid === undefined || uid === 0) continue
+    // Linha em branco (tarefa nula): o MS Project a grava com UID e OutlineLevel 0; é descartada, mas com aviso
+    if (text(node, 'IsNull') === '1') {
+      nullRows++
+      continue
+    }
+    if (level === 0) continue
     if (text(node, 'Active') === '0') {
       inactive++
       continue
@@ -558,15 +690,25 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     const name = text(node, 'Name') ?? `Tarefa ${uid}`
     const isSummary = text(node, 'Summary') === '1'
     const baseline = kids(node, 'Baseline').find((b) => (text(b, 'Number') ?? '0') === '0')
-    const ext = new Map(kids(node, 'ExtendedAttribute').map((e) => [text(e, 'FieldID') ?? '', text(e, 'Value') ?? '']))
+    const extNodes = kids(node, 'ExtendedAttribute')
+    const ext = new Map(extNodes.map((e) => [text(e, 'FieldID') ?? '', text(e, 'Value') ?? '']))
+    for (const e of extNodes) {
+      const id = text(e, 'FieldID') ?? ''
+      if (id === sinapiField || id === leadField) continue
+      customValues++
+      customFields.add(id)
+    }
+    if (kids(node, 'Baseline').some((b) => (text(b, 'Number') ?? '0') !== '0')) otherBaselines++
+    const taskCal = text(node, 'CalendarUID')
+    if (taskCal !== undefined && taskCal !== '-1' && taskCal !== projectCalUid) ownCalendar++
     const preds = kids(node, 'PredecessorLink')
       .map((l) => {
         let lagDays = lagToWorkingDays(num(l, 'LinkLag') ?? 0, num(l, 'LagFormat') ?? 7, minutesPerDay)
         if (lagDays === undefined) {
           percentLags++
           lagDays = 0
-        }
-        return { uid: num(l, 'PredecessorUID') ?? -1, type: CODE_TO_LINK[text(l, 'Type') ?? '1'] ?? 'FS', lagDays }
+        } else if ((num(l, 'LinkLag') ?? 0) !== 0 && ![7, 39].includes(num(l, 'LagFormat') ?? 7)) lagOtherFormat++ // o export regrava em dias úteis (LagFormat 7)
+        return { uid: num(l, 'PredecessorUID') ?? -1, type: linkTypeOf(text(l, 'Type') ?? '1') ?? 'FS', lagDays }
       })
       .filter((p) => p.uid > 0 && p.uid !== uid)
     const pct = Math.min(100, Math.max(0, num(node, 'PercentComplete') ?? 0))
@@ -575,6 +717,20 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     const fixed = num(node, 'FixedCost') ?? 0
     const baselineCost = num(baseline, 'Cost') ?? 0
     const lead = ext.get(leadField)
+    const durationDays = isSummary ? 0 : Math.round(fromDuration(text(node, 'Duration'), minutesPerDay))
+    if (!isSummary) {
+      // Só aviso: converter tempo corrido e fração de dia é semântica da SPEC-05 (o valor importado não muda)
+      const rawMinutes = durationMinutes(text(node, 'Duration'), minutesPerDay) ?? 0
+      if (rawMinutes > 0 && ELAPSED_FORMATS.has(text(node, 'DurationFormat') ?? '')) elapsedDurations++
+      if (rawMinutes > 0 && durationDays === 0) milestoneFromShort++
+      else if (durationDays > 0 && fromDuration(text(node, 'Duration'), minutesPerDay) !== durationDays) fractionalDurations++
+    }
+    if (ext.get(sinapiField) && !sinapiAlias) sinapiNoAlias++
+    if (lead !== undefined && lead !== '' && !Number.isNaN(Number(lead)) && !leadAlias) leadNoAlias++
+    const baselineStart = isoDate(text(baseline, 'Start'))
+    const baselineFinish = isoDate(text(baseline, 'Finish'))
+    if (!isSummary && baseline && baselineStart && !baselineFinish) baselineNoFinish++
+    if (!isSummary && baseline && !baselineStart && baselineFinish) baselineNoStart++
 
     tasks.push({
       uid,
@@ -582,7 +738,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
       name,
       outlineLevel: level,
       isSummary,
-      durationDays: isSummary ? 0 : Math.round(fromDuration(text(node, 'Duration'), minutesPerDay)),
+      durationDays,
       predecessors: preds,
       percentComplete: isSummary ? 0 : pct,
       actualStart: pct > 0 ? (isoDate(text(node, 'ActualStart')) ?? start) : undefined,
@@ -592,8 +748,8 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
       resources: assignments.get(uid) ?? [],
       sinapi: ext.get(sinapiField) || undefined,
       leadTimeDays: lead !== undefined && lead !== '' && !Number.isNaN(Number(lead)) ? Number(lead) : undefined,
-      baselineStart: isoDate(text(baseline, 'Start')),
-      baselineFinish: isoDate(text(baseline, 'Finish')),
+      baselineStart,
+      baselineFinish,
       baselineDuration: baseline ? Math.round(fromDuration(text(baseline, 'Duration'), minutesPerDay)) : undefined,
       snet:
         text(node, 'ConstraintType') === '4'
@@ -609,6 +765,25 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   if (!tasks.length) throw new Error('Nenhuma tarefa encontrada no XML.')
   if (inactive) warnings.push(`${inactive} tarefa(s) inativa(s) ignorada(s).`)
   if (percentLags) warnings.push(`${percentLags} vínculo(s) com latência em % ou formato desconhecido importados com latência zero.`)
+  if (lagOtherFormat) warnings.push(`${lagOtherFormat} vínculo(s) com lag em formato diferente de dias úteis: serão exportados em dias úteis.`)
+  if (otherBaselines) warnings.push(`Linhas de base 1 a 10 não importadas em ${otherBaselines} tarefa(s): o CronoAI usa só a linha de base 0.`)
+  // Sem término, evm.ts devolve PV zero. Sem início, a store (withBaseline onlyMissing olha só baselineStart) recalcula a LB pelo cronograma.
+  if (baselineNoFinish) warnings.push(`${baselineNoFinish} tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.`)
+  if (baselineNoStart) warnings.push(`${baselineNoStart} tarefa(s) com linha de base 0 sem início: a linha de base delas será recalculada pelo cronograma ao importar.`)
+  if (elapsedDurations) warnings.push(`${elapsedDurations} tarefa(s) com duração em tempo corrido convertida como horas úteis: revise as durações.`)
+  if (milestoneFromShort) warnings.push(`${milestoneFromShort} tarefa(s) com menos de meio dia de duração importada(s) como marco (0 dia).`)
+  if (fractionalDurations) warnings.push(`${fractionalDurations} duração(ões) fracionária(s) arredondada(s) para dias úteis inteiros.`)
+  if (sinapiNoAlias) warnings.push(`Text1 lido como código SINAPI em ${sinapiNoAlias} tarefa(s) sem apelido 'SINAPI' no arquivo: confira.`)
+  if (leadNoAlias) warnings.push(`Number1 lido como lead time em ${leadNoAlias} tarefa(s) sem apelido 'lead' no arquivo: confira.`)
+  if (ownCalendar) warnings.push(`${ownCalendar} tarefa(s) com calendário próprio importada(s) no calendário do projeto.`)
+  if (nullRows) warnings.push(`${nullRows} linha(s) em branco (tarefa nula) ignorada(s).`)
+  // Informativo (um aviso só, para não virar toast demais): dados que o CronoAI ainda não tem onde guardar
+  const timephased = doc.getElementsByTagNameNS('*', 'TimephasedData').length
+  const notImported = [
+    timephased && `${timephased} registro(s) distribuído(s) no tempo (TimephasedData)`,
+    customValues && `${customValues} valor(es) de ${customFields.size} campo(s) personalizado(s)`,
+  ].filter(Boolean)
+  if (notImported.length) warnings.push(`Não importado do MS Project: ${notImported.join('; ')}.`)
   if (tasks.filter((t) => !t.isSummary).every((t) => t.bac === 0)) {
     warnings.push('O arquivo não traz custos (Cost/Baseline Cost): os indicadores EVM ficarão zerados até que o BAC seja informado.')
   }

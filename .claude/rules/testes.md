@@ -28,6 +28,7 @@ Fonte da verdade: `CLAUDE.md` › **Convenções › Testes** e › **Invioláve
 
 - Mudança no `msProjectXmlParser.ts`: teste de ida e volta (`buildMspdiXml` → `parseMspdiXml`) afirmando os campos tocados e `validateMspdi(xml, { strictOrder: true })` com `errors` igual a `[]`.
 - XML de teste pequeno e fictício, montado no próprio teste ou em fixture versionada; arquivo real de obra nunca entra no repositório.
+- **Teste de corpus (só local):** `src/lib/msProjectXmlParser.corpus.test.ts` roda o import nos 134 MSPDI do MPXJ, que ficam fora do git. Rodar com `CRONOAI_REF_DIR=<pasta referencias>` (o corpus é lido de `${CRONOAI_REF_DIR}/mpxj-mspdi/`); sem a variável a suíte é pulada por `describe.skipIf` (é o motivo do pulo, não um `it.skip` esquecido) e o CI não depende do corpus. O relatório sai em `test-results/corpus-mspdi/` (ignorado pelo git). Os auxiliares moram dentro do `*.test.ts`: um `.ts` auxiliar em `src/lib` entraria na cobertura sem execução no CI. Como o CI não roda o corpus, **quem muda o parser roda o corpus localmente** e registra o antes e o depois do inventário. Detalhes em `msproject-mspdi.md`.
 
 ## Store
 
@@ -36,7 +37,7 @@ Fonte da verdade: `CLAUDE.md` › **Convenções › Testes** e › **Invioláve
 
 ## Regras gerais
 
-- Teste comportamento, não detalhe de implementação. Sem `setTimeout` para esperar; sem `it.skip`/`it.only` no commit (`skip` só com o motivo e quando sai).
+- Teste comportamento, não detalhe de implementação. Sem `setTimeout` para esperar (única exceção: o `beforeEach` do teste de corpus, `setTimeout(…, 0)`, só cede o laço de eventos entre parses síncronos longos, para o worker responder ao Vitest); sem `it.skip`/`it.only` no commit (`skip` só com o motivo e quando sai).
 - `vi.useFakeTimers()`/`vi.setSystemTime()` quando o código usa a data de hoje; sempre restaure.
 
 ## Antes de entregar
