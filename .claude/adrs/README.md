@@ -10,3 +10,4 @@ Candidatas conhecidas: as **Decisões em aberto** D1–D4 de `docs/specs/README.
 |---|---|---|---|
 | [00001](00001-stack-backend-dotnet-10.md) | Stack do backend: .NET 10 + PostgreSQL | 2026-10-25 | Aceito (stack); Infra/Segurança pendentes |
 | [00002](00002-armazenamento-local-fase-1.md) | Armazenamento local da Fase 1: IndexedDB, uma entrada por obra | 2026-10-25 | Aceito (revisar no PR) |
+| [00003](00003-minutos-inteiros-persistidos.md) | Durações, lags e horários persistidos em minutos inteiros | 2026-10-25 | Aceito (revisar no PR) |
