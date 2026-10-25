@@ -24,7 +24,7 @@ CronoAI é o copiloto de planejamento de obras integrado ao MS Project:
 | Item | Valor |
 |---|---|
 | Front | Vue 3 (Composition API, `<script setup lang="ts">`) + TypeScript strict + Vite 6 + Pinia + Tailwind 3 + Chart.js (vue-chartjs) + lucide-vue-next |
-| Testes | Vitest (jsdom) |
+| Testes | Vitest (jsdom) + Playwright (E2E, Chromium) |
 | Lint | ESLint 9 flat config (`eslint.config.js`): js + typescript-eslint + vue essential |
 | Node | 22 LTS ou superior (`.nvmrc`) |
 | Container | `Dockerfile` multi-stage → `nginxinc/nginx-unprivileged` |
@@ -38,7 +38,10 @@ npm run lint              # ESLint
 npm run typecheck         # vue-tsc --noEmit
 npm test                  # Vitest (todos)
 npx vitest run <arquivo>  # testes de um arquivo
-npm run ci                # lint + tipos + testes + build — o mesmo do GitHub Actions
+npm run test:coverage     # Vitest com cobertura de src/lib (mínimo 80%)
+npm run e2e:instalar      # baixa o Chromium do Playwright (uma vez)
+npm run e2e               # testes E2E (build de produção em :4173)
+npm run ci                # lint + tipos + testes com cobertura + build — o mesmo do GitHub Actions
 docker compose up --build app        # produção local (porta CRONOAI_PORT, padrão 8080)
 docker compose --profile dev up dev  # desenvolvimento em container
 ```
@@ -134,5 +137,4 @@ Não substitua o parecer dessas áreas: registre a pendência no PR/ciclo.
 - Premissas fixas no código (SPEC-03).
 - CPM em dias inteiros, com calendário único (SPEC-05).
 - Dependências de desenvolvimento com aviso: `vitest` 3 (críticas; correção exige o `vitest` 5) e `tailwindcss` 3 (moderadas; correção exige o Tailwind 4). O audit de produção está zerado.
-- Não há testes E2E (SPEC-00, incremento 0.2).
 - Pontos de cálculo a tratar com teste e decisão explícita: `safeDiv` devolve 1 com divisor zero (SPI/CPI = 1,00 sem PV/AC); `progressPatch` arredonda o custo real no meio do cálculo e usa o fator 1,03 sem histórico; a DLP conta dias corridos e o CPM conta dias úteis; há testes antigos que só verificam direção (`toBeGreaterThan`). Detalhes em [.claude/rules/divida-conhecida.md](.claude/rules/divida-conhecida.md).

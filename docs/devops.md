@@ -15,7 +15,8 @@
   - PowerShell: `$env:CRONOAI_PORT=8088; docker compose up --build app`
   - ou um arquivo `.env` ao lado do `docker-compose.yml` com `CRONOAI_PORT=8088` (não versionar).
 - As portas são publicadas só em `127.0.0.1`: outras máquinas da rede não acessam o container nem o servidor de desenvolvimento.
-- **Validação completa antes do PR:** `npm run ci` (lint, tipos, testes e build).
+- **Validação completa antes do PR:** `npm run ci` (lint, tipos, testes com cobertura mínima de 80% em `src/lib` e build).
+- **E2E (Playwright, Chromium):** `npm run e2e:instalar` (uma vez; baixa o navegador) e `npm run e2e` (gera o build, sobe o preview na porta 4173 e roda os fluxos de `e2e/`). Relatório: `npx playwright show-report`. Cobertura: `npm run test:coverage` (HTML em `coverage/index.html`).
 - **Node exigido:** 22 LTS ou superior (`.nvmrc`).
 
 ### Imagem Docker
@@ -45,7 +46,8 @@ No Git Bash, prefixe o `docker run` com `MSYS_NO_PATHCONV=1` para o `/tmp` não 
 
 | Workflow | Quando roda | O que faz | Bloqueia merge? |
 |---|---|---|---|
-| [CI](../.github/workflows/ci.yml) | Todo PR, push na `master`, manual | `npm ci` → lint → type-check → testes → build → `npm audit` (produção, alta/crítica) → artefato `dist` | Sim |
+| [CI](../.github/workflows/ci.yml) | Todo PR, push na `master`, manual | `npm ci` → lint → type-check → testes com cobertura (limiar de 80% em `src/lib`) → build → `npm audit` (produção, alta/crítica) → artefato `dist` | Sim |
+| CI › Testes E2E (Playwright) | Junto do CI, em paralelo | `npm ci` → Chromium (cache opcional) → `npm run e2e`; na falha publica `playwright-report` e `test-results` (7 dias) | Não (incluir na proteção da `master` depois da 1ª execução verde) |
 | CI › auditoria dev | Junto do CI | Relatório do `npm audit` de todas as dependências no resumo da execução | Não (informativo) |
 | [Docker](../.github/workflows/docker.yml) | **Todo** PR, push na `master`, manual | Build da imagem (sem push), checa usuário não root, sobe container somente leitura e sem capabilities, testa `/healthz`, `/`, fallback da SPA e headers | Sim |
 | [CodeQL](../.github/workflows/codeql.yml) | PR, push na `master`, segundas 06:23 UTC | Análise estática de segurança (`security-extended`) | Recomendado |
@@ -110,6 +112,7 @@ Versões seguem o [SemVer](https://semver.org/lang/pt-BR/): `minor` para funcion
   - `vitest` 3 / `tinypool` / `@vitest/mocker`: críticas; a correção exige o `vitest` 5 (versão principal nova). Fica para um PR próprio, provavelmente aberto pelo Dependabot.
   - `tailwindcss` 3 → `postcss-nested` / `postcss-selector-parser`: moderadas; a correção exige o Tailwind 4 (migração de configuração).
   - `eslint-plugin-vue` foi atualizado para a 10, o que elimina o aviso que ele trazia.
-- Testes E2E (Playwright) e cobertura mínima: SPEC-00, incremento 0.2.
+- Cache do navegador do Playwright no job `e2e`: a [documentação oficial não recomenda](https://playwright.dev/docs/ci#caching-browsers); medir no 1º PR (com e sem cache) e remover se não houver ganho.
+- `@playwright/test` e `@vitest/coverage-v8` (só dev) e o download do Chromium/pacotes de sistema no CI: revisão de licença (Jurídico) e de segurança (Segurança da Informação) antes de produção. `@vitest/coverage-v8` precisa subir junto com o `vitest` (mesma versão).
 - Deploy em ambientes: definir com a Infraestrutura (SPEC-00, incremento 0.3).
 - Bibliotecas novas de lint (`eslint`, `@eslint/js`, `eslint-plugin-vue`, `vue-eslint-parser`, `typescript-eslint`, `globals`): revisão de segurança e de licença antes de produção (todas MIT; só dev).

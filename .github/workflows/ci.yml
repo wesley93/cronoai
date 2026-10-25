@@ -1,4 +1,4 @@
-# CI: lint, type-check, testes, build e auditoria em todo PR e na branch principal.
+# CI: lint, tipos, testes com cobertura, build, auditoria e E2E (Playwright) em todo PR e na branch principal.
 name: CI
 
 on:
@@ -40,8 +40,8 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
-      - name: Testes
-        run: npm test
+      - name: Testes e cobertura (mínimo de 80% em src/lib)
+        run: npm run test:coverage
 
       - name: Build
         run: npx vite build
@@ -54,6 +54,60 @@ jobs:
         with:
           name: dist-${{ github.sha }}
           path: dist
+          retention-days: 7
+
+  e2e:
+    name: Testes E2E (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Node (versão do .nvmrc)
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci --no-audit --no-fund
+
+      - name: Versão do Playwright
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Atenção: a documentação do Playwright não recomenda cache de navegadores (restaurar leva quase
+      # o mesmo tempo que baixar): https://playwright.dev/docs/ci#caching-browsers
+      # Medir no 1º PR (com e sem cache) e remover este passo se não houver ganho.
+      - name: Cache do navegador
+        id: cache-navegador
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      - name: Instalar Chromium e dependências do sistema
+        if: steps.cache-navegador.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Instalar dependências do sistema (navegador em cache)
+        if: steps.cache-navegador.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Testes E2E
+        run: npm run e2e
+
+      - name: Publicar relatório e traces (só na falha)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-${{ github.sha }}
+          path: |
+            playwright-report
+            test-results
           retention-days: 7
 
   audit-dev:
