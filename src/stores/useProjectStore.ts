@@ -90,7 +90,7 @@ import { calcularObra, mensagemDoCalculo, verificarCalculo } from '@/lib/horizon
 import { ROTULO_RESTRICAO, calendarioExiste, montarRestricao, tarefasManuaisAlteradas, validarPrazoFinal, validarRestricao, type TipoRestricaoTela } from '@/lib/restricoes'
 import { lagEmDias, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
 import { criarRegistro, lerEstadoV1, migrarRegistro } from '@/lib/migracaoEstado'
-import { avaliarCota, erroDeStatusForaDaJanela, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, validarIndice, validarOpcoesCronograma, type DadosObra } from '@/lib/obras'
+import { avaliarCota, erroDoRegistroDeDesfazer, erroDeStatusForaDaJanela, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, validarIndice, validarOpcoesCronograma, type DadosObra } from '@/lib/obras'
 import { obterArmazenamento, type ArmazenamentoObras } from './armazenamentoObras'
 import { useUiStore } from './ui'
 
@@ -902,10 +902,12 @@ export const useProjectStore = defineStore('project', () => {
     return state.undo.find((u) => u.kind === kind)?.result
   }
 
-  function undoScenario(kind: ScenarioKind) {
+  function undoScenario(kind: ScenarioKind): ResultadoAcao {
     const idx = state.undo.findIndex((u) => u.kind === kind)
-    if (idx < 0) return
+    if (idx < 0) return { ok: false, erro: 'Este cenário não está aplicado.' }
     const u = state.undo[idx]
+    // Registro vindo do estado salvo com forma inválida: recusa ANTES de alterar qualquer coisa (nada de desfazer pela metade)
+    if (erroDoRegistroDeDesfazer(u)) return { ok: false, erro: 'Não foi possível desfazer este cenário: o registro dele no estado salvo está inválido. Nada foi alterado.' }
     if (u.taskUid !== undefined && u.before) patchTask(u.taskUid, clone(u.before))
     if (u.addedDays) atualizarCalendarioPadrao((c) => semDiasExtras(c, u.addedDays!))
     // Hora extra por frente: cada tarefa volta ao calendário de antes e os calendários derivados saem da obra. O que veio do estado salvo é
@@ -945,6 +947,7 @@ export const useProjectStore = defineStore('project', () => {
     state.undo.splice(idx, 1)
     log('cenario', 'Cenário desfeito', `Cenário "${kind}" revertido; cronograma recalculado.`)
     if (avisosHE.length) log('cenario', 'Calendários das tarefas ajustados ao desfazer', avisosHE.join(' '))
+    return { ok: true }
   }
 
   // ---------------------------------------------------------------- Módulo 3

@@ -904,7 +904,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   if (total.truncadas) warnings.push(`${total.truncadas} exceção(ões) do calendário com mais de ${MAX_EXCEPTION_DAYS} dias: lidas apenas nos primeiros ${MAX_EXCEPTION_DAYS} dias.`)
   if (total.acimaDoOrcamento) warnings.push(`Calendário com mais de ${MAX_CALENDAR_DAYS} dias de exceção: o excedente não foi importado; confira feriados e dias úteis extras.`)
   if (rejeitados) warnings.push(`${rejeitados} calendário(s) rejeitado(s) por não ter tempo útil, ter horário inválido ou mais de ${MAX_INTERVALOS_POR_DIA} intervalos por dia: as tarefas deles passam ao calendário padrão da obra.`)
-  if (calendariosAcimaDoLimite) warnings.push(`${calendariosAcimaDoLimite} calendário(s) acima do limite de ${MAX_CALENDARIOS_IMPORTADOS} não importado(s): as tarefas usam o calendário do projeto.`)
+  if (calendariosAcimaDoLimite) warnings.push(`${calendariosAcimaDoLimite} calendário(s) acima do limite de ${MAX_CALENDARIOS_IMPORTADOS} não importado(s): as tarefas deles passam ao calendário padrão da obra.`)
   if (workWeeks) warnings.push(`${workWeeks} calendário(s) com semanas de trabalho alternativas (WorkWeeks) não aplicadas: o cálculo usa a semana padrão.`)
 
   // Recursos e atribuições

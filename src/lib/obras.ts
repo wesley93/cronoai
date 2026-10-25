@@ -148,6 +148,29 @@ export function estadoObraVazia(d: DadosObra): PersistedState {
   }
 }
 
+const eInteiro = (v: unknown): v is number => Number.isInteger(v)
+
+/**
+ * Confere a forma do registro de "desfazer" lido do estado salvo (dado externo) ANTES de qualquer alteração: listas de datas, de calendários
+ * criados e de calendário anterior das tarefas, e as atribuições da hora extra guardadas no resultado. Devolve o problema ou `undefined`.
+ */
+export function erroDoRegistroDeDesfazer(u: unknown): string | undefined {
+  if (!eObj(u)) return 'registro em formato inválido'
+  if (u.calendariosCriados !== undefined && !(Array.isArray(u.calendariosCriados) && u.calendariosCriados.every(eInteiro))) return 'calendários criados inválidos'
+  if (
+    u.calendariosAntes !== undefined &&
+    !(Array.isArray(u.calendariosAntes) && u.calendariosAntes.every((x) => eObj(x) && eInteiro(x.uid) && (x.calendarioUid === undefined || eInteiro(x.calendarioUid))))
+  ) {
+    return 'calendários anteriores das tarefas inválidos'
+  }
+  if (u.addedDays !== undefined && !(Array.isArray(u.addedDays) && u.addedDays.every((d) => typeof d === 'string'))) return 'datas da hora extra inválidas'
+  const he = eObj(u.result) ? u.result.horaExtra : undefined
+  if (he !== undefined && !(eObj(he) && Array.isArray(he.atribuicoes) && he.atribuicoes.every((a) => eObj(a) && eInteiro(a.uid) && eInteiro(a.calendarioUid)))) {
+    return 'atribuições da hora extra inválidas'
+  }
+  return undefined
+}
+
 /** Nome da cópia de uma obra: "X (cópia)", ou "X (cópia 2)" se já existir. */
 export function nomeDaCopia(nome: string, existentes: string[] = []): string {
   const base = `${nome} (cópia)`

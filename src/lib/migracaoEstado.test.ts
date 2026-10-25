@@ -478,7 +478,8 @@ describe('esquema 3 → 4: premissas versionadas e feriados da obra (ciclo 00005
     expect(m.estado.premissas).toHaveLength(1)
     const longo = migrarRegistro(registro(JSON.stringify({ ...base, premissas: [{ ...v, motivo: 'm'.repeat(201) }] }), 4))
     if (longo.tipo !== 'ok') throw new Error('esperava ok')
-    expect(longo.estado.premissas[0].motivo).not.toHaveLength(201)
+    expect(longo.estado.premissas).toHaveLength(1)
+    expect(longo.estado.premissas[0].motivo).toBe('Premissas padrão (o estado salvo não tinha premissas válidas)')
   })
 
   it('P-4: esquema 5 é recusado (e nunca sobrescrito)', () => {

@@ -797,7 +797,7 @@ describe('limites do import de calendários, restrições e lags (S-1 e S-2)', (
     const r = parseMspdiXml(projeto({ head: `<StartDate>2026-03-02T08:00:00</StartDate><Calendars>${base(1, 'Obra', PADRAO_XML)}${cals}</Calendars>`, tasks }))
     expect(performance.now() - t0).toBeLessThan(2000)
     expect(r.calendarios).toHaveLength(MAX_CALENDARIOS_IMPORTADOS)
-    expect(r.warnings).toContain('1 calendário(s) acima do limite de 100 não importado(s): as tarefas usam o calendário do projeto.')
+    expect(r.warnings).toContain('1 calendário(s) acima do limite de 100 não importado(s): as tarefas deles passam ao calendário padrão da obra.')
     expect(r.tasks.filter((t) => t.calendarioUid !== undefined)).toHaveLength(99)
   })
 

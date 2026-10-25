@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { Plus, Trash2 } from '@lucide/vue'
 import type { CalendarioObra, IntervaloTrabalho } from '@/types/domain'
 import { useProjectStore } from '@/stores/useProjectStore'
@@ -14,6 +14,15 @@ const ui = useUiStore()
 type TipoExcecao = 'nao-util' | 'quatro-horas' | 'oito-horas' | 'proprio'
 const excecao = reactive({ data: '', tipo: 'quatro-horas' as TipoExcecao, de: '08:00', ate: '12:00', descricao: '' })
 const erroExcecao = ref('')
+
+// Rascunho e erro são do calendário aberto: ao trocar de calendário a exceção digitada não vai para o outro
+watch(
+  () => props.calendario.uid,
+  () => {
+    Object.assign(excecao, { data: '', tipo: 'quatro-horas', de: '08:00', ate: '12:00', descricao: '' })
+    erroExcecao.value = ''
+  },
+)
 const excecoesOrdenadas = computed(() => props.calendario.excecoes)
 const LIMITE_EXCECOES = 200
 

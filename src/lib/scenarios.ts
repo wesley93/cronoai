@@ -1,5 +1,5 @@
 // Efeito dominó e simulador de recuperação (Crashing, Fast Tracking e Hora Extra).
-import type { CalendarioObra, ConfigFeriadosObra, PremissasObra, ProjectMeta, ScenarioKind, ScheduleResult, ScheduledTask, Task, VersaoPremissas } from '@/types/domain'
+import type { CalendarioObra, ConfigFeriadosObra, IntervaloTrabalho, PremissasObra, ProjectMeta, ScenarioKind, ScheduleResult, ScheduledTask, Task, VersaoPremissas } from '@/types/domain'
 import { WorkCalendar, diffCalendarDays, nextSaturdays } from './calendar'
 import {
   MAX_CALENDARIOS,
@@ -154,6 +154,8 @@ export interface ScenarioResult {
     calendariosNovos: CalendarioObra[]
     atribuicoes: { uid: number; calendarioUid: number }[]
     naoConvocadas: number[]
+    /** Voltas do ajuste dos sábados por frente (0 no modo "todas"). */
+    voltas?: number
   }
 }
 
@@ -441,19 +443,21 @@ function agendadaNoDia(s: ScheduledTask, aposStatus: number, inicioDia: number):
   return !(Math.max(s.inicioCedoMin, aposStatus) >= inicioDia + MINUTOS_NO_DIA_CORRIDO || s.terminoCedoMin <= inicioDia)
 }
 
+type Compilados = ReturnType<typeof compilar>
+
 /**
- * A tarefa (já com o calendário da hipótese) trabalha nesse sábado depois da hora extra: o intervalo agendado, nunca antes da data de status,
- * cruza minutos úteis do sábado no calendário dela.
+ * Minutos úteis que a tarefa (já com o calendário da hipótese) trabalha nesse sábado depois da hora extra: o intervalo agendado, nunca antes da
+ * data de status, cruzado com o expediente do sábado no calendário dela. Zero = a frente não trabalha nesse sábado.
  */
-function ativaNoSabadoDepois(ctx: Ctx, t: Task, dia: string, schedule: ScheduleResult, cals: ReturnType<typeof compilar>): boolean {
+function minutosNoSabadoDepois(ctx: Ctx, t: Task, dia: string, schedule: ScheduleResult, cals: Compilados): number {
   const s = schedule.byUid.get(t.uid)
-  if (!s) return false
+  if (!s) return 0
   const cal = cals.de(t.calendarioUid)
   const apos = cal.proximoUtil((diaRelativo(cals.base, ctx.meta.statusDate) + 1) * MINUTOS_NO_DIA_CORRIDO)
   const inicioDia = diaRelativo(cals.base, dia) * MINUTOS_NO_DIA_CORRIDO
   const de = Math.max(s.inicioCedoMin, apos, inicioDia)
   const ate = Math.min(s.terminoCedoMin, inicioDia + MINUTOS_NO_DIA_CORRIDO)
-  return ate > de && cal.minutosUteisEntre(de, ate) > 0
+  return ate > de ? cal.minutosUteisEntre(de, ate) : 0
 }
 
 /** Nome do calendário derivado: cabe em 60 caracteres e é único na obra (sufixo "(2)", "(3)"… se já existir). */
@@ -468,20 +472,108 @@ function nomeDoDerivado(baseNome: string, sufixo: string, nDias: number, existen
   return candidato
 }
 
-/** Frentes (tarefas folha não concluídas) com trabalho agendado nos sábados convocados, antes da hora extra: críticas primeiro. */
+const baseUidDe = (padrao: CalendarioObra, t: Task) => t.calendarioUid ?? padrao.uid
+const baseCalDe = (ctx: Ctx, padrao: CalendarioObra, t: Task) => ctx.calendarios.find((c) => c.uid === baseUidDe(padrao, t)) ?? padrao
+
+/**
+ * Sábados candidatos da frente: o calendário base não trabalha neles (já útil = jornada normal, sem custo e sem ganho) e eles não são feriado
+ * nesse calendário (trabalho em feriado tem regra própria: RH e Jurídico).
+ */
+function diasBaseDe(ctx: Ctx, padrao: CalendarioObra, cals0: Compilados, days: string[], t: Task): string[] {
+  return days.filter((d) => !cals0.de(baseUidDe(padrao, t)).dataUtil(d) && !ehFeriadoNoCalendario(ctx, baseCalDe(ctx, padrao, t), d))
+}
+
+interface MontagemHE {
+  criados: CalendarioObra[]
+  atribuidos: { uid: number; calendarioUid: number }[]
+  calendarios: CalendarioObra[]
+  tarefas: Task[]
+}
+
+/** Um calendário derivado por calendário base e conjunto de sábados (nome único, UID = maior + 1), atribuído às frentes do `mapa`. */
+function montarDerivados(ctx: Ctx, padrao: CalendarioObra, alvos: Task[], mapa: Map<number, string[]>, expediente: IntervaloTrabalho[] | undefined): MontagemHE {
+  const derivados = new Map<string, CalendarioObra>()
+  const criados: CalendarioObra[] = []
+  const atribuidos: { uid: number; calendarioUid: number }[] = []
+  for (const t of alvos) {
+    const dias = mapa.get(t.uid)
+    if (!dias) continue
+    const base = baseCalDe(ctx, padrao, t)
+    const chave = `${base.uid}|${dias.join(',')}`
+    if (!derivados.has(chave)) {
+      const nome = nomeDoDerivado(base.nome, ` + HE ${listaDeDias(dias)}`, dias.length, [...ctx.calendarios, ...criados].map((c) => c.nome))
+      const uid = proximoUidCalendario([...ctx.calendarios, ...criados])
+      const derivado = comDiasExtras({ ...copiarCalendario(base, uid, nome), derivadoDe: base.uid, origem: 'hora-extra' }, dias, expediente ?? expedienteDoDiaUtil(base))
+      criados.push(derivado)
+      derivados.set(chave, derivado)
+    }
+    atribuidos.push({ uid: t.uid, calendarioUid: derivados.get(chave)!.uid })
+  }
+  const porUid = new Map(atribuidos.map((a) => [a.uid, a.calendarioUid]))
+  return {
+    criados,
+    atribuidos,
+    calendarios: [...ctx.calendarios, ...criados],
+    tarefas: ctx.tasks.map((x) => (porUid.has(x.uid) ? { ...x, calendarioUid: porUid.get(x.uid) } : x)),
+  }
+}
+
+/** Sábados dos pares (frente, sábado) ainda candidatos. */
+const totalDePares = (mapa: Map<number, string[]>) => [...mapa.values()].reduce((n, d) => n + d.length, 0)
+
+/**
+ * Ponto fixo dos sábados por frente. Parte da hipótese máxima (todos os sábados candidatos já no calendário de cada frente) e tira, até
+ * estabilizar, os sábados em que a frente não trabalha DEPOIS da hora extra (o lag que chega a ela só conta o sábado em que ela trabalha: sem
+ * ganho de lag sem custo). Cada volta que muda tira ao menos um par (frente, sábado): o teto de voltas é o total de pares mais a volta de
+ * conferência. `mapa` é alterado no lugar; `montado` corresponde ao `mapa` final.
+ */
+function ajustarSabadosPorFrente(ctx: Ctx, padrao: CalendarioObra, alvos: Task[], mapa: Map<number, string[]>, expediente: IntervaloTrabalho[] | undefined) {
+  const teto = totalDePares(mapa)
+  let montado = montarDerivados(ctx, padrao, alvos, mapa, expediente)
+  let voltas = 0
+  let estabilizou = false
+  for (let volta = 1; volta <= teto + 1 && mapa.size; volta++) {
+    voltas = volta
+    const { cals, schedule } = reschedule(ctx, montado.tarefas, montado.calendarios)
+    let mudou = false
+    for (const [uid, dias] of [...mapa]) {
+      const t = montado.tarefas.find((x) => x.uid === uid)!
+      const ativos = dias.filter((d) => minutosNoSabadoDepois(ctx, t, d, schedule, cals) > 0)
+      if (ativos.length === dias.length) continue
+      mudou = true
+      if (ativos.length) mapa.set(uid, ativos)
+      else mapa.delete(uid)
+    }
+    if (!mudou) {
+      estabilizou = true
+      break
+    }
+    if (mapa.size) montado = montarDerivados(ctx, padrao, alvos, mapa, expediente)
+  }
+  return { montado, voltas, estabilizou }
+}
+
+/**
+ * Frentes (tarefas folha não concluídas) com trabalho nos sábados convocados, avaliadas com esses sábados JÁ no calendário de cada frente
+ * (hipótese máxima: a frente pode começar a trabalhar no sábado por causa da hora extra); críticas primeiro.
+ */
 export function overtimeTargets(ctx: Ctx, saturdays = DEFAULT_SCENARIO_PARAMS.overtime.saturdays): ScenarioOption[] {
   const padrao = ctx.calendarios.find((c) => c.uid === ctx.calendarioPadraoUid)
   if (!padrao) return []
   const days = sabadosConvocados(ctx, padrao, Math.max(1, Math.min(8, Math.round(saturdays))))
-  const cals = compilar(ctx, ctx.calendarios)
+  const cals0 = compilar(ctx, ctx.calendarios)
+  const alvos = ctx.tasks.filter((t) => !t.isSummary && t.percentComplete < 100 && ctx.forecast.byUid.has(t.uid))
+  const mapa = new Map<number, string[]>()
+  for (const t of alvos) {
+    const ds = diasBaseDe(ctx, padrao, cals0, days, t)
+    if (ds.length) mapa.set(t.uid, ds)
+  }
+  if (!mapa.size) return []
+  const montado = montarDerivados(ctx, padrao, alvos, mapa, undefined)
+  const { cals, schedule } = reschedule(ctx, montado.tarefas, montado.calendarios)
   const crit = (t: Task) => !!ctx.forecast.byUid.get(t.uid)?.critical
-  return ctx.tasks
-    .filter((t) => {
-      const s = ctx.forecast.byUid.get(t.uid)
-      if (t.isSummary || t.percentComplete >= 100 || !s) return false
-      const apos = cals.de(t.calendarioUid).proximoUtil((diaRelativo(cals.base, ctx.meta.statusDate) + 1) * MINUTOS_NO_DIA_CORRIDO)
-      return days.some((d) => agendadaNoDia(s, apos, diaRelativo(cals.base, d) * MINUTOS_NO_DIA_CORRIDO))
-    })
+  return montado.tarefas
+    .filter((t) => mapa.get(t.uid)?.some((d) => minutosNoSabadoDepois(ctx, t, d, schedule, cals) > 0))
     .sort((a, b) => Number(crit(b)) - Number(crit(a)) || ctx.forecast.byUid.get(a.uid)!.inicioCedoMin - ctx.forecast.byUid.get(b.uid)!.inicioCedoMin)
     .map((t) => ({ value: String(t.uid), label: `${t.wbs} ${shortName(t.name)}`, critical: crit(t) }))
 }
@@ -490,11 +582,12 @@ export function overtimeTargets(ctx: Ctx, saturdays = DEFAULT_SCENARIO_PARAMS.ov
  * Hora extra nos sábados (RF-03.6). Dois modos:
  * - `'todas'` (padrão): os sábados entram como exceção útil no calendário padrão (todas as tarefas do padrão); tarefas com calendário
  *   próprio não são convocadas (a memória lista as ativas que ficaram de fora);
- * - lista de frentes: cada frente ativa num sábado convocado (no cronograma de hoje) recebe uma cópia ("derivada") do calendário base dela
- *   só com os sábados em que está ativa, como exceção útil; sábado que o calendário base já trabalha não é hora extra, e sábado que é feriado
- *   nesse calendário não é convocado (trabalho em feriado tem regra própria: RH e Jurídico).
+ * - lista de frentes: cada frente recebe uma cópia ("derivada") do calendário base dela só com os sábados em que ela trabalha depois da hora
+ *   extra (ponto fixo, ver `ajustarSabadosPorFrente`); sábado que o calendário base já trabalha não é hora extra, e sábado que é feriado nesse
+ *   calendário não é convocado (trabalho em feriado tem regra própria: RH e Jurídico).
  * Custo = Σ por sábado e por frente convocada ativa no sábado: unidades × horas do sábado × taxa × (1 + adicional). As horas do sábado são os
- * minutos úteis da exceção do sábado no calendário da frente ÷ 60 (o mesmo que o cronograma usa): 8 h no dia inteiro, 4 h no meio período.
+ * minutos úteis da exceção do sábado no calendário da frente ÷ 60 (o mesmo que o cronograma usa): 8 h no dia inteiro, 4 h no meio período. A
+ * equipe é convocada para o expediente inteiro (regra do plano, a validar com RH); a memória mostra os minutos efetivamente trabalhados.
  */
 export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAULT_SCENARIO_PARAMS.overtime): ScenarioResult {
   const title = 'Hora Extra (Sábados)'
@@ -526,6 +619,8 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
   const naoConvocadas: number[] = []
   const avisosFeriado: string[] = []
   const foraPorCalendario: Task[] = []
+  let voltas = 0
+  let estabilizou = true
   /** Tarefas cobradas e os sábados que são hora extra para cada uma. */
   let participantes: { t: Task; dias: string[] }[]
   const folhas = ctx.tasks.filter((x) => !x.isSummary)
@@ -539,17 +634,14 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
     const uids = new Set(frentes)
     const escolhidas = folhas.filter((t) => uids.has(t.uid))
     if (!escolhidas.length) return notApplicable('overtime', title, 'Escolha ao menos uma frente (tarefa) para a hora extra.', ctx)
-    // Ativa = com trabalho agendado em ao menos um sábado convocado, no cronograma de hoje (antes da hora extra)
-    const ativas = escolhidas.filter((t) => days.some((d) => ativaHoje(t, d)))
-    if (!ativas.length) return notApplicable('overtime', title, `Nenhuma frente escolhida trabalha nos sábados convocados (${days.map(fmtDia).join(', ')}).`, ctx)
-    const baseDe = (t: Task) => t.calendarioUid ?? padrao.uid
-    const baseCal = (t: Task) => ctx.calendarios.find((c) => c.uid === baseDe(t)) ?? padrao
-    // Sábados candidatos da frente: o calendário base não trabalha neles (já útil = jornada normal, sem custo e sem ganho) e eles não são feriado
-    // nesse calendário (trabalho em feriado tem regra própria: RH e Jurídico)
-    const diasBase = (t: Task) => days.filter((d) => !cals0.de(baseDe(t)).dataUtil(d) && !ehFeriadoNoCalendario(ctx, baseCal(t), d))
-    const candidatas = ativas.filter((t) => diasBase(t).length > 0)
+    const semTrabalho = `Nenhuma frente escolhida trabalha nos sábados convocados (${days.map(fmtDia).join(', ')}).`
+    const abertas = escolhidas.filter((t) => t.percentComplete < 100 && ctx.forecast.byUid.has(t.uid))
+    if (!abertas.length) return notApplicable('overtime', title, semTrabalho, ctx)
+    // Candidatas: as frentes abertas com algum sábado que é hora extra para elas. Não se filtra pelo cronograma de hoje: a frente pode passar a
+    // trabalhar no sábado por causa da própria hora extra (ex.: data de status na sexta); quem poda é o ponto fixo, depois.
+    const candidatas = abertas.filter((t) => diasBaseDe(ctx, padrao, cals0, days, t).length > 0)
     if (!candidatas.length) {
-      const jaUteis = ativas.some((t) => days.some((d) => cals0.de(baseDe(t)).dataUtil(d)))
+      const jaUteis = abertas.some((t) => days.some((d) => cals0.de(baseUidDe(padrao, t)).dataUtil(d)))
       return notApplicable(
         'overtime',
         title,
@@ -559,71 +651,29 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
         ctx,
       )
     }
-    for (const t of candidatas) {
+    for (const t of abertas) {
+      const s = ctx.forecast.byUid.get(t.uid)!
       for (const d of days) {
-        if (ativaHoje(t, d) && ehFeriadoNoCalendario(ctx, baseCal(t), d) && !cals0.de(baseDe(t)).dataUtil(d)) {
+        const cobre = s.inicioCedoMin < inicioDe(d) + MINUTOS_NO_DIA_CORRIDO && s.terminoCedoMin > inicioDe(d)
+        if (cobre && ehFeriadoNoCalendario(ctx, baseCalDe(ctx, padrao, t), d) && !cals0.de(baseUidDe(padrao, t)).dataUtil(d)) {
           avisosFeriado.push(`sábado ${fmtDia(d)} é feriado no calendário da frente ${t.wbs}; trabalho em feriado tem regra própria (validar com RH/Jurídico)`)
         }
       }
     }
 
-    // Um calendário derivado por calendário base e conjunto de sábados (nome único, UID = maior + 1), atribuído às frentes
-    const montar = (mapa: Map<number, string[]>) => {
-      const derivados = new Map<string, CalendarioObra>()
-      const criados: CalendarioObra[] = []
-      const atribuidos: { uid: number; calendarioUid: number }[] = []
-      for (const t of candidatas) {
-        const dias = mapa.get(t.uid)
-        if (!dias) continue
-        const base = baseCal(t)
-        const chave = `${base.uid}|${dias.join(',')}`
-        if (!derivados.has(chave)) {
-          const nome = nomeDoDerivado(base.nome, ` + HE ${listaDeDias(dias)}`, dias.length, [...ctx.calendarios, ...criados].map((c) => c.nome))
-          const uid = proximoUidCalendario([...ctx.calendarios, ...criados])
-          const derivado = comDiasExtras({ ...copiarCalendario(base, uid, nome), derivadoDe: base.uid, origem: 'hora-extra' }, dias, expediente ?? expedienteDoDiaUtil(base))
-          criados.push(derivado)
-          derivados.set(chave, derivado)
-        }
-        atribuidos.push({ uid: t.uid, calendarioUid: derivados.get(chave)!.uid })
-      }
-      return {
-        criados,
-        atribuidos,
-        calendarios: [...ctx.calendarios, ...criados],
-        tarefas: ctx.tasks.map((x) => {
-          const at = atribuidos.find((y) => y.uid === x.uid)
-          return at ? { ...x, calendarioUid: at.calendarioUid } : x
-        }),
-      }
-    }
-
-    // O derivado leva só os sábados em que a frente fica ativa DEPOIS da hora extra (o lag que chega a ela só conta o sábado em que ela trabalha:
-    // sem ganho de lag sem custo). Parte de todos os candidatos e tira, até estabilizar, os sábados em que a frente não trabalha.
-    const mapa = new Map<number, string[]>(candidatas.map((t) => [t.uid, diasBase(t)]))
-    let montado = montar(mapa)
-    for (let volta = 0; volta < 4 && mapa.size; volta++) {
-      const { cals: c1, schedule: s1 } = reschedule(ctx, montado.tarefas, montado.calendarios)
-      let mudou = false
-      for (const [uid, dias] of [...mapa]) {
-        const t = montado.tarefas.find((x) => x.uid === uid)!
-        const ativos = dias.filter((d) => ativaNoSabadoDepois(ctx, t, d, s1, c1))
-        if (ativos.length === dias.length) continue
-        mudou = true
-        if (ativos.length) mapa.set(uid, ativos)
-        else mapa.delete(uid)
-      }
-      if (!mudou) break
-      montado = montar(mapa)
-    }
-    if (!mapa.size) return notApplicable('overtime', title, `Nenhuma frente escolhida trabalha nos sábados convocados (${days.map(fmtDia).join(', ')}).`, ctx)
+    const mapa = new Map<number, string[]>(candidatas.map((t) => [t.uid, diasBaseDe(ctx, padrao, cals0, days, t)]))
+    const ajuste = ajustarSabadosPorFrente(ctx, padrao, candidatas, mapa, expediente)
+    voltas = ajuste.voltas
+    estabilizou = ajuste.estabilizou
+    if (!mapa.size) return notApplicable('overtime', title, semTrabalho, ctx)
     for (const t of escolhidas) if (!mapa.has(t.uid)) naoConvocadas.push(t.uid)
-    novos.push(...montado.criados)
-    atribuicoes.push(...montado.atribuidos)
+    novos.push(...ajuste.montado.criados)
+    atribuicoes.push(...ajuste.montado.atribuidos)
     if (ctx.calendarios.length + novos.length > MAX_CALENDARIOS) {
       return notApplicable('overtime', title, `Não há espaço para o calendário da hora extra: a obra já tem ${ctx.calendarios.length} calendários (máximo ${MAX_CALENDARIOS}).`, ctx)
     }
-    calendarios = montado.calendarios
-    tarefas = montado.tarefas
+    calendarios = ajuste.montado.calendarios
+    tarefas = ajuste.montado.tarefas
     participantes = candidatas.filter((t) => mapa.has(t.uid)).map((t) => ({ t: tarefas.find((x) => x.uid === t.uid)!, dias: mapa.get(t.uid)! }))
   }
 
@@ -636,12 +686,17 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
   let workers = 0
   const horasUsadas = new Set<number>()
   const byTask = new Map<string, number>()
+  /** Minutos efetivamente trabalhados por frente e sábado (memória de cálculo e alerta de convocação). */
+  const trabalhados: { uid: number; wbs: string; dia: string; minutos: number; expediente: number }[] = []
   for (const { t, dias } of participantes) {
     const cal = cals.de(t.calendarioUid)
     for (const day of dias) {
-      if (!ativaNoSabadoDepois(ctx, t, day, schedule, cals)) continue
-      const horas = cal.minutosNoDia(diaRelativo(cals.base, day)) / 60
+      const minutos = minutosNoSabadoDepois(ctx, t, day, schedule, cals)
+      if (minutos <= 0) continue
+      const expedienteMin = cal.minutosNoDia(diaRelativo(cals.base, day))
+      const horas = expedienteMin / 60
       horasUsadas.add(horas)
+      trabalhados.push({ uid: t.uid, wbs: t.wbs, dia: day, minutos, expediente: expedienteMin })
       for (const r of t.resources) {
         const c = r.units * horas * rateOf(prem, r.resource) * (1 + adicional)
         overtimeCost += c
@@ -656,6 +711,17 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
   const net = overtimeCost - indirectSavings
   const escolhidasNoCritico = frentes !== 'todas' && frentes.some((u) => crit(u))
   const nomeFrentes = (uids: number[]) => uids.map((u) => ctx.tasks.find((t) => t.uid === u)?.wbs ?? String(u)).join(', ')
+  const LIMITE_LINHAS = 12
+  const limitar = (linhas: string[]) => (linhas.length > LIMITE_LINHAS ? [...linhas.slice(0, LIMITE_LINHAS), `… e mais ${linhas.length - LIMITE_LINHAS}`] : linhas)
+  // E-12: minutos efetivamente trabalhados por frente e sábado; a frente que trabalha menos da metade do expediente é cobrada por ele inteiro
+  const porFrente = new Map<number, typeof trabalhados>()
+  for (const x of trabalhados) porFrente.set(x.uid, [...(porFrente.get(x.uid) ?? []), x])
+  const memoriaMinutos = [...porFrente.values()]
+    .sort((a, b) => a[0].wbs.localeCompare(b[0].wbs, 'pt-BR', { numeric: true }))
+    .map((xs) => `   · ${crit(xs[0].uid) ? '● ' : ''}${xs[0].wbs} trabalha: ${xs.map((x) => `${fmtDia(x.dia)}: ${x.minutos} min`).join('; ')}`)
+  const memoriaConvocacao = trabalhados
+    .filter((x) => x.minutos * 2 < x.expediente)
+    .map((x) => `${crit(x.uid) ? '● ' : ''}${x.wbs} trabalha ${x.minutos} min no sábado ${fmtDia(x.dia)} e é cobrada pelo expediente inteiro (${num(x.expediente / 60)} h): validar a convocação com RH.`)
   const memoriaFrentes =
     frentes === 'todas'
       ? foraPorCalendario.length
@@ -665,6 +731,7 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
           `Frentes convocadas: ${nomeFrentes(atribuicoes.map((a) => a.uid)) || '—'}${naoConvocadas.length ? `; não convocadas (sem trabalho nos sábados convocados, já trabalham neles ou o sábado é feriado no calendário delas): ${nomeFrentes(naoConvocadas)}` : ''}`,
           ...avisosFeriado,
           ...novos.map((c) => `Calendário derivado "${c.nome}" (UID ${c.uid}) atribuído a ${nomeFrentes(atribuicoes.filter((a) => a.calendarioUid === c.uid).map((a) => a.uid))}`),
+          ...(estabilizou ? [] : [`O ajuste dos sábados por frente não estabilizou em ${voltas} voltas (teto: um par frente × sábado por volta): o resultado foi conferido uma última vez; confira as datas e o custo.`]),
         ]
 
   return comVersao(ctx, {
@@ -695,13 +762,15 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
     memory: [
       `Custo HE = Σ profissionais × ${horasTexto} h × taxa × ${num(1 + adicional)} = ${fmt(overtimeCost)}`,
       ...[...byTask.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([wbs, c]) => `   · frente ${wbs}: ${fmt(c)}`),
+      ...(memoriaMinutos.length ? ['Minutos efetivamente trabalhados por frente e sábado (a equipe é convocada para o expediente inteiro):', ...limitar(memoriaMinutos)] : []),
+      ...limitar(memoriaConvocacao),
       ...memoriaFrentes,
       `CPM recalculado com ${days.length} dia(s) útil(eis) a mais${jornada === 'meio' ? ' (meio período: 4 h)' : ''}: entrega ${br(ctx.forecast.projectFinish)} → ${br(schedule.projectFinish)} (${gained} d.u.)`,
       `Economia de indireto = ${Math.max(0, gained)} d × ${fmt(prem.custoIndiretoDiario)} = ${fmt(indirectSavings)}`,
       memoriaPremissas(ctx.versaoPremissas, prem, ['adicionalHoraExtraPct', 'custoIndiretoDiario'], [...new Set(ctx.tasks.flatMap((t) => t.resources.map((r) => r.resource)))]),
     ],
     ...(frentes === 'todas' ? { addedWorkingDays: days } : {}),
-    horaExtra: { jornada, dias: days, calendariosNovos: novos, atribuicoes, naoConvocadas },
+    horaExtra: { jornada, dias: days, calendariosNovos: novos, atribuicoes, naoConvocadas, voltas },
   })
 }
 

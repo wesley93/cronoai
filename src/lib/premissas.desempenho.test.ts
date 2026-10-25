@@ -100,4 +100,41 @@ describe('desempenho: mudar uma premissa recalcula cenários e DLP (RNF-03.1, ob
     console.info(`[CRONOAI_PERF] mudança de premissa (ms): ${tempos.map((t) => t.toFixed(0)).join(', ')}; mediana ${tempos[2].toFixed(0)} ms`)
     expect(tempos[2]).toBeLessThan(1000)
   })
+
+  // R-12 (rodada 03): a hora extra por frentes escolhidas roda o ponto fixo (uma reprogramação do cronograma inteiro por volta, mais a lista de
+  // frentes da tela): mede a mudança de premissa com algumas frentes escolhidas.
+  const mudarIndiretoComFrentes = () => {
+    indireto += 100
+    const t0 = performance.now()
+    const valores: PremissasObra = { ...JSON.parse(JSON.stringify(store.premissasVigentes)), custoIndiretoDiario: indireto }
+    const r = store.criarVersaoPremissas({ vigencia, motivo: 'medição de desempenho (frentes)', valores })
+    const cenarios = store.scenarios
+    const dlp = store.supplies
+    const opcoes = store.scenarioOptions
+    return { ms: performance.now() - t0, ok: r.ok, cenarios, dlp, opcoes }
+  }
+
+  it('com frentes escolhidas, a mudança de premissa chega à hora extra e recalcula tudo em menos de 5.000 ms (teto largo para o CI)', () => {
+    store.scenarioParams.overtime.frentes = 'todas'
+    const lista = store.scenarioOptions.overtime
+    expect(lista.length).toBeGreaterThan(0)
+    store.scenarioParams.overtime.frentes = lista.slice(0, 3).map((o) => Number(o.value))
+    const r = mudarIndiretoComFrentes()
+    expect(r.ok).toBe(true)
+    const he = r.cenarios.overtime
+    expect(he.applicable).toBe(true)
+    expect(he.horaExtra?.atribuicoes.length).toBeGreaterThan(0)
+    expect(he.indirectSavings).toBe(Math.max(0, he.daysRecovered) * indireto)
+    expect(r.ms).toBeLessThan(5000)
+  })
+
+  it.skipIf(!process.env.CRONOAI_PERF)('local (CRONOAI_PERF=1): mediana de 5 mudanças de premissa com frentes escolhidas (informativo; meta 1.000 ms)', () => {
+    mudarIndiretoComFrentes() // aquecimento
+    const tempos: number[] = []
+    for (let i = 0; i < 5; i++) tempos.push(mudarIndiretoComFrentes().ms)
+    tempos.sort((a, b) => a - b)
+    const voltas = store.scenarios.overtime.horaExtra?.voltas
+    console.info(`[CRONOAI_PERF] mudança de premissa com frentes escolhidas (ms): ${tempos.map((t) => t.toFixed(0)).join(', ')}; mediana ${tempos[2].toFixed(0)} ms; voltas do ajuste ${voltas}`)
+    expect(tempos[2]).toBeLessThan(5000) // o número medido vai para o relatório; acima de 1.000 ms é reportado, não otimizado
+  })
 })

@@ -633,8 +633,8 @@ describe('useProjectStore · rodada 02 do ciclo 00005 (calendário de hora extra
     const store = useProjectStore()
     aplicarHE104(store)
     const u = store.state.undo[0]
-    u.calendariosCriados = [1, 2, 99, 2.5] // o 1 é o padrão
-    u.calendariosAntes = [{ uid: 104, calendarioUid: 999 }, { uid: 105, calendarioUid: 1.5 }]
+    u.calendariosCriados = [1, 2, 99] // o 1 é o padrão e o 99 não existe (itens de tipo errado são recusados em bloco: ver a rodada 03)
+    u.calendariosAntes = [{ uid: 104, calendarioUid: 999 }, { uid: 105, calendarioUid: 7 }]
     store.undoScenario('overtime')
     expect(store.state.calendarios.map((c) => c.uid)).toEqual([1]) // o padrão ficou; o derivado saiu
     expect(store.taskByUid.get(104)?.calendarioUid).toBeUndefined()
@@ -688,5 +688,43 @@ describe('useProjectStore · rodada 02 do ciclo 00005 (calendário de hora extra
     expect(store.scenarios['fast-tracking'].extraCost).not.toBeCloseTo(antes.ft, 2)
     expect(store.updateTask(302, { resources: [{ resource: 'Pedreiro', units: 1 }] })).toEqual({ ok: true })
     expect(store.scenarios.overtime.extraCost).not.toBeCloseTo(antes.he, 2) // a equipe do 302 convocada na hora extra mudou
+  })
+})
+
+describe('useProjectStore · registro de desfazer inválido no estado salvo (rodada 03)', () => {
+  beforeEach(() => {
+    globalThis.localStorage?.clear?.() // Node 26 pode expor localStorage indefinido
+    setActivePinia(createPinia())
+  })
+
+  const MSG = 'Não foi possível desfazer este cenário: o registro dele no estado salvo está inválido. Nada foi alterado.'
+  const adulteracoes: [string, (u: ReturnType<typeof useProjectStore>['state']['undo'][number]) => void][] = [
+    ['calendariosCriados que não é lista', (u) => Object.assign(u, { calendariosCriados: 'x' })],
+    ['calendariosCriados com item que não é inteiro', (u) => Object.assign(u, { calendariosCriados: [2, 'a'] })],
+    ['calendariosAntes que não é lista', (u) => Object.assign(u, { calendariosAntes: {} })],
+    ['calendariosAntes com item de tipo errado', (u) => Object.assign(u, { calendariosAntes: [{ uid: 'x' }] })],
+    ['atribuicoes da hora extra que não é lista', (u) => Object.assign(u.result.horaExtra ?? {}, { atribuicoes: 5 })],
+    ['atribuicoes com calendarioUid de tipo errado', (u) => Object.assign(u.result.horaExtra ?? {}, { atribuicoes: [{ uid: 104, calendarioUid: 'b' }] })],
+    ['addedDays que não é lista de datas', (u) => Object.assign(u, { addedDays: [1, 2] })],
+  ]
+
+  it.each(adulteracoes)('recusa antes de alterar qualquer coisa: %s', (_nome, adulterar) => {
+    const store = useProjectStore()
+    store.scenarioParams.overtime.frentes = [104]
+    expect(store.applyScenario(store.scenarios.overtime)).toEqual({ ok: true })
+    adulterar(store.state.undo[0])
+    const antes = JSON.stringify({ tasks: store.state.tasks, calendarios: store.state.calendarios, applied: store.state.appliedScenarios, custos: store.state.recoveryCosts, undo: store.state.undo, log: store.state.log })
+    expect(store.undoScenario('overtime')).toEqual({ ok: false, erro: MSG })
+    // nada de desfazer pela metade: tarefas, calendários, custos, lista de cenários, undo e log ficam como estavam
+    expect(JSON.stringify({ tasks: store.state.tasks, calendarios: store.state.calendarios, applied: store.state.appliedScenarios, custos: store.state.recoveryCosts, undo: store.state.undo, log: store.state.log })).toBe(antes)
+    expect(store.taskByUid.get(104)?.calendarioUid).toBe(2)
+  })
+
+  it('um undo íntegro continua desfazendo e devolve ok', () => {
+    const store = useProjectStore()
+    store.scenarioParams.overtime.frentes = [104]
+    store.applyScenario(store.scenarios.overtime)
+    expect(store.undoScenario('overtime')).toEqual({ ok: true })
+    expect(store.undoScenario('overtime')).toEqual({ ok: false, erro: 'Este cenário não está aplicado.' })
   })
 })

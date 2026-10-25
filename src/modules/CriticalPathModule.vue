@@ -79,7 +79,11 @@ function apply(kind: ScenarioKind) {
   ui.notify('success', `${res.title} aplicado`, `Entrega: ${fmtDate(before)} → ${fmtDate(project.schedule.projectFinish)} · custo comprometido ${fmtBRL(res.extraCost)}. Gantt, EVM e suprimentos recalculados.`)
 }
 function undo(kind: ScenarioKind) {
-  project.undoScenario(kind)
+  const r = project.undoScenario(kind)
+  if (!r.ok) {
+    ui.notify('error', 'Cenário não desfeito', r.erro)
+    return
+  }
   ui.notify('info', 'Cenário desfeito', 'Cronograma restaurado e recalculado.')
 }
 

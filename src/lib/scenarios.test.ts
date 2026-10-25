@@ -207,10 +207,14 @@ describe('Premissas da obra nos cenários (ciclo 00005)', () => {
     const r = simulateOvertime({ ...ctx, calendarios: [c9], forecast: forecast9 })
     expect(r.summary).toContain('(9 h, adicional de 50%)')
     expect(r.addedWorkingDays).toEqual(['2026-10-24', '2026-10-31'])
-    // 73 profissionais-dia (a frente ativa muda com a jornada de 9 h): custo = 9 h × Σ (unidades × taxa) × 1,5; com 8 h seria 25.436,40
+    // 73 profissionais-dia (a frente ativa muda com a jornada de 9 h): custo = 9 h × Σ (unidades × taxa) × 1,5
     expect(r.details[0].value).toBe('73')
     expect(r.extraCost).toBeCloseTo(28615.95, 2)
-    expect((r.extraCost / 9 / 1.5) * 8 * 1.5).toBeCloseTo(25436.4, 2)
+    // E-12: o 03.01.03 (105) só entra às 16:36 de 31/10, trabalha 24 min e é cobrado pelo expediente inteiro (9 h); a memória mostra os minutos
+    expect(r.memory).toContain('   · ● 03.01.03 trabalha: 31/10: 24 min')
+    expect(r.memory).toContain('   · ● 03.01.02 trabalha: 24/10: 540 min; 31/10: 516 min')
+    expect(r.memory).toContain('● 03.01.03 trabalha 24 min no sábado 31/10 e é cobrada pelo expediente inteiro (9 h): validar a convocação com RH.')
+    expect(r.memory.filter((m) => m.includes('validar a convocação com RH'))).toHaveLength(1) // as demais frentes trabalham mais da metade do expediente
   })
 })
 
@@ -231,7 +235,7 @@ describe('Hora extra: meio período e frentes escolhidas (ciclo 00005, E4)', () 
     expect(r.extraCost).toBeCloseTo(22315.2, 2)
     expect(r.details[0].value).toBe('64')
     // "todas": exceção no calendário padrão, sem calendário derivado nem atribuição
-    expect(r.horaExtra).toEqual({ jornada: 'integral', dias: ['2026-10-24', '2026-10-31'], calendariosNovos: [], atribuicoes: [], naoConvocadas: [] })
+    expect(r.horaExtra).toEqual({ jornada: 'integral', dias: ['2026-10-24', '2026-10-31'], calendariosNovos: [], atribuicoes: [], naoConvocadas: [], voltas: 0 })
     expect(he({ saturdays: 1 }).daysRecovered).toBe(1)
     expect(he({ saturdays: 4 }).daysRecovered).toBe(4)
   })
@@ -414,8 +418,8 @@ describe('Hora extra: derivado só com os sábados em que a frente trabalha, fer
     const tasks = seed.tasks.map((t) => (t.uid === 104 ? { ...t, calendarioUid: 2 } : t))
     const r2 = simulateOvertime(ctxDe([...seed.calendarios, longo, existente2], tasks), { saturdays: 2, frentes: [104] })
     const nome = r2.horaExtra!.calendariosNovos[0].nome
-    expect(nome.length).toBeLessThanOrEqual(60)
-    expect(nome.endsWith('(2)')).toBe(true)
+    expect(nome).toBe(`${'x'.repeat(42)} + HE (2 sáb.) (2)`) // 60 caracteres
+    expect(nome).toHaveLength(60)
   })
 
   it('Segurança 2: sem espaço para o calendário derivado (100 calendários) a hora extra por frente não é aplicável', () => {
@@ -424,5 +428,69 @@ describe('Hora extra: derivado só com os sábados em que a frente trabalha, fer
     const r = simulateOvertime(c, { saturdays: 2, frentes: [104] })
     expect([r.applicable, r.reason]).toEqual([false, 'Não há espaço para o calendário da hora extra: a obra já tem 100 calendários (máximo 100).'])
     expect(simulateOvertime(c, { saturdays: 2 }).applicable).toBe(true) // "todas" não cria calendário
+  })
+})
+
+// E-13 (rodada 03): a entrada e a lista de frentes são avaliadas com os sábados candidatos já no calendário (hipótese máxima), e o ponto
+// fixo poda. Com a data de status na sexta (23/10, o caso do Aurora) nenhuma frente "trabalha" no 1º sábado no cronograma de hoje, mas passa
+// a trabalhar nele por causa da própria hora extra.
+describe('Hora extra: frentes avaliadas com os sábados já no calendário (E-13) e ponto fixo (E-14)', () => {
+  it('status na sexta, 1 sábado e frente {104}: aplicável, 1 d.u., 173,40 × 8 h × 1,5 = R$ 2.080,80', () => {
+    // O especialista calculou "R$ 1.040,40" para esta conta, mas a própria fórmula (173,40 × 8 × 1,5) dá R$ 2.080,80: 1.040,40 é a de 4 h
+    const r = simulateOvertime(ctx, { saturdays: 1, jornada: 'integral', frentes: [104] })
+    expect(r.applicable).toBe(true)
+    expect(r.daysRecovered).toBe(1)
+    expect(r.extraCost).toBeCloseTo(173.4 * 8 * 1.5, 2)
+    expect(r.horaExtra!.dias).toEqual(['2026-10-24'])
+    expect(r.details[0].value).toBe('6')
+    // o modo "todas" recupera o mesmo 1 d.u. com 1 sábado
+    expect(simulateOvertime(ctx, { saturdays: 1 }).daysRecovered).toBe(1)
+  })
+
+  it('1 sábado e frente {302}: R$ 9.076,80 e 0 d.u.', () => {
+    const r = simulateOvertime(ctx, { saturdays: 1, frentes: [302] })
+    expect([r.applicable, r.daysRecovered]).toEqual([true, 0])
+    expect(r.extraCost).toBeCloseTo(756.4 * 8 * 1.5, 2)
+  })
+
+  it('a lista da tela com 1 sábado traz 104 e 302 (críticas primeiro); com 4 sábados entram 105 e 303', () => {
+    expect(overtimeTargets(ctx, 1).map((o) => [o.value, o.critical])).toEqual([['104', true], ['302', false]])
+    expect(overtimeTargets(ctx, 4).map((o) => o.value)).toEqual(['104', '105', '302', '303'])
+  })
+
+  it('frente que hoje só trabalha de seg a sex na semana seguinte é oferecida e convocada quando o sábado a antecipa', () => {
+    const base = seed.calendarios[0]
+    const tasks: Task[] = [
+      { uid: 1, wbs: '1', name: 'Frente', outlineLevel: 1, isSummary: false, duracaoMin: 3 * 480, predecessors: [], percentComplete: 0, bac: 0, actualCost: 0, resources: [{ resource: 'Pedreiro', units: 1 }] },
+    ]
+    const cals = compilarCalendarios(seed.meta.startDate, [base], 1)
+    const forecast = computeSchedule(tasks, cals, { mode: 'forecast', statusDate: seed.meta.statusDate })
+    const c = { tasks, calendarios: [base], calendarioPadraoUid: 1, meta: seed.meta, forecast, origin: undefined }
+    expect(forecast.byUid.get(1)!.start).toBe('2026-10-26') // hoje: segunda 26/10
+    expect(overtimeTargets(c, 1).map((o) => o.value)).toEqual(['1'])
+    const r = simulateOvertime(c, { saturdays: 1, frentes: [1] })
+    expect([r.applicable, r.daysRecovered]).toEqual([true, 1]) // é a única tarefa: o sábado antecipa o término do projeto em 1 d.u.
+    expect(r.extraCost).toBeCloseTo(31.4 * 8 * 1.5, 2)
+  })
+})
+
+describe('Hora extra: o ponto fixo repete até estabilizar (E-14)', () => {
+  it('cadeia de 3 frentes (FS+1, FS+1, FS) com 4 sábados: poda em cascata em 3 voltas e só a última frente fica convocada', () => {
+    const base = seed.calendarios[0]
+    const t = (uid: number, dias: number, pred?: [number, number], extra: Partial<Task> = {}): Task => ({
+      uid, wbs: String(uid), name: `T${uid}`, outlineLevel: 1, isSummary: false, duracaoMin: dias * 480,
+      predecessors: pred ? [{ uid: pred[0], type: 'FS', lag: { tipo: 'util', minutos: pred[1] * 480 } }] : [],
+      percentComplete: 0, bac: 0, actualCost: 0, resources: [{ resource: 'Pedreiro', units: 1 }], ...extra,
+    })
+    const tasks = [t(1, 5, undefined, { percentComplete: 100, actualStart: '2026-10-19', actualFinish: '2026-10-23', resources: [] }), t(2, 4, [1, 1]), t(3, 1, [2, 1]), t(4, 7, [3, 0])]
+    const forecast = computeSchedule(tasks, compilarCalendarios(seed.meta.startDate, [base], 1), { mode: 'forecast', statusDate: seed.meta.statusDate })
+    const c = { tasks, calendarios: [base], calendarioPadraoUid: 1, meta: seed.meta, forecast, origin: undefined }
+    const r = simulateOvertime(c, { saturdays: 4, frentes: [2, 3, 4] })
+    // volta 1: todos os sábados em todas as frentes; volta 2: tira os sábados que a 2 e a 3 não trabalham (muda o lag e as datas); volta 3: confere
+    expect(r.horaExtra!.voltas).toBe(3)
+    expect(r.horaExtra!.atribuicoes).toEqual([{ uid: 4, calendarioUid: 2 }])
+    expect(r.horaExtra!.naoConvocadas).toEqual([2, 3])
+    expect(r.extraCost).toBeCloseTo(31.4 * 8 * 1.5, 2) // a frente 4 trabalha um sábado só
+    expect(r.memory.some((m) => m.includes('não estabilizou'))).toBe(false)
   })
 })
