@@ -23,6 +23,9 @@ public static class BordaExtensoes
     /// <summary>Nome da política de taxa de <c>/health/ready</c>.</summary>
     public const string PoliticaSaude = "saude";
 
+    /// <summary>Nome da política de taxa da exportação CSV da trilha de auditoria.</summary>
+    public const string PoliticaExportacao = "exportacao";
+
     private static readonly TimeSpan _janela = TimeSpan.FromMinutes(1);
 
     #endregion
@@ -110,6 +113,7 @@ public static class BordaExtensoes
 
             opcoes.AddPolicy(PoliticaAutenticacao, http => JanelaFixa("autenticacao", http, LimiteAutenticacao(http)));
             opcoes.AddPolicy(PoliticaSaude, http => JanelaFixa("saude", http, http.RequestServices.GetRequiredService<IOptions<OpcoesBorda>>().Value.LimiteSaudePorMinuto));
+            opcoes.AddPolicy(PoliticaExportacao, http => JanelaFixa("exportacao", http, http.RequestServices.GetRequiredService<IOptions<OpcoesBorda>>().Value.LimiteExportacaoPorMinuto));
 
             // O retorno do OIDC é caminho de middleware (não é endpoint): limitador global só nele.
             opcoes.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http =>

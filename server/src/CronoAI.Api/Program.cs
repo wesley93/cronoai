@@ -1,4 +1,5 @@
 using CronoAI.Api;
+using CronoAI.Api.Auditoria;
 using CronoAI.Api.Autenticacao;
 using CronoAI.Api.Borda;
 using CronoAI.Api.Desenvolvimento;
@@ -6,6 +7,7 @@ using CronoAI.Api.Empresas;
 using CronoAI.Api.Obras;
 using CronoAI.Api.Sessao;
 using CronoAI.Dados;
+using CronoAI.Dados.Auditoria;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
@@ -46,6 +48,11 @@ builder.AdicionarAutenticacao();
 // Obras (ciclo 00013): scoped, porque depende do CronoDbContext e do ContextoSessao da requisição. Singleton aqui seria
 // capturar serviço scoped (e vazar a empresa de uma requisição para outra).
 builder.Services.AddScoped<ServicoObras>();
+
+// Leitura e exportação da trilha (ciclo 00013, E3): scoped pelo mesmo motivo (CronoDbContext da requisição).
+builder.Services.Configure<OpcoesAuditoria>(builder.Configuration.GetSection(OpcoesAuditoria.Secao));
+builder.Services.AddScoped<ConsultasAuditoria>();
+builder.Services.AddScoped<ServicoAuditoria>();
 
 // Usuário de desenvolvimento: falha fechada na partida fora de Development (ValidateOnStart).
 builder.Services.AddSingleton<IValidateOptions<OpcoesUsuarioDesenvolvimento>, ValidadorOpcoesUsuarioDesenvolvimento>();
@@ -111,6 +118,7 @@ api.MapearAutenticacao();
 api.MapearEu();
 api.MapearEmpresas();
 api.MapearObras();
+api.MapearAuditoria();
 app.MapearDesenvolvimento();
 
 app.Run();

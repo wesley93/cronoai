@@ -30,6 +30,10 @@ public static class CatalogoRotas
         new("PUT", Raiz + "/obras/{id}", CenarioIsolamento.ComIdDeOutraEmpresa, _ => CorpoDeAtualizacao(), RecursoAlheio.Obra),
         new("POST", Raiz + "/obras/{id}/arquivar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { versao = 1 }, RecursoAlheio.Obra),
         new("POST", Raiz + "/obras/{id}/restaurar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { versao = 1 }, RecursoAlheio.Obra),
+
+        // Trilha de auditoria (ciclo 00013, E3): a da obra tem {id} (obra REAL de B); a exportação é por empresa da sessão.
+        new("GET", Raiz + "/obras/{id}/auditoria", CenarioIsolamento.ComIdDeOutraEmpresa, Recurso: RecursoAlheio.Obra),
+        new("GET", Raiz + "/auditoria/exportacao.csv", CenarioIsolamento.SemRecurso),
     ];
 
     /// <summary>Únicas rotas que podem ser anônimas (AllowAnonymous), por chave.</summary>

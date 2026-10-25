@@ -94,6 +94,16 @@ public sealed class AmbienteApi : IAsyncDisposable
         return await RespostaJson.LerAsync(resposta);
     }
 
+    /// <summary>GET que devolve os bytes crus (o BOM do CSV não pode ser perdido pela decodificação) e os cabeçalhos.</summary>
+    public async Task<(HttpStatusCode Status, byte[] Bytes, IReadOnlyDictionary<string, string> Cabecalhos)> LerBytesAsync(string url)
+    {
+        using var resposta = await Navegador.GetAsync(url, TestContext.Current.CancellationToken);
+        var bytes = await resposta.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken);
+        var cabecalhos = resposta.Headers.Concat(resposta.Content.Headers)
+            .ToDictionary(h => h.Key, h => string.Join(',', h.Value), StringComparer.OrdinalIgnoreCase);
+        return (resposta.StatusCode, bytes, cabecalhos);
+    }
+
     /// <summary>Cria uma obra pela API (POST) e devolve a resposta; falha o teste se não for 201.</summary>
     public async Task<RespostaJson> CriarObraAsync(object? corpo = null)
     {

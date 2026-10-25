@@ -18,14 +18,15 @@ public sealed record MetadadosEscrita
             throw new ArgumentException("Origem de auditoria inválida.", nameof(origem));
         }
 
-        var motivoAparado = motivo?.Trim();
-        if (motivoAparado is { Length: > RegistroAuditoria.TamanhoMaximoMotivo })
+        // Texto livre: só a ausência (nulo ou em branco) vira nulo. O conteúdo NÃO é alterado (nem aparado): quem o exporta
+        // neutraliza fórmula em CSV, inclusive a que começa com TAB ou CR.
+        if (motivo is { Length: > RegistroAuditoria.TamanhoMaximoMotivo })
         {
             throw new ArgumentException($"O motivo deve ter no máximo {RegistroAuditoria.TamanhoMaximoMotivo} caracteres.", nameof(motivo));
         }
 
         // O PostgreSQL recusa NUL em text.
-        if (motivoAparado is not null && motivoAparado.Contains('\0', StringComparison.Ordinal))
+        if (motivo is not null && motivo.Contains('\0', StringComparison.Ordinal))
         {
             throw new ArgumentException("O motivo não pode ter o caractere nulo.", nameof(motivo));
         }
@@ -36,7 +37,7 @@ public sealed record MetadadosEscrita
         }
 
         Origem = origem;
-        Motivo = string.IsNullOrEmpty(motivoAparado) ? null : motivoAparado;
+        Motivo = string.IsNullOrWhiteSpace(motivo) ? null : motivo;
         CorrelacaoId = correlacaoId;
         InstanteUtc = instanteUtc;
     }

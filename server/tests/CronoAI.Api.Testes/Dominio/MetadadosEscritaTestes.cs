@@ -26,10 +26,15 @@ public sealed class MetadadosEscritaTestes
     }
 
     [Fact]
-    public void Motivo_em_branco_vira_nulo_e_e_aparado()
+    public void Motivo_em_branco_vira_nulo_e_o_texto_e_preservado()
     {
         Assert.Null(new MetadadosEscrita(OrigensAuditoria.Ui, "   ", null, _agora).Motivo);
-        Assert.Equal("revisão de prazo", new MetadadosEscrita(OrigensAuditoria.Ui, "  revisão de prazo ", null, _agora).Motivo);
+        Assert.Null(new MetadadosEscrita(OrigensAuditoria.Ui, "", null, _agora).Motivo);
+
+        // Texto livre não é alterado: nem aparado, nem sem TAB ou CR no início (o CSV neutraliza fórmula de ponta a ponta).
+        Assert.Equal("  revisão de prazo ", new MetadadosEscrita(OrigensAuditoria.Ui, "  revisão de prazo ", null, _agora).Motivo);
+        Assert.Equal("\tx", new MetadadosEscrita(OrigensAuditoria.Ui, "\tx", null, _agora).Motivo);
+        Assert.Equal("\rx", new MetadadosEscrita(OrigensAuditoria.Ui, "\rx", null, _agora).Motivo);
     }
 
     [Fact]

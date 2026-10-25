@@ -84,6 +84,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             // Limites altos por padrão: cada teste cria o próprio host. Testes de taxa sobrescrevem.
             ["Borda:LimiteAutenticacaoPorMinuto"] = "1000",
             ["Borda:LimiteSaudePorMinuto"] = "1000",
+            ["Borda:LimiteExportacaoPorMinuto"] = "1000",
         };
         if (!SemAnelDeChaves)
         {

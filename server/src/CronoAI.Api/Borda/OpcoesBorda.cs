@@ -17,5 +17,8 @@ public sealed class OpcoesBorda
     /// <summary>Requisições por minuto, por IP, em <c>/health/ready</c>.</summary>
     public int LimiteSaudePorMinuto { get; set; } = 60;
 
+    /// <summary>Requisições por minuto, por IP, em <c>GET /api/v1/auditoria/exportacao.csv</c> (RF-12.5).</summary>
+    public int LimiteExportacaoPorMinuto { get; set; } = 10;
+
     #endregion
 }
