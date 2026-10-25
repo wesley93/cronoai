@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { TableProperties, Save, History, Download, Upload, Search } from 'lucide-vue-next'
+import { TableProperties, Save, History, Download, Upload, Search } from '@lucide/vue'
 import type { Task } from '@/types/domain'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'

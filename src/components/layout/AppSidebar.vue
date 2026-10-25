@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { MessagesSquare, GitBranch, Truck, Calculator, TrendingUp, TableProperties, HardHat, RotateCcw } from 'lucide-vue-next'
+import { MessagesSquare, GitBranch, Truck, Calculator, TrendingUp, TableProperties, HardHat, RotateCcw } from '@lucide/vue'
 import { MODULES, useUiStore, type ModuleId } from '@/stores/ui'
 import { useProjectStore } from '@/stores/useProjectStore'
 

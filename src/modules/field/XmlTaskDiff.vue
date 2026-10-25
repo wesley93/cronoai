@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { FileCode2, ChevronDown } from 'lucide-vue-next'
+import { FileCode2, ChevronDown } from '@lucide/vue'
 import { diffLines } from '@/lib/textDiff'
 
 const props = defineProps<{ before: string; after: string }>()

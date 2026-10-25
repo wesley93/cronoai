@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { MessagesSquare, Sparkles, ShieldAlert, History, Check } from 'lucide-vue-next'
+import { MessagesSquare, Sparkles, ShieldAlert, History, Check } from '@lucide/vue'
 import { useProjectStore } from '@/stores/useProjectStore'
 import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'

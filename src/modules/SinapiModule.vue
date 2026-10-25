@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Calculator, ListPlus, Users, Timer, ExternalLink, Trash2, GitCommitHorizontal, KeyRound, TableProperties } from 'lucide-vue-next'
+import { Calculator, ListPlus, Users, Timer, ExternalLink, Trash2, GitCommitHorizontal, KeyRound, TableProperties } from '@lucide/vue'
 import type { LinkType } from '@/types/domain'
 import { RESOURCE_KINDS } from '@/types/domain'
 import { useProjectStore, type SinapiInsert } from '@/stores/useProjectStore'

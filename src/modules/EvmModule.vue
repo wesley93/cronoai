@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { TrendingUp, Gauge, Wallet, Target, Bot, Copy, Table2, LineChart, ClipboardList, Sigma, Activity, CalendarCheck, MousePointerClick } from 'lucide-vue-next'
+import { TrendingUp, Gauge, Wallet, Target, Bot, Copy, Table2, LineChart, ClipboardList, Sigma, Activity, CalendarCheck, MousePointerClick } from '@lucide/vue'
 import IndexTrendChart from '@/components/charts/IndexTrendChart.vue'
 import { indexSeries, monthlyIncrements } from '@/lib/evm'
 import { useProjectStore } from '@/stores/useProjectStore'

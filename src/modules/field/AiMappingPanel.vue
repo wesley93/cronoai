@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Sparkles, ArrowRight, CheckCircle2, Download, XCircle, CloudRain, Package, Users, Wrench, ShieldAlert, FileQuestion, Cpu, KeyRound } from 'lucide-vue-next'
+import { Sparkles, ArrowRight, CheckCircle2, Download, XCircle, CloudRain, Package, Users, Wrench, ShieldAlert, FileQuestion, Cpu, KeyRound } from '@lucide/vue'
 import type { FieldReport, RestrictionKind } from '@/types/domain'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
