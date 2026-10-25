@@ -1,3 +1,8 @@
 node_modules
 dist
 *.local
+
+# Variáveis de ambiente locais (podem conter segredos)
+.env
+.env.*
+!.env.example

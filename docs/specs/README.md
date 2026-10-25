@@ -5,6 +5,8 @@ Este diretório reúne as especificações para levar o CronoAI do protótipo at
 > **Como ler:** cada spec traz problema, escopo, requisitos (RF/RNF), critérios de aceite, riscos e plano de entrega.
 > Itens marcados **(recomendação)** são opinião técnica, não exigência. Itens com impacto jurídico, de segurança ou de RH trazem a área que **precisa validar** antes de seguir.
 
+> Spec de produto original (visão e stack sugerida): [SPEC-original.md](SPEC-original.md).
+
 ## Estado atual (out/2026)
 
 | Área | Hoje | Lacuna para obra real |
