@@ -21,13 +21,13 @@ docker compose up --build app        # produção (Nginx) em http://localhost:80
 docker compose --profile dev up dev  # desenvolvimento com recarga automática em http://localhost:5180
 ```
 
-Porta 8080 ocupada? Use `CRONOAI_PORT=8088 docker compose up --build app`. Detalhes em [docs/devops.md](docs/devops.md).
+Porta 8080 ocupada? bash: `CRONOAI_PORT=8088 docker compose up --build app`; PowerShell: `$env:CRONOAI_PORT=8088; docker compose up --build app`. Detalhes em [docs/devops.md](docs/devops.md).
 
 | Script | O que faz |
 |---|---|
 | `npm run dev` | Servidor de desenvolvimento (Vite) |
 | `npm run ci` | Lint + type-check + testes + build (o mesmo que o GitHub Actions roda) |
-| `npm test` | Testes do núcleo (Vitest) |
+| `npm test` / `test:watch` | Testes do núcleo (Vitest), uma vez ou em modo observação |
 | `npm run lint` / `lint:fix` | ESLint (JS, TypeScript e Vue) |
 | `npm run build` | Type-check + build de produção em `dist/` |
 

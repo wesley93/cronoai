@@ -2,19 +2,8 @@
 name: Docker
 
 on:
+  # Sem filtro de caminhos: o check é obrigatório na proteção da master e não pode ficar pendente
   pull_request:
-    paths:
-      - Dockerfile
-      - .dockerignore
-      - docker/**
-      - docker-compose.yml
-      - package.json
-      - package-lock.json
-      - index.html
-      - vite.config.ts
-      - src/**
-      - public/**
-      - .github/workflows/docker.yml
   push:
     branches: [master]
   workflow_dispatch:
@@ -34,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -54,10 +45,10 @@ jobs:
           echo "Usuário da imagem: ${user}"
           test -n "${user}" && test "${user}" != "root" && test "${user}" != "0"
 
-      - name: Subir container (somente leitura, sem novos privilégios)
+      - name: Subir container (somente leitura, sem capabilities, sem novos privilégios)
         run: |
           docker run -d --name cronoai -p 8080:8080 \
-            --read-only --tmpfs /tmp --security-opt no-new-privileges:true \
+            --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
             cronoai:ci
 
       - name: Smoke test

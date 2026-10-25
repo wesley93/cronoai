@@ -1,5 +1,7 @@
 # CronoAI — execução local.
 #   Produção (Nginx):      docker compose up --build app        -> http://localhost:8080 (porta: CRONOAI_PORT)
+#   Outra porta — bash: CRONOAI_PORT=8088 docker compose up --build app
+#                 PowerShell: $env:CRONOAI_PORT=8088; docker compose up --build app
 #   Desenvolvimento (HMR): docker compose --profile dev up dev  -> http://localhost:5180
 # Publicação em servidor/ambientes: alinhar com a equipe de Infraestrutura.
 
@@ -10,21 +12,24 @@ services:
       dockerfile: Dockerfile
     image: cronoai:local
     ports:
-      - "${CRONOAI_PORT:-8080}:8080"
+      # Só na interface local da máquina (127.0.0.1)
+      - "127.0.0.1:${CRONOAI_PORT:-8080}:8080"
     read_only: true
     tmpfs:
       - /tmp
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
 
   dev:
     profiles: ["dev"]
-    image: node:22-alpine
+    image: node:22.23.4-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
     working_dir: /app
     command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
     ports:
-      - "5180:5180"
+      - "127.0.0.1:5180:5180"
     environment:
       # Necessário para o watcher enxergar mudanças em volumes montados no Windows/macOS
       CHOKIDAR_USEPOLLING: "true"

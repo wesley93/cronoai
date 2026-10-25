@@ -10,3 +10,6 @@ coverage
 Dockerfile
 docker-compose.yml
 docs
+.claude
+.env
+.env.*

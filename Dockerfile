@@ -2,7 +2,8 @@
 # CronoAI — imagem de produção: build com Node e entrega estática com Nginx sem root.
 
 # ---------- Etapa 1: dependências e build ----------
-FROM node:22-alpine AS build
+# Imagens fixadas por versão + digest (Dependabot atualiza ambos)
+FROM node:22.23.4-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS build
 WORKDIR /app
 
 # Instala dependências pelo lockfile (camada reaproveitada enquanto package*.json não mudar)
@@ -14,8 +15,8 @@ COPY . .
 RUN npm run build
 
 # ---------- Etapa 2: servidor estático ----------
-# nginx-unprivileged roda como usuário 101 e escuta na porta 8080
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+# nginx-unprivileged (linha stable) roda como usuário 101 e escuta na porta 8080
+FROM nginxinc/nginx-unprivileged:1.30.6-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03 AS runtime
 
 LABEL org.opencontainers.image.title="CronoAI" \
       org.opencontainers.image.description="Copiloto de Planejamento de Obras & MS Project" \
