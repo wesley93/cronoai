@@ -15,7 +15,7 @@ RUN npm run build
 
 # ---------- Etapa 2: servidor estático ----------
 # nginx-unprivileged roda como usuário 101 e escuta na porta 8080
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 
 LABEL org.opencontainers.image.title="CronoAI" \
       org.opencontainers.image.description="Copiloto de Planejamento de Obras & MS Project" \
