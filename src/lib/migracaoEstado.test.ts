@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import aurora from './__fixtures__/estado-v1-aurora.json?raw'
 import aurora75 from './__fixtures__/estado-v1-aurora-75.json?raw'
-import { ESQUEMA_ATUAL, MIGRACOES, criarRegistro, lerEstadoV1, migrarRegistro } from './migracaoEstado'
+import { ESQUEMA_ATUAL, MIGRACOES, criarRegistro, lerEstadoV1 as lerV1, migrarRegistro as migrar } from './migracaoEstado'
+import { defaultHolidays } from './calendar'
 import type { RegistroObra } from '@/types/obra'
+
+// Ano usado quando a obra não informa a data de início (os testes fixam 2026 para os feriados serem previsíveis)
+const ANO = 2026
+const lerEstadoV1 = (raw: string | null | undefined) => lerV1(raw, ANO)
+const migrarRegistro = (reg: RegistroObra | undefined) => migrar(reg, ANO)
 
 describe('lerEstadoV1', () => {
   it('lê a fixture completa da v1 sem avisos e sem mudar o estado (AC-1, M-1)', () => {
@@ -61,16 +67,42 @@ describe('lerEstadoV1', () => {
     expect(r.tipo).toBe('ok')
     if (r.tipo !== 'ok') return
     expect(r.estado.calendar.extraWorkingDays).toEqual([])
-    expect(r.estado.calendar.holidays).toContain('2026-09-07') // Independência
+    // Início da obra em 2026-05-04: feriados nacionais de 2026 a 2029
+    expect(r.estado.calendar.holidays).toEqual(defaultHolidays(2026, 2029))
     expect(r.avisos[0]).toContain('calendar')
   })
 
-  it('sem startDate válido, o calendário parte de 2026', () => {
+  it('o ano dos feriados vem da data de início da obra, não de um ano fixo', () => {
     const base = JSON.parse(aurora)
-    const r = lerEstadoV1(JSON.stringify({ ...base, calendar: undefined, meta: { ...base.meta, startDate: undefined } }))
+    const r = lerEstadoV1(JSON.stringify({ ...base, calendar: undefined, meta: { ...base.meta, startDate: '2028-03-01' } }))
     expect(r.tipo).toBe('ok')
     if (r.tipo !== 'ok') return
-    expect(r.estado.calendar.holidays).toContain('2026-12-25')
+    expect(r.estado.calendar.holidays).toEqual(defaultHolidays(2028, 2031))
+  })
+
+  it('sem startDate válido, usa o ano recebido de quem chama', () => {
+    const base = JSON.parse(aurora)
+    const r = lerV1(JSON.stringify({ ...base, calendar: undefined, meta: { ...base.meta, startDate: undefined } }), 2031)
+    expect(r.tipo).toBe('ok')
+    if (r.tipo !== 'ok') return
+    expect(r.estado.calendar.holidays).toEqual(defaultHolidays(2031, 2034))
+  })
+
+  it('calendário só com feriados: preserva os feriados e completa só os dias extras', () => {
+    const base = JSON.parse(aurora)
+    const r = lerEstadoV1(JSON.stringify({ ...base, calendar: { holidays: ['2026-11-20'] } }))
+    expect(r.tipo).toBe('ok')
+    if (r.tipo !== 'ok') return
+    expect(r.estado.calendar).toEqual({ holidays: ['2026-11-20'], extraWorkingDays: [] })
+    expect(r.avisos[0]).toContain('calendar')
+  })
+
+  it('calendário só com dias extras: preserva os extras e completa os feriados', () => {
+    const base = JSON.parse(aurora)
+    const r = lerEstadoV1(JSON.stringify({ ...base, calendar: { extraWorkingDays: ['2026-11-21'] } }))
+    expect(r.tipo).toBe('ok')
+    if (r.tipo !== 'ok') return
+    expect(r.estado.calendar).toEqual({ holidays: defaultHolidays(2026, 2029), extraWorkingDays: ['2026-11-21'] })
   })
 })
 

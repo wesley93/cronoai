@@ -16,7 +16,8 @@ export interface EstimativaArmazenamento {
 }
 
 export interface ArmazenamentoObras {
-  lerIndice(): Promise<IndiceObras | undefined>
+  /** Índice como está gravado: dado externo, validado por quem chama (`validarIndice`). */
+  lerIndice(): Promise<unknown>
   lerObra(id: string): Promise<RegistroObra | undefined>
   /** Ids com registro gravado (para achar obra ausente sem ler o conteúdo). */
   listarIdsObras(): Promise<string[]>
@@ -151,7 +152,7 @@ export async function criarArmazenamentoIndexedDB(): Promise<ArmazenamentoObras>
   const db = await abrirBanco()
   return {
     async lerIndice() {
-      return (await transacao(db, 'readonly', (tx) => tx.objectStore(STORE_META).get(CHAVE_INDICE))) as IndiceObras | undefined
+      return await transacao(db, 'readonly', (tx) => tx.objectStore(STORE_META).get(CHAVE_INDICE))
     },
     async lerObra(id) {
       return (await transacao(db, 'readonly', (tx) => tx.objectStore(STORE_OBRAS).get(id))) as RegistroObra | undefined

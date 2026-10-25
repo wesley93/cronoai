@@ -6,7 +6,7 @@ import type { SupplyAnalysis } from './supplies'
 import { fmtBRL, fmtBRLCompact, fmtDate, fmtIndex } from './format'
 
 export interface Diagnosis {
-  status: 'verde' | 'amarelo' | 'vermelho'
+  status: 'verde' | 'amarelo' | 'vermelho' | 'sem-dados'
   headline: string
   paragraphs: string[]
   actions: string[]
@@ -27,6 +27,18 @@ export function buildDiagnosis(args: {
   recoveryTotal: number
 }): Diagnosis {
   const { evm, packages, delay, tasks, restrictions, supplies, recoveryTotal } = args
+
+  // Sem orçamento (BAC = 0) o SPI e o CPI 1,00 são só o fallback do safeDiv: não é desempenho, então não há o que diagnosticar
+  if (evm.bac <= 0) {
+    return {
+      status: 'sem-dados',
+      headline: 'Obra sem cronograma ou orçamento para diagnosticar',
+      paragraphs: [
+        `O ${args.projectName} não tem tarefas com orçamento (BAC) na data de status (${fmtDate(args.statusDate)}). Sem elas, os indicadores de prazo e custo (SPI e CPI) não medem desempenho.`,
+      ],
+      actions: ['Use Importar .xml no topo para trazer o cronograma do MS Project, ou cadastre os pacotes na EAP.'],
+    }
+  }
   const leaves = tasks.filter((t) => !t.isSummary)
   const active = packages.filter((p) => p.pv > 0 || p.ac > 0)
 

@@ -42,7 +42,7 @@ const CHAVES_LISTA = ['reports', 'restrictions', 'materials', 'recoveryCosts', '
  * Completa as chaves ausentes ou de tipo errado com o valor vazio. Diferente do merge raso antigo,
  * não injeta orçamento nem relatos do Edifício Aurora numa obra que não é o Aurora.
  */
-function completarChaves(bruto: Record<string, unknown>): { estado: PersistedState; preenchidas: string[] } {
+function completarChaves(bruto: Record<string, unknown>, anoPadrao: number): { estado: PersistedState; preenchidas: string[] } {
   const preenchidas: string[] = []
   const saida: Record<string, unknown> = { ...bruto }
   for (const chave of CHAVES_LISTA) {
@@ -51,11 +51,19 @@ function completarChaves(bruto: Record<string, unknown>): { estado: PersistedSta
       preenchidas.push(chave)
     }
   }
-  const cal = saida.calendar
-  if (!eObjeto(cal) || !Array.isArray(cal.holidays) || !Array.isArray(cal.extraWorkingDays)) {
+  // Calendário: preserva o que existe (feriados cadastrados, dias extras) e completa só o que falta.
+  // Sem feriados, usa os nacionais a partir do ano de início da obra (ou do ano informado por quem chama).
+  const cal = eObjeto(saida.calendar) ? saida.calendar : {}
+  const semFeriados = !Array.isArray(cal.holidays)
+  const semExtras = !Array.isArray(cal.extraWorkingDays)
+  if (semFeriados || semExtras) {
     const meta = saida.meta as Record<string, unknown>
-    const ano = Number(String(meta.startDate ?? '').slice(0, 4)) || 2026
-    saida.calendar = { holidays: defaultHolidays(ano, ano + 3), extraWorkingDays: [] }
+    const ano = Number(String(meta.startDate ?? '').slice(0, 4)) || anoPadrao
+    saida.calendar = {
+      ...cal,
+      holidays: semFeriados ? defaultHolidays(ano, ano + 3) : cal.holidays,
+      extraWorkingDays: semExtras ? [] : cal.extraWorkingDays,
+    }
     preenchidas.push('calendar')
   }
   if (!eEstado(saida)) throw new Error('Estado da obra inválido') // inalcançável: as chaves já foram verificadas acima
@@ -69,7 +77,7 @@ function avisoDePreenchidas(preenchidas: string[]): string[] {
 }
 
 /** Lê o texto gravado em `cronoai-state-v1`. */
-export function lerEstadoV1(raw: string | null | undefined): LeituraV1 {
+export function lerEstadoV1(raw: string | null | undefined, anoPadrao: number): LeituraV1 {
   if (raw === null || raw === undefined || raw === '') return { tipo: 'ausente' }
   let parsed: unknown
   try {
@@ -78,7 +86,7 @@ export function lerEstadoV1(raw: string | null | undefined): LeituraV1 {
     return { tipo: 'corrompido' }
   }
   if (!temTarefasEMeta(parsed)) return { tipo: 'corrompido' }
-  const { estado, preenchidas } = completarChaves(parsed)
+  const { estado, preenchidas } = completarChaves(parsed, anoPadrao)
   return { tipo: 'ok', estado, avisos: avisoDePreenchidas(preenchidas) }
 }
 
@@ -88,7 +96,7 @@ export function criarRegistro(id: string, estado: PersistedState, atualizadoEm: 
 }
 
 /** Lê um registro gravado e o leva ao esquema atual. Esquema mais novo que o do app é recusado (e nunca sobrescrito). */
-export function migrarRegistro(reg: RegistroObra | undefined): ResultadoMigracao {
+export function migrarRegistro(reg: RegistroObra | undefined, anoPadrao: number): ResultadoMigracao {
   if (!reg || typeof reg.json !== 'string') return { tipo: 'erro', mensagem: 'Os dados desta obra não foram encontrados.' }
   if (!Number.isInteger(reg.versaoEsquema) || reg.versaoEsquema < 1) {
     return { tipo: 'erro', mensagem: 'Os dados desta obra estão em um formato desconhecido.' }
@@ -106,7 +114,7 @@ export function migrarRegistro(reg: RegistroObra | undefined): ResultadoMigracao
   if (!eObjeto(parsed) || !Array.isArray(parsed.tasks) || !eObjeto(parsed.meta)) {
     return { tipo: 'erro', mensagem: 'Os dados desta obra estão ilegíveis.' }
   }
-  const { estado: completo, preenchidas } = completarChaves(parsed)
+  const { estado: completo, preenchidas } = completarChaves(parsed, anoPadrao)
   let estado = completo
   for (let v = reg.versaoEsquema; v < ESQUEMA_ATUAL; v++) {
     const passo = MIGRACOES.find((p) => p.de === v)

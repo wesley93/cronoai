@@ -66,7 +66,7 @@ docker compose --profile dev up dev  # desenvolvimento em container
 | `src/stores/armazenamentoObras.ts` | Acesso ao IndexedDB (banco `cronoai`: obras + índice) e adaptador de memória para testes |
 | `src/types/obra.ts`, `src/lib/migracaoEstado.ts`, `src/lib/obras.ts`, `src/data/ufs.ts` | Tipos da persistência, cadeia de migrações do esquema da obra, regras da obra (validação, cota) e as 27 UFs |
 | `src/stores/ui.ts` | Tema, navegação por hash, toasts |
-| `src/modules/*.vue` | Telas dos módulos (Apontamento, Caminho Crítico, Suprimentos, SINAPI, EVM, EAP) |
+| `src/modules/*.vue` | Telas dos módulos (Apontamento, Caminho Crítico, Suprimentos, SINAPI, EVM, EAP e Obras: lista, criação, dados da obra) |
 | `src/components/` | Layout, cards, Gantt, gráficos, ilustrações |
 | `docker/`, `Dockerfile`, `docker-compose.yml` | Execução em container |
 | `.github/` | Workflows, Dependabot, templates |

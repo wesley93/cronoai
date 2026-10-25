@@ -205,12 +205,80 @@ describe('useProjectStore · multiobra', () => {
       expect(store.estadoGravacao).toBe('erro')
     })
 
-    it('falha ao ler o índice não derruba a carga nem sobrescreve o que está salvo', async () => {
-      const adaptador = criarArmazenamentoMemoria(aurora)
+    it('falha ao LER o índice = estado desconhecido: não grava nada, bloqueia e avisa de forma persistente', async () => {
+      // Parte de um índice prévio com 2 obras: ler com falha não pode seguir para "obra de exemplo" nem sobrescrevê-lo
+      const { adaptador, store: primeira } = await carregarCom(aurora)
+      const b = await primeira.criarObra({ modelo: 'branco', dados: recife })
+      if (!b.ok) throw new Error(b.erro)
+      const indiceAntes = structuredClone(adaptador.indice)
+      const registrosAntes = structuredClone([...adaptador.obras.entries()])
+      expect(indiceAntes?.obras).toHaveLength(2)
+
       adaptador.falhar.ler = true
       const store = await recarregar(adaptador)
-      expect(store.avisosCarga[0]).toContain('Não foi possível ler as obras salvas')
+      adaptador.falhar.ler = false
+
+      expect(store.gravacaoBloqueada).toBe(true)
+      expect(store.estadoGravacao).toBe('erro')
+      expect(store.mensagemGravacao).toContain('Não foi possível ler as obras salvas')
+      expect(await store.salvarAgora()).toBe(false)
+      expect(await store.criarObra({ modelo: 'exemplo' })).toMatchObject({ ok: false })
+      expect((await store.trocarObra('qualquer')).ok).toBe(false)
+      expect((await store.excluirObra('qualquer')).ok).toBe(false)
+      store.state.meta.name = 'Alterada com a carga bloqueada'
+      await nextTick()
+      expect(store.estadoGravacao).toBe('erro') // nunca "salvo"
+      expect(adaptador.indice).toEqual(indiceAntes)
+      expect([...adaptador.obras.entries()]).toEqual(registrosAntes)
       expect(adaptador.v1).toBe(aurora)
+    })
+
+    it('índice inválido ou de versão mais nova = ilegível: bloqueia e não grava por cima', async () => {
+      const { adaptador } = await carregarCom(aurora)
+      const valido = structuredClone(adaptador.indice)!
+      const ruins: unknown[] = [
+        { ...valido, versaoIndice: 2 },
+        { ...valido, versaoIndice: 'x' },
+        { ...valido, obraAtivaId: 123 },
+        { ...valido, obras: 'nada' },
+        { ...valido, obras: [{ id: 'a' }] },
+        'texto',
+      ]
+      for (const ruim of ruins) {
+        adaptador.indice = structuredClone(ruim) as typeof adaptador.indice
+        const antes = structuredClone(adaptador.indice)
+        const registros = structuredClone([...adaptador.obras.entries()])
+        const store = await recarregar(adaptador)
+        expect(store.gravacaoBloqueada).toBe(true)
+        expect(store.estadoGravacao).toBe('erro')
+        expect(store.mensagemGravacao).toMatch(/índice das obras/)
+        expect(await store.salvarAgora()).toBe(false)
+        expect(adaptador.indice).toEqual(antes)
+        expect([...adaptador.obras.entries()]).toEqual(registros)
+      }
+      expect((await recarregar(Object.assign(adaptador, { indice: valido }))).gravacaoBloqueada).toBe(false)
+    })
+
+    it('índice de versão mais nova tem mensagem própria', async () => {
+      const { adaptador } = await carregarCom(aurora)
+      adaptador.indice = { ...structuredClone(adaptador.indice)!, versaoIndice: 2 as never }
+      const store = await recarregar(adaptador)
+      expect(store.mensagemGravacao).toBe('O índice das obras foi salvo por uma versão mais nova do CronoAI (índice 2). Nada foi gravado.')
+    })
+
+    it('falha inesperada na carga bloqueia a gravação e avisa (nunca "salvo")', async () => {
+      const adaptador = criarArmazenamentoMemoria(aurora)
+      adaptador.lerV1 = () => {
+        throw new Error('quebrou')
+      }
+      const store = await recarregar(adaptador)
+      expect(store.gravacaoBloqueada).toBe(true)
+      expect(store.estadoGravacao).toBe('erro')
+      expect(store.mensagemGravacao).toContain('Não foi possível carregar as obras')
+      expect(adaptador.obras.size).toBe(0)
+      expect(adaptador.indice).toBeUndefined()
+      store.bloquearGravacao('Falha de teste')
+      expect(store.mensagemGravacao).toBe('Falha de teste')
     })
   })
 
@@ -528,7 +596,7 @@ describe('useProjectStore · multiobra', () => {
       expect(store.state.meta.name).toBe(NOME_AURORA)
     })
 
-    it('AC-4: importar .xml na obra em branco preserva UF e município', async () => {
+    it('AC-15 / RF-14.1: importar .xml na obra em branco preserva UF e município e mantém os números do Aurora', async () => {
       const { store } = await carregarCom(aurora)
       const xml = store.exportXml().xml
       const b = await store.criarObra({ modelo: 'branco', dados: recife })
@@ -537,6 +605,118 @@ describe('useProjectStore · multiobra', () => {
       expect(store.state.tasks).toHaveLength(29)
       expect(store.state.meta.uf).toBe('PE')
       expect(store.state.meta.municipio).toBe('Recife')
+      // Mesmos números do Aurora depois da ida e volta pelo .xml
+      expect(store.schedule.projectFinish).toBe('2027-06-23')
+      expect(store.delay.delayDays).toBe(16)
+      expect(store.evm.spi).toBeCloseTo(0.8883, 4)
+      expect(store.evm.cpi).toBeCloseTo(0.9349, 4)
+    })
+
+    it('mudar a data de início reprograma tarefas não iniciadas, registra no log e não mexe na linha de base', async () => {
+      const { store } = await carregarCom(aurora)
+      const m = store.state.meta
+      const dados = { nome: m.name, responsavel: m.manager, dataInicio: m.startDate, dataStatus: m.statusDate }
+      const baseline = store.taskByUid.get(104)?.baselineStart
+      // Antes: início 2026-05-04
+      expect(store.schedule.projectFinish).toBe('2027-06-23')
+      expect(store.delay.delayDays).toBe(16)
+      expect(store.atualizarDadosObra({ ...dados, dataInicio: '2026-10-26' })).toEqual({ ok: true })
+      // Depois: início 2026-10-26 (depois da data de status), a entrega antecipa 1 d.u.
+      expect(store.schedule.projectFinish).toBe('2027-06-22')
+      expect(store.delay.delayDays).toBe(15)
+      expect(store.taskByUid.get(104)?.baselineStart).toBe(baseline)
+      expect(store.state.log[0]).toMatchObject({
+        title: 'Data de início alterada',
+        detail: 'Nova data de início: 26/10/2026. Tarefas não iniciadas foram reprogramadas; a linha de base não mudou.',
+      })
+      // Sem mudança de início, nenhuma entrada nova
+      const total = store.state.log.length
+      store.atualizarDadosObra({ ...dados, dataInicio: '2026-10-26' })
+      expect(store.state.log).toHaveLength(total)
+    })
+
+    it('obra sem tarefas é "sem cronograma" e sem orçamento; o Aurora não', async () => {
+      const { store } = await carregarCom(aurora)
+      expect(store.semCronograma).toBe(false)
+      expect(store.semOrcamento).toBe(false)
+      const b = await store.criarObra({ modelo: 'branco', dados: recife })
+      if (!b.ok) throw new Error(b.erro)
+      expect(store.semCronograma).toBe(true)
+      expect(store.semOrcamento).toBe(true)
+      // O número do motor não muda: o fallback do safeDiv continua 1
+      expect(store.evm.spi).toBe(1)
+      expect(store.evm.cpi).toBe(1)
+    })
+  })
+
+  describe('gravação · revisão e pendências', () => {
+    it('alteração feita durante a escrita continua "pendente" até a próxima gravação', async () => {
+      const { adaptador, store } = await carregarCom(aurora)
+      const original = adaptador.gravarObra
+      let liberar: () => void = () => undefined
+      const portao = new Promise<void>((r) => (liberar = r))
+      let chamadas = 0
+      adaptador.gravarObra = async (registro, indice) => {
+        chamadas++
+        await portao
+        return original(registro, indice)
+      }
+      store.updateTask(104, { percentComplete: 60 })
+      await nextTick()
+      const gravando = store.salvarAgora()
+      await vi.waitFor(() => expect(chamadas).toBe(1))
+      store.updateTask(104, { percentComplete: 70 }) // muda durante a escrita
+      await nextTick()
+      liberar()
+      expect(await gravando).toBe(true)
+      expect(store.estadoGravacao).toBe('pendente')
+      adaptador.gravarObra = original
+      expect(await store.salvarAgora()).toBe(true)
+      expect(store.estadoGravacao).toBe('salvo')
+      expect(JSON.parse(adaptador.obras.get(store.obraAtivaId)!.json).tasks.find((t: { uid: number }) => t.uid === 104).percentComplete).toBe(70)
+    })
+
+    it('trocar de obra com o atraso de gravação ainda correndo grava a obra atual antes', async () => {
+      const { adaptador, store } = await carregarCom(aurora)
+      const idA = store.obraAtivaId
+      const b = await store.criarObra({ modelo: 'branco', dados: recife })
+      if (!b.ok) throw new Error(b.erro)
+      await store.trocarObra(idA)
+      store.updateTask(104, { percentComplete: 60 }) // timer pendente, sem esperar o observador
+      expect((await store.trocarObra(b.id)).ok).toBe(true)
+      const salvo = JSON.parse(adaptador.obras.get(idA)!.json)
+      expect(salvo.tasks.find((t: { uid: number }) => t.uid === 104).percentComplete).toBe(60)
+    })
+
+    it('excluir a obra ativa não deixa uma gravação pendente ressuscitá-la', async () => {
+      const { adaptador, store } = await carregarCom(aurora)
+      const idA = store.obraAtivaId
+      const d = await store.duplicarObra(idA)
+      if (!d.ok) throw new Error(d.erro)
+      vi.useFakeTimers()
+      store.updateTask(104, { percentComplete: 60 })
+      await nextTick()
+      expect(await store.excluirObra(idA)).toEqual({ ok: true })
+      await vi.advanceTimersByTimeAsync(500)
+      expect(adaptador.obras.has(idA)).toBe(false)
+      expect(store.obraAtivaId).toBe(d.id)
+      expect(store.estadoGravacao).toBe('salvo')
+    })
+
+    it('excluir que falha reagenda a gravação pendente da obra ativa', async () => {
+      const { adaptador, store } = await carregarCom(aurora)
+      const idA = store.obraAtivaId
+      const b = await store.criarObra({ modelo: 'branco', dados: recife })
+      if (!b.ok) throw new Error(b.erro)
+      await store.trocarObra(idA)
+      adaptador.obras.set(b.id, { ...adaptador.obras.get(b.id)!, json: '{' }) // a única outra obra fica ilegível
+      vi.useFakeTimers()
+      store.updateTask(104, { percentComplete: 60 })
+      await nextTick()
+      expect((await store.excluirObra(idA)).ok).toBe(false)
+      await vi.advanceTimersByTimeAsync(500)
+      expect(store.estadoGravacao).toBe('salvo')
+      expect(JSON.parse(adaptador.obras.get(idA)!.json).tasks.find((t: { uid: number }) => t.uid === 104).percentComplete).toBe(60)
     })
   })
 })

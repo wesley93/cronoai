@@ -1,5 +1,5 @@
 // Regras puras da obra: validação dos dados, obra em branco, nome da cópia, resumo da lista e limiar de cota.
-import type { PersistedState, ResumoObra } from '@/types/obra'
+import type { IndiceObras, PersistedState, ResumoObra } from '@/types/obra'
 import type { ProjectMeta } from '@/types/domain'
 import { REGIMES_SINAPI, ROTULO_REGIME_SINAPI, UFS, type RegimeSinapi, type UF } from '@/data/ufs'
 import { defaultHolidays, parseISO, toISO } from './calendar'
@@ -87,6 +87,37 @@ export function nomeDaCopia(nome: string, existentes: string[] = []): string {
     const candidato = `${nome} (cópia ${n})`
     if (!existentes.includes(candidato)) return candidato
   }
+}
+
+/** Data local de hoje (yyyy-mm-dd): `toISOString` usaria UTC e, à noite no Brasil, daria o dia seguinte. */
+export function dataLocalISO(d: Date): string {
+  const dois = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${dois(d.getMonth() + 1)}-${dois(d.getDate())}`
+}
+
+export type ValidacaoIndice = { tipo: 'ok'; indice: IndiceObras } | { tipo: 'invalido'; mensagem: string }
+
+const eObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/** Confere a forma do índice (dado externo): versão 1, id ativo em texto e obras com id, nome e data em texto. */
+function formaDoIndice(v: Record<string, unknown>): v is Record<string, unknown> & IndiceObras {
+  if (v.versaoIndice !== 1 || typeof v.obraAtivaId !== 'string' || !Array.isArray(v.obras)) return false
+  if (!v.obras.every((o) => eObj(o) && typeof o.id === 'string' && o.id !== '' && typeof o.nome === 'string' && typeof o.atualizadoEm === 'string')) return false
+  const mig = v.migracaoV1
+  return mig === undefined || (eObj(mig) && typeof mig.em === 'string' && (mig.resultado === 'migrado' || mig.resultado === 'ilegivel'))
+}
+
+/**
+ * Valida o índice lido do armazenamento. Índice inválido ou de versão mais nova é recusado:
+ * quem chama não grava nada por cima dele.
+ */
+export function validarIndice(raw: unknown): ValidacaoIndice {
+  const invalido = (mensagem: string): ValidacaoIndice => ({ tipo: 'invalido', mensagem })
+  if (eObj(raw) && typeof raw.versaoIndice === 'number' && raw.versaoIndice > 1) {
+    return invalido(`O índice das obras foi salvo por uma versão mais nova do CronoAI (índice ${raw.versaoIndice}). Nada foi gravado.`)
+  }
+  if (!eObj(raw) || !formaDoIndice(raw)) return invalido('O índice das obras salvas está inválido. Nada foi gravado, para não sobrescrever o que já existe.')
+  return { tipo: 'ok', indice: raw }
 }
 
 /** Aviso do catálogo SINAPI com a UF, a data-base e o regime da obra (o catálogo do app é ilustrativo, de nenhuma UF). */

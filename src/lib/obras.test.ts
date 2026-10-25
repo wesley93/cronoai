@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { UFS } from '@/data/ufs'
 import { WorkCalendar } from './calendar'
 import { computeSchedule } from './cpm'
-import { avaliarCota, descreverTabelaSinapi, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, type DadosObra } from './obras'
+import { avaliarCota, dataLocalISO, descreverTabelaSinapi, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, validarIndice, type DadosObra } from './obras'
 
 const valido: DadosObra = {
   nome: 'Residencial Teste',
@@ -125,6 +125,52 @@ describe('descreverTabelaSinapi', () => {
 
   it('com só a UF, cita apenas a UF', () => {
     expect(descreverTabelaSinapi({ uf: 'PE' })).toBe('Catálogo SINAPI ilustrativo: não corresponde a PE.')
+  })
+})
+
+describe('dataLocalISO', () => {
+  it('usa a data local, não a UTC', () => {
+    // 23:30 do dia 25 no horário local: em UTC (Brasil, UTC-3) já seria dia 26
+    expect(dataLocalISO(new Date(2026, 9, 25, 23, 30))).toBe('2026-10-25')
+    expect(dataLocalISO(new Date(2026, 0, 5, 0, 10))).toBe('2026-01-05')
+  })
+})
+
+describe('validarIndice', () => {
+  const ok = { versaoIndice: 1, obraAtivaId: 'a', obras: [{ id: 'a', nome: 'A', atualizadoEm: '2026-10-25T10:00:00.000Z' }] }
+
+  it('aceita o índice válido, com e sem migração', () => {
+    expect(validarIndice(ok)).toEqual({ tipo: 'ok', indice: ok })
+    const comMig = { ...ok, migracaoV1: { em: '2026-10-25T10:00:00.000Z', resultado: 'migrado' } }
+    expect(validarIndice(comMig).tipo).toBe('ok')
+  })
+
+  it('recusa índice de versão mais nova com mensagem própria', () => {
+    expect(validarIndice({ ...ok, versaoIndice: 2 })).toEqual({
+      tipo: 'invalido',
+      mensagem: 'O índice das obras foi salvo por uma versão mais nova do CronoAI (índice 2). Nada foi gravado.',
+    })
+  })
+
+  it('recusa formatos inválidos', () => {
+    const ruins: unknown[] = [
+      null,
+      'x',
+      [],
+      { ...ok, versaoIndice: undefined },
+      { ...ok, versaoIndice: 0 },
+      { ...ok, obraAtivaId: 7 },
+      { ...ok, obras: 'x' },
+      { ...ok, obras: [{ id: 'a', nome: 'A' }] },
+      { ...ok, obras: [{ id: '', nome: 'A', atualizadoEm: 'x' }] },
+      { ...ok, obras: [null] },
+      { ...ok, migracaoV1: { em: 'x', resultado: 'talvez' } },
+      { ...ok, migracaoV1: 'x' },
+    ]
+    for (const ruim of ruins) {
+      const r = validarIndice(ruim)
+      expect(r.tipo).toBe('invalido')
+    }
   })
 })
 

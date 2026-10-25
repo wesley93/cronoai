@@ -33,8 +33,9 @@ async function onFile(e: Event) {
       <div class="text-right">
         <div class="eyebrow flex items-center justify-end gap-1"><KeyRound class="h-3 w-3" /> Entrega das chaves</div>
         <div class="text-sm font-semibold tabular-nums">
-          {{ fmtDate(project.schedule.projectFinish) }}
-          <span v-if="delay > 0" class="chip-critical ml-1">+{{ delay }} d.u.</span>
+          {{ project.semCronograma ? '—' : fmtDate(project.schedule.projectFinish) }}
+          <span v-if="project.semCronograma" class="chip-neutral ml-1">sem cronograma</span>
+          <span v-else-if="delay > 0" class="chip-critical ml-1">+{{ delay }} d.u.</span>
           <span v-else-if="delay < 0" class="chip-ok ml-1">{{ delay }} d.u.</span>
           <span v-else class="chip-ok ml-1">no prazo</span>
         </div>
@@ -42,11 +43,11 @@ async function onFile(e: Event) {
       <div class="h-8 w-px bg-zinc-200 dark:bg-zinc-800" />
       <div class="text-right">
         <div class="eyebrow">SPI</div>
-        <div class="text-sm font-semibold tabular-nums" :class="idxTone(project.evm.spi)">{{ fmtIndex(project.evm.spi) }}</div>
+        <div class="text-sm font-semibold tabular-nums" :class="project.semOrcamento ? 'text-zinc-500' : idxTone(project.evm.spi)">{{ project.semOrcamento ? '—' : fmtIndex(project.evm.spi) }}</div>
       </div>
       <div class="text-right">
         <div class="eyebrow">CPI</div>
-        <div class="text-sm font-semibold tabular-nums" :class="idxTone(project.evm.cpi)">{{ fmtIndex(project.evm.cpi) }}</div>
+        <div class="text-sm font-semibold tabular-nums" :class="project.semOrcamento ? 'text-zinc-500' : idxTone(project.evm.cpi)">{{ project.semOrcamento ? '—' : fmtIndex(project.evm.cpi) }}</div>
       </div>
       <div class="h-8 w-px bg-zinc-200 dark:bg-zinc-800" />
     </div>

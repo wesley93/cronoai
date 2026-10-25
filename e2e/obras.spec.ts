@@ -57,7 +57,9 @@ test('criar obra em PE, alternar e ver só a obra ativa', async ({ page }) => {
   await criarObraRecife(page)
 
   // A obra em branco: no prazo, EAP sem linhas, Apontamento sem relatos
-  await expect(kpi(page, 'Entrega das chaves')).toContainText('no prazo')
+  await expect(kpi(page, 'Entrega das chaves')).toContainText('sem cronograma')
+  await expect(kpi(page, 'SPI')).toContainText('—')
+  await expect(kpi(page, 'CPI')).toContainText('—')
   await expect(page.getByLabel('Obra ativa').locator('option:checked')).toHaveText(`${NOME_RECIFE} · PE`)
   await page.getByRole('navigation').getByRole('button', { name: /EAP \/ MS Project/ }).click()
   await expect(page.getByRole('row').filter({ hasText: '03.01.02' })).toHaveCount(0)

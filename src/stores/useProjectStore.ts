@@ -48,7 +48,7 @@ import { SAFETY_MARGIN_DAYS, analyzeSupplies } from '@/lib/supplies'
 import { fmtBRL, fmtMonth, uid } from '@/lib/format'
 import { nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
 import { criarRegistro, lerEstadoV1, migrarRegistro } from '@/lib/migracaoEstado'
-import { avaliarCota, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, type DadosObra } from '@/lib/obras'
+import { avaliarCota, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, validarIndice, type DadosObra } from '@/lib/obras'
 import { obterArmazenamento, type ArmazenamentoObras } from './armazenamentoObras'
 import { useUiStore } from './ui'
 
@@ -147,6 +147,8 @@ export const useProjectStore = defineStore('project', () => {
   const armazenamentoIndisponivel = ref(false)
   const migracaoV1 = ref<MigracaoV1 | undefined>(undefined)
   const carregado = ref(false)
+  /** Carga sem segurança (índice ilegível, leitura falhou): nada é gravado até recarregar a página. */
+  const gravacaoBloqueada = ref(false)
 
   let armazenamento: ArmazenamentoObras | undefined
   let indice: IndiceObras | undefined
@@ -154,17 +156,40 @@ export const useProjectStore = defineStore('project', () => {
   let saveTimer: ReturnType<typeof setTimeout> | undefined
   let fila: Promise<unknown> = Promise.resolve()
   let ultimaConsultaCota = 0
+  /** Conta as alterações do estado: a gravação só vira "salva" se nada mudou durante a escrita. */
+  let revisao = 0
+  let timerPendente = false
 
   watch(
     state,
     () => {
       if (!gravacaoLigada) return
+      revisao++
       estadoGravacao.value = 'pendente'
-      clearTimeout(saveTimer)
-      saveTimer = setTimeout(() => void salvarAgora(), ATRASO_GRAVACAO_MS)
+      agendarGravacao()
     },
     { deep: true },
   )
+
+  function agendarGravacao() {
+    clearTimeout(saveTimer)
+    timerPendente = true
+    saveTimer = setTimeout(() => {
+      timerPendente = false
+      void salvarAgora()
+    }, ATRASO_GRAVACAO_MS)
+  }
+
+  /** Carga ou gravação sem segurança: aviso persistente, gravação desligada e nada escrito por cima do que existe. */
+  function bloquearGravacao(mensagem: string) {
+    gravacaoLigada = false
+    gravacaoBloqueada.value = true
+    clearTimeout(saveTimer)
+    timerPendente = false
+    estadoGravacao.value = 'erro'
+    mensagemGravacao.value = mensagem
+    carregado.value = true
+  }
 
   /**
    * Cópias simples (sem proxy) do que vai ao IndexedDB: o valor de um `ref` é um proxy reativo
@@ -217,16 +242,20 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Grava agora a obra ativa (cancela o atraso). Devolve false se falhar; as gravações seguem em fila, na ordem. */
   function salvarAgora(): Promise<boolean> {
+    if (gravacaoBloqueada.value) return Promise.resolve(false)
     clearTimeout(saveTimer)
+    timerPendente = false
     const gravar = async (): Promise<boolean> => {
       if (!armazenamento || !obraAtivaId.value) return true
       try {
+        const rev = revisao
         const em = agora()
         const novoIndice = indiceComAtiva(em)
         await armazenamento.gravarObra(criarRegistro(obraAtivaId.value, state, em), novoIndice)
         aceitarIndice(novoIndice)
-        // Sem IndexedDB o "salvo" é só na memória da sessão: o aviso de indisponibilidade continua
-        if (!armazenamentoIndisponivel.value) {
+        // Sem IndexedDB o "salvo" é só na memória da sessão: o aviso de indisponibilidade continua.
+        // Alteração feita durante a escrita (rev mudou) continua "pendente": o observador já agendou outra gravação.
+        if (!armazenamentoIndisponivel.value && rev === revisao) {
           estadoGravacao.value = 'salvo'
           mensagemGravacao.value = ''
         }
@@ -255,7 +284,7 @@ export const useProjectStore = defineStore('project', () => {
   async function abrirRegistro(id: string): Promise<{ estado: PersistedState; avisos: string[] } | { erro: string }> {
     if (!armazenamento) return { erro: 'Armazenamento não carregado.' }
     try {
-      const r = migrarRegistro(await armazenamento.lerObra(id))
+      const r = migrarRegistro(await armazenamento.lerObra(id), new Date().getFullYear())
       if (r.tipo === 'ok') return { estado: r.estado, avisos: r.avisos }
       return { erro: r.mensagem }
     } catch {
@@ -274,7 +303,16 @@ export const useProjectStore = defineStore('project', () => {
    * Liga a gravação só no fim. Deve ser aguardada antes de montar a interface (main.ts).
    */
   async function carregar(): Promise<void> {
+    try {
+      await carregarObras()
+    } catch {
+      bloquearGravacao('Não foi possível carregar as obras deste navegador. Nada foi gravado, para não sobrescrever o que já existe.')
+    }
+  }
+
+  async function carregarObras(): Promise<void> {
     gravacaoLigada = false
+    gravacaoBloqueada.value = false
     obraAtivaId.value = ''
     indice = undefined
     const aberto = await obterArmazenamento()
@@ -287,11 +325,22 @@ export const useProjectStore = defineStore('project', () => {
       mensagemGravacao.value = 'Armazenamento local indisponível.'
     }
 
-    let existente: IndiceObras | undefined
+    // Leitura que falha = estado desconhecido: não grava nada (poderia sobrescrever o índice e deixar obras órfãs)
+    let bruto: unknown
     try {
-      existente = await armazenamento.lerIndice()
+      bruto = await armazenamento.lerIndice()
     } catch {
-      avisos.push('Não foi possível ler as obras salvas no navegador. Nada foi alterado.')
+      bloquearGravacao('Não foi possível ler as obras salvas neste navegador. Nada foi gravado, para não sobrescrever o que já existe. Recarregue a página.')
+      return
+    }
+    let existente: IndiceObras | undefined
+    if (bruto !== undefined && bruto !== null) {
+      const v = validarIndice(bruto)
+      if (v.tipo === 'invalido') {
+        bloquearGravacao(v.mensagem)
+        return
+      }
+      existente = v.indice
     }
 
     let inicial: PersistedState | undefined
@@ -323,7 +372,7 @@ export const useProjectStore = defineStore('project', () => {
       }
       if (!inicial) avisos.push('Nenhuma obra salva pôde ser lida: a obra de exemplo foi aberta. As obras ilegíveis continuam no navegador, sem alteração.')
     } else {
-      const v1 = lerEstadoV1(armazenamento.lerV1())
+      const v1 = lerEstadoV1(armazenamento.lerV1(), new Date().getFullYear())
       if (v1.tipo === 'ok') {
         inicial = v1.estado
         avisos.push(...v1.avisos)
@@ -358,10 +407,11 @@ export const useProjectStore = defineStore('project', () => {
       const em = agora()
       const base = indice
       const novo: IndiceObras = { ...indiceComAtiva(em), ...migracaoPlana() }
+      const rev = revisao
       try {
         await armazenamento.gravarObra(criarRegistro(obraAtivaId.value, state, em), novo)
         aceitarIndice(novo)
-        if (!aberto.indisponivel) estadoGravacao.value = 'salvo'
+        if (!aberto.indisponivel && rev === revisao) estadoGravacao.value = 'salvo'
       } catch (err) {
         obras.value = novo.obras.map((o) => ({ ...o }))
         indice = base // sem índice gravado (M-4); com índice, o antigo continua valendo
@@ -383,6 +433,10 @@ export const useProjectStore = defineStore('project', () => {
   const packageEvm = computed(() => computePackageEvm(state.tasks, baseCalendar.value, state.meta.statusDate))
   const sCurve = computed(() => computeSCurve(state.tasks, baseCalendar.value, state.meta.statusDate, schedule.value, fmtMonth))
   const delay = computed(() => analyzeDelay(state.tasks, schedule.value, baseCalendar.value))
+  /** Obra sem tarefas: não há entrega nem desempenho a mostrar (o motor devolve a data de início e SPI/CPI 1 por `safeDiv`). */
+  const semCronograma = computed(() => state.tasks.length === 0)
+  /** Sem orçamento (BAC = 0): SPI e CPI 1,00 são só o fallback do `safeDiv`, não desempenho. */
+  const semOrcamento = computed(() => evm.value.bac <= 0)
 
   /** Tarefas de um pacote de 1º nível (ou a obra inteira quando `wbs` é vazio). */
   function tasksOf(wbs?: string): Task[] {
@@ -964,9 +1018,11 @@ export const useProjectStore = defineStore('project', () => {
   /** Grava a obra atual antes de uma troca, se houver o que gravar. Falhou: a troca é cancelada, para não perder alterações. */
   async function garantirObraAtualSalva(): Promise<boolean> {
     await nextTick() // deixa o observador do estado marcar como "pendente" uma alteração feita neste mesmo instante
-    return estadoGravacao.value === 'salvo' ? true : salvarAgora()
+    // Grava sempre que houver alteração pendente (o observador já marcou ou o atraso ainda corre)
+    return estadoGravacao.value === 'salvo' && !timerPendente ? true : salvarAgora()
   }
 
+  const ERRO_BLOQUEADO = 'As obras não foram carregadas com segurança: nada será gravado até recarregar a página.'
   const ERRO_SALVAR_ANTES = 'A obra atual não pôde ser salva. Resolva o aviso de armazenamento antes de trocar de obra.'
 
   function indiceComAtivaNova(ativaId: string, obrasLista: ResumoObra[]): IndiceObras {
@@ -976,7 +1032,7 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Troca a obra ativa: grava a atual, lê e migra a nova, grava o índice e só então muda a tela. */
   async function trocarObra(id: string): Promise<ResultadoAcao> {
-    if (!armazenamento) return { ok: false, erro: 'As obras ainda não foram carregadas.' }
+    if (!armazenamento || gravacaoBloqueada.value) return { ok: false, erro: gravacaoBloqueada.value ? ERRO_BLOQUEADO : 'As obras ainda não foram carregadas.' }
     if (id === obraAtivaId.value) return { ok: true }
     if (!(await garantirObraAtualSalva())) return { ok: false, erro: ERRO_SALVAR_ANTES }
     const r = await abrirRegistro(id)
@@ -999,7 +1055,7 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Cria uma obra (em branco ou a de exemplo) e a torna ativa. */
   async function criarObra(nova: NovaObra): Promise<ResultadoCriacao> {
-    if (!armazenamento) return { ok: false, erro: 'As obras ainda não foram carregadas.' }
+    if (!armazenamento || gravacaoBloqueada.value) return { ok: false, erro: gravacaoBloqueada.value ? ERRO_BLOQUEADO : 'As obras ainda não foram carregadas.' }
     let estado: PersistedState
     if (nova.modelo === 'branco') {
       const erros = validarDadosObra(nova.dados)
@@ -1030,7 +1086,7 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Copia uma obra para uma nova, independente (não a torna ativa). */
   async function duplicarObra(id: string): Promise<ResultadoCriacao> {
-    if (!armazenamento) return { ok: false, erro: 'As obras ainda não foram carregadas.' }
+    if (!armazenamento || gravacaoBloqueada.value) return { ok: false, erro: gravacaoBloqueada.value ? ERRO_BLOQUEADO : 'As obras ainda não foram carregadas.' }
     if (id === obraAtivaId.value && !(await garantirObraAtualSalva())) return { ok: false, erro: ERRO_SALVAR_ANTES }
     const origem = id === obraAtivaId.value ? { estado: clone(state) } : await abrirRegistro(id)
     if (!('estado' in origem)) return { ok: false, erro: origem.erro }
@@ -1051,7 +1107,15 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Exclui uma obra. A única não é excluída; excluir a ativa abre a 1ª outra obra legível. */
   async function excluirObra(id: string): Promise<ResultadoAcao> {
-    if (!armazenamento) return { ok: false, erro: 'As obras ainda não foram carregadas.' }
+    const tinhaGravacaoPendente = timerPendente
+    const r = await excluirObraInterno(id)
+    // Falhou: a obra continua aberta e o que estava pendente nela precisa ser gravado
+    if (!r.ok && tinhaGravacaoPendente && id === obraAtivaId.value && !gravacaoBloqueada.value) agendarGravacao()
+    return r
+  }
+
+  async function excluirObraInterno(id: string): Promise<ResultadoAcao> {
+    if (!armazenamento || gravacaoBloqueada.value) return { ok: false, erro: gravacaoBloqueada.value ? ERRO_BLOQUEADO : 'As obras ainda não foram carregadas.' }
     const lista = indice?.obras ?? obrasPlanas()
     if (!lista.some((o) => o.id === id)) return { ok: false, erro: 'Obra não encontrada.' }
     if (lista.length <= 1) return { ok: false, erro: 'A obra não pode ser excluída: é a única.' }
@@ -1059,6 +1123,8 @@ export const useProjectStore = defineStore('project', () => {
     const eraAtiva = id === obraAtivaId.value
     let proxima: { id: string; estado: PersistedState } | undefined
     if (eraAtiva) {
+      clearTimeout(saveTimer) // alterações pendentes são da obra que será excluída
+      timerPendente = false
       for (const o of restantes) {
         const r = await abrirRegistro(o.id)
         if ('estado' in r) {
@@ -1085,7 +1151,6 @@ export const useProjectStore = defineStore('project', () => {
     }
     aceitarIndice(novoIndice)
     if (proxima) {
-      clearTimeout(saveTimer) // alterações pendentes eram da obra excluída
       obraAtivaId.value = proxima.id
       await aplicarEstado(proxima.estado)
       estadoGravacao.value = armazenamentoIndisponivel.value ? 'erro' : 'salvo'
@@ -1100,7 +1165,11 @@ export const useProjectStore = defineStore('project', () => {
     const meta = state.meta
     meta.name = dados.nome.trim()
     meta.manager = (dados.responsavel ?? '').trim()
-    meta.startDate = dados.dataInicio
+    if (dados.dataInicio !== meta.startDate) {
+      meta.startDate = dados.dataInicio
+      // A data de início é a base do calendário: as tarefas não iniciadas são reprogramadas; a linha de base (datas ISO) não muda
+      log('sistema', 'Data de início alterada', `Nova data de início: ${dados.dataInicio.split('-').reverse().join('/')}. Tarefas não iniciadas foram reprogramadas; a linha de base não mudou.`)
+    }
     // Campo opcional vazio = "não informado": a propriedade some, como na obra de exemplo
     if (dados.uf) meta.uf = dados.uf
     else delete meta.uf
@@ -1131,6 +1200,8 @@ export const useProjectStore = defineStore('project', () => {
     evmFor,
     evmForecast,
     delay,
+    semCronograma,
+    semOrcamento,
     scenarios,
     scenarioParams,
     scenarioOptions,
@@ -1184,6 +1255,8 @@ export const useProjectStore = defineStore('project', () => {
     armazenamentoIndisponivel,
     migracaoV1,
     carregado,
+    gravacaoBloqueada,
+    bloquearGravacao,
     carregar,
     salvarAgora,
     trocarObra,

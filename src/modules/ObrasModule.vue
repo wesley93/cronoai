@@ -6,13 +6,13 @@ import { useUiStore } from '@/stores/ui'
 import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import ObraDadosForm from './obras/ObraDadosForm.vue'
-import type { DadosObra } from '@/lib/obras'
+import { dataLocalISO, type DadosObra } from '@/lib/obras'
 
 const project = useProjectStore()
 const ui = useUiStore()
 
 const criando = ref(false)
-const hoje = new Date().toISOString().slice(0, 10)
+const hoje = dataLocalISO(new Date())
 const dadosNovaObra: DadosObra = { nome: '', uf: '', municipio: '', responsavel: '', dataInicio: hoje, dataStatus: hoje, regimeSinapi: '', dataBaseSinapi: '' }
 
 // Dados da obra ativa; a chave refaz o formulário quando o meta muda por fora (ex.: importar .xml)
@@ -153,7 +153,7 @@ function salvarDados(dados: DadosObra) {
     </div>
 
     <SectionCard title="Dados da obra ativa" subtitle="UF, município, responsável, datas e tabela SINAPI" :icon="Settings2">
-      <ObraDadosForm :key="chaveDados" :inicial="dadosAtivos" rotulo-botao="Salvar dados" id-prefixo="ativa" @salvar="salvarDados" />
+      <ObraDadosForm :key="chaveDados" :inicial="dadosAtivos" rotulo-botao="Salvar dados" id-prefixo="ativa" avisar-inicio @salvar="salvarDados" />
     </SectionCard>
   </div>
 </template>

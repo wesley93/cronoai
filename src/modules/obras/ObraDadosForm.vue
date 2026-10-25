@@ -3,12 +3,13 @@ import { computed, reactive, ref } from 'vue'
 import { REGIMES_SINAPI, ROTULO_REGIME_SINAPI, UFS } from '@/data/ufs'
 import { MAX_MUNICIPIO, MAX_NOME_OBRA, MAX_RESPONSAVEL, validarDadosObra, type DadosObra } from '@/lib/obras'
 
-const props = defineProps<{ inicial: DadosObra; rotuloBotao: string; idPrefixo: string; cancelavel?: boolean }>()
+const props = defineProps<{ inicial: DadosObra; rotuloBotao: string; idPrefixo: string; cancelavel?: boolean; avisarInicio?: boolean }>()
 const emit = defineEmits<{ salvar: [dados: DadosObra]; cancelar: [] }>()
 
 const form = reactive<DadosObra>({ ...props.inicial })
 const erros = computed(() => validarDadosObra(form))
 const tentou = ref(false)
+const inicioMudou = computed(() => !!props.avisarInicio && form.dataInicio !== props.inicial.dataInicio)
 
 function enviar() {
   tentou.value = true
@@ -42,6 +43,9 @@ function enviar() {
       <div>
         <label class="label" :for="`${idPrefixo}-inicio`">Data de início</label>
         <input :id="`${idPrefixo}-inicio`" v-model="form.dataInicio" type="date" class="input" />
+        <p v-if="inicioMudou" role="status" class="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+          Atenção: alterar a data de início reprograma as tarefas não iniciadas; a linha de base não muda.
+        </p>
       </div>
       <div>
         <label class="label" :for="`${idPrefixo}-status`">Data de status</label>
@@ -59,6 +63,7 @@ function enviar() {
         <input :id="`${idPrefixo}-database`" v-model="form.dataBaseSinapi" type="month" class="input" />
       </div>
     </div>
+    <p class="text-[11px] text-zinc-500">Calendário com feriados nacionais; feriados estaduais e municipais entram no ciclo 00005.</p>
     <ul v-if="tentou && erros.length" role="alert" class="list-disc space-y-0.5 pl-5 text-xs text-coral-600 dark:text-coral-400">
       <li v-for="e in erros" :key="e">{{ e }}</li>
     </ul>
