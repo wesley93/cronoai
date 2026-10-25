@@ -893,16 +893,17 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   // feriados nacionais e em 83 de 104 com eles). "Aplicar feriados da obra" é ação explícita do usuário, com prévia (ciclo 00005, P3).
   const uidPadrao = Number.isInteger(Number(uidProjetoTexto)) && uidProjetoTexto !== undefined ? Number(uidProjetoTexto) : UID_CALENDARIO_PADRAO
   let calPadrao = importados.get(uidPadrao)
+  const semCalendarioDoProjeto = !calPadrao
   if (!calPadrao) {
     calPadrao = calendarioPadrao([], [], uidPadrao)
     importados.set(uidPadrao, calPadrao)
   }
-  const semFeriados = !calPadrao.excecoes.some((ex) => ex.intervalos.length === 0)
+  const semFeriados = !semCalendarioDoProjeto && !calPadrao.excecoes.some((ex) => ex.intervalos.length === 0)
   if (total.recorrentes) warnings.push(`${total.recorrentes} exceção(ões) recorrente(s) do calendário não aplicada(s): confira feriados e dias úteis extras.`)
   if (total.invalidas) warnings.push(`${total.invalidas} exceção(ões) do calendário com data inválida ignorada(s).`)
   if (total.truncadas) warnings.push(`${total.truncadas} exceção(ões) do calendário com mais de ${MAX_EXCEPTION_DAYS} dias: lidas apenas nos primeiros ${MAX_EXCEPTION_DAYS} dias.`)
   if (total.acimaDoOrcamento) warnings.push(`Calendário com mais de ${MAX_CALENDAR_DAYS} dias de exceção: o excedente não foi importado; confira feriados e dias úteis extras.`)
-  if (rejeitados) warnings.push(`${rejeitados} calendário(s) rejeitado(s) por não ter tempo útil, ter horário inválido ou mais de ${MAX_INTERVALOS_POR_DIA} intervalos por dia: as tarefas usam o calendário do projeto.`)
+  if (rejeitados) warnings.push(`${rejeitados} calendário(s) rejeitado(s) por não ter tempo útil, ter horário inválido ou mais de ${MAX_INTERVALOS_POR_DIA} intervalos por dia: as tarefas deles passam ao calendário padrão da obra.`)
   if (calendariosAcimaDoLimite) warnings.push(`${calendariosAcimaDoLimite} calendário(s) acima do limite de ${MAX_CALENDARIOS_IMPORTADOS} não importado(s): as tarefas usam o calendário do projeto.`)
   if (workWeeks) warnings.push(`${workWeeks} calendário(s) com semanas de trabalho alternativas (WorkWeeks) não aplicadas: o cálculo usa a semana padrão.`)
 
@@ -1126,7 +1127,9 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     warnings.push('O arquivo não traz custos (Cost/Baseline Cost): os indicadores EVM ficarão zerados até que o BAC seja informado.')
   }
   if (!meta.statusDate) warnings.push('Data de status ausente no XML; mantida a data de status atual do CronoAI.')
-  if (semFeriados) {
+  if (semCalendarioDoProjeto) {
+    warnings.push('O calendário do projeto não veio no arquivo (ou foi rejeitado): o CronoAI usou seg–sex 08:00–12:00 e 13:00–17:00 sem feriados, como o Standard do MS Project. Confira as datas.')
+  } else if (semFeriados) {
     warnings.push('O calendário do arquivo não traz feriados. O CronoAI não acrescentou nenhum: use "Aplicar feriados da obra" em Premissas › Calendários para ver o impacto antes.')
   }
 

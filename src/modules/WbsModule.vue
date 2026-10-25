@@ -86,7 +86,9 @@ function aplicarEmLote() {
   ui.notify('success', 'Calendário atribuído', `${uids.length} tarefa(s) do pacote ${pacoteLote.value}. Datas recalculadas.`)
 }
 
-const calendariosAlternativos = computed(() => project.state.calendarios.filter((c) => c.uid !== project.state.calendarioPadraoUid))
+// Calendário criado por hora extra só vale para as frentes do cenário: não aparece nas listas de atribuição
+const calendariosAlternativos = computed(() => project.state.calendarios.filter((c) => c.uid !== project.state.calendarioPadraoUid && c.origem !== 'hora-extra'))
+const calendarioDeHoraExtra = (t: Task) => project.state.calendarios.find((c) => c.uid === t.calendarioUid && c.origem === 'hora-extra')
 const nomeCalendarioPadrao = computed(() => project.state.calendarios.find((c) => c.uid === project.state.calendarioPadraoUid)?.nome ?? '')
 
 function saveBaseline() {
@@ -225,6 +227,7 @@ const ac = (t: Task) => (t.isSummary ? (project.rollups.get(t.uid)?.actualCost ?
               <select v-if="!t.isSummary" :value="t.calendarioUid ?? ''" class="rounded border border-transparent bg-transparent px-1 hover:border-zinc-300 focus:border-amber-400 focus:outline-none dark:hover:border-zinc-700 text-[11px]" aria-label="Calendário da tarefa" @change="mudarCalendario(t, ($event.target as HTMLSelectElement).value)">
                 <option value="">Padrão da obra ({{ nomeCalendarioPadrao }})</option>
                 <option v-for="c in calendariosAlternativos" :key="c.uid" :value="c.uid">{{ c.nome }}</option>
+                <option v-if="calendarioDeHoraExtra(t)" :value="t.calendarioUid" disabled>{{ calendarioDeHoraExtra(t)?.nome }} (hora extra)</option>
               </select>
             </td>
             <td class="max-w-[180px] truncate text-[11px] text-zinc-500" :title="t.resources.map((r) => `${r.units} ${r.resource}`).join(', ')">{{ t.resources.map((r) => `${r.units} ${r.resource}`).join(', ') }}</td>

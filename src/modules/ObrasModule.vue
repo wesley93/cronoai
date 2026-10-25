@@ -9,6 +9,7 @@ import ObraDadosForm from './obras/ObraDadosForm.vue'
 import PreviaImpacto from './premissas/PreviaImpacto.vue'
 import type { PreviaTrocaLocal } from '@/stores/useProjectStore'
 import { dataLocalISO, type DadosObra } from '@/lib/obras'
+import { fmtDate } from '@/lib/format'
 
 const project = useProjectStore()
 const ui = useUiStore()
@@ -192,7 +193,7 @@ function resolverTrocaLocal(remover: boolean) {
         Você está trocando a UF ou o município da obra. Estes feriados estaduais ou municipais foram cadastrados para outro local; os feriados locais não são carregados automaticamente nesta fase.
       </p>
       <ul class="list-disc space-y-0.5 pl-5 text-[12px]">
-        <li v-for="f in pendenteLocal.previa.foraDoLocal" :key="f.id">{{ f.nome }} ({{ f.data.split('-').reverse().join('/') }}) · {{ [f.municipio, f.uf].filter(Boolean).join(' / ') || 'sem local' }}</li>
+        <li v-for="f in pendenteLocal.previa.foraDoLocal" :key="f.id">{{ f.nome }} ({{ fmtDate(f.data) }}) · {{ [f.municipio, f.uf].filter(Boolean).join(' / ') || 'sem local' }}</li>
       </ul>
       <p class="text-[12px] font-medium">Se forem removidos, as datas mudam assim:</p>
       <PreviaImpacto v-if="pendenteLocal.previa.impactoDeRemover" :previa="pendenteLocal.previa.impactoDeRemover" />

@@ -4,7 +4,7 @@ import type { PersistedState, RegistroObra } from '@/types/obra'
 import { defaultHolidays, parseISO, toISO } from './calendar'
 import { UID_CALENDARIO_PADRAO, calendarioPadrao, diasParaMinutos, erroDoCalendario } from './calendarioTrabalho'
 import type { CalendarioObra, ChavePremissa, VersaoPremissas } from '@/types/domain'
-import { configFeriadosPadrao, configFeriadosValida } from './feriadosObra'
+import { configFeriadosPadrao, sanearConfigFeriados } from './feriadosObra'
 import { premissasPadrao, versoesValidas } from './premissas'
 
 /**
@@ -176,8 +176,9 @@ function anoDaObra(estado: Record<string, unknown>, anoPadrao: number): number {
  * não injeta orçamento nem relatos do Edifício Aurora numa obra que não é o Aurora.
  * Esquema ≤ 2: completa `calendar`. Esquema ≥ 3: completa `calendarios` e o calendário padrão; esquema ≥ 4: `premissas` e `feriados`.
  */
-function completarChaves(bruto: EstadoBruto, anoPadrao: number, esquema: number): { estado: EstadoBruto; preenchidas: string[] } {
+function completarChaves(bruto: EstadoBruto, anoPadrao: number, esquema: number): { estado: EstadoBruto; preenchidas: string[]; avisos: string[] } {
   const preenchidas: string[] = []
+  const avisos: string[] = []
   const saida: EstadoBruto = { ...bruto }
   for (const chave of CHAVES_LISTA) {
     if (!Array.isArray(saida[chave])) {
@@ -222,12 +223,17 @@ function completarChaves(bruto: EstadoBruto, anoPadrao: number, esquema: number)
       saida.premissas = [{ versao: 1, vigencia, motivo: 'Premissas padrão (o estado salvo não tinha premissas válidas)', valores: premissasPadrao() }]
       preenchidas.push('premissas')
     }
-    if (!configFeriadosValida(saida.feriados)) {
+    // Feriados: forma inválida volta ao padrão; feriado manual inválido (tipo ou tamanho) é descartado, com aviso
+    const feriados = sanearConfigFeriados(saida.feriados)
+    if (!feriados.config) {
       saida.feriados = configFeriadosPadrao()
       preenchidas.push('feriados')
+    } else if (feriados.descartados > 0) {
+      saida.feriados = feriados.config
+      avisos.push(`${feriados.descartados} feriado(s) manual(is) inválido(s) descartado(s) do estado salvo.`)
     }
   }
-  return { estado: saida, preenchidas }
+  return { estado: saida, preenchidas, avisos }
 }
 
 function avisoDePreenchidas(preenchidas: string[]): string[] {
@@ -270,7 +276,7 @@ const tarefasCompletas = (tasks: unknown[]): boolean => tasks.every((t) => eObje
 
 /** Leva o estado do esquema `de` ao atual pela cadeia de migrações. */
 function levarAoAtual(bruto: EstadoBruto, de: number, anoPadrao: number): ResultadoMigracao {
-  const { estado: completo, preenchidas } = completarChaves(bruto, anoPadrao, de)
+  const { estado: completo, preenchidas, avisos: avisosChaves } = completarChaves(bruto, anoPadrao, de)
   let estado = completo
   // Antes do esquema 4 o indireto e a margem moravam no meta: valor inválido volta ao padrão, com aviso
   const avisosPremissas: string[] = []
@@ -289,7 +295,7 @@ function levarAoAtual(bruto: EstadoBruto, de: number, anoPadrao: number): Result
   if (!eEstado(estado) || !tarefasCompletas(estado.tasks)) {
     return { tipo: 'erro', mensagem: 'Os dados desta obra estão ilegíveis.' }
   }
-  return { tipo: 'ok', estado, avisos: [...avisoDePreenchidas(preenchidas), ...avisosPremissas, ...descartes] }
+  return { tipo: 'ok', estado, avisos: [...avisoDePreenchidas(preenchidas), ...avisosChaves, ...avisosPremissas, ...descartes] }
 }
 
 /** Lê o texto gravado em `cronoai-state-v1`. */

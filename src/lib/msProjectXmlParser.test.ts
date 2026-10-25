@@ -776,7 +776,7 @@ describe('limites do import de calendários, restrições e lags (S-1 e S-2)', (
       expect(performance.now() - t0, nome).toBeLessThan(2000)
       expect(r.calendarios.map((c) => c.uid), nome).toEqual([1])
       expect(r.tasks[1].calendarioUid, nome).toBeUndefined()
-      expect(r.warnings, nome).toContain('1 calendário(s) rejeitado(s) por não ter tempo útil, ter horário inválido ou mais de 5 intervalos por dia: as tarefas usam o calendário do projeto.')
+      expect(r.warnings, nome).toContain('1 calendário(s) rejeitado(s) por não ter tempo útil, ter horário inválido ou mais de 5 intervalos por dia: as tarefas deles passam ao calendário padrão da obra.')
       expect(r.warnings, nome).toContain('1 tarefa(s) com calendário não importado (de recurso, ausente, rejeitado ou acima do limite): calculadas no calendário do projeto.')
     }
   })
@@ -808,7 +808,10 @@ describe('limites do import de calendários, restrições e lags (S-1 e S-2)', (
     expect(r.calendarios[0].excecoes).toEqual([]) // antes do ciclo 00005: os feriados nacionais de 5 anos como exceções
     expect(r.calendarios[0].aplicaFeriadosObra).toBeUndefined()
     expect(r.warnings.some((w) => w.startsWith('1 calendário(s) rejeitado(s)'))).toBe(true)
-    expect(r.warnings).toContain(AVISO_SEM_FERIADOS)
+    // E-4 (rodada 02): mensagem própria para o calendário do projeto ausente ou rejeitado (e não a de "calendário sem feriados")
+    expect(r.warnings).toContain('O calendário do projeto não veio no arquivo (ou foi rejeitado): o CronoAI usou seg–sex 08:00–12:00 e 13:00–17:00 sem feriados, como o Standard do MS Project. Confira as datas.')
+    expect(r.warnings).not.toContain(AVISO_SEM_FERIADOS)
+    expect(r.warnings.join(' ')).not.toContain('as tarefas usam o calendário do projeto')
     expect(r.meta.feriadosNacionaisAplicados).toBeUndefined()
   })
 

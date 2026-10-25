@@ -5,7 +5,8 @@ import aurora from '@/lib/__fixtures__/estado-v1-aurora.json?raw'
 import aurora75 from '@/lib/__fixtures__/estado-v1-aurora-75.json?raw'
 import auroraCenarios from '@/lib/__fixtures__/estado-v2-aurora-cenarios.json?raw'
 import fixtureCalendarios from '@/lib/__fixtures__/mspdi-calendarios-restricoes.xml?raw'
-import { lerEstadoV1 } from '@/lib/migracaoEstado'
+import { MIGRACOES, lerEstadoV1 } from '@/lib/migracaoEstado'
+import { analyzeSupplies } from '@/lib/supplies'
 import type { DadosObra } from '@/lib/obras'
 import { criarArmazenamentoMemoria, usarArmazenamento, type ArmazenamentoMemoria } from './armazenamentoObras'
 import { useProjectStore } from './useProjectStore'
@@ -140,6 +141,63 @@ describe('useProjectStore · multiobra', () => {
       expect(store.state.calendarios[0].excecoes.filter((x) => x.intervalos.length > 0)).toEqual([])
       expect(await store.salvarAgora()).toBe(true)
       expect(adaptador.obras.get('o3')?.versaoEsquema).toBe(4)
+    })
+
+    /** Registro REAL do esquema 3 (formato do ciclo 00004): fixture do esquema 2 com os 3 cenários aplicados, passada pelo passo 2 → 3. */
+    const esquema3Real = (meta: Record<string, unknown> = {}) => {
+      const e = MIGRACOES.find((x) => x.de === 2)!.aplicar(JSON.parse(auroraCenarios))
+      return JSON.stringify({ ...e, meta: { ...(e.meta as Record<string, unknown>), ...meta } })
+    }
+    const abrirEsquema3 = async (json: string) => {
+      const adaptador = criarArmazenamentoMemoria(null)
+      const em = '2026-10-25T10:00:00.000Z'
+      adaptador.obras.set('o3', { id: 'o3', versaoEsquema: 3, json, atualizadoEm: em })
+      adaptador.indice = { versaoIndice: 1, obraAtivaId: 'o3', obras: [{ id: 'o3', nome: NOME_AURORA, atualizadoEm: em }] }
+      return { adaptador, store: await recarregar(adaptador) }
+    }
+
+    it('P-1 (registro real do esquema 3): abre no esquema 4 com os 3 cenários aplicados e desfazer cada um devolve o PR-1 (23/06/2027, +16, SPI 0,8883, CPI 0,9349)', async () => {
+      const { store } = await abrirEsquema3(esquema3Real())
+      expect(store.avisosCarga).toEqual([])
+      // calendário no formato de antes: 52 feriados fixos como exceção e nenhuma marca de "aplica feriados da obra"
+      expect(store.state.calendarios[0].aplicaFeriadosObra).toBeUndefined()
+      expect(store.state.calendarios[0].excecoes.filter((e) => e.intervalos.length === 0)).toHaveLength(52)
+      expect(store.state.appliedScenarios).toEqual(['crashing', 'fast-tracking', 'overtime'])
+      expect(store.schedule.projectFinish).toBe('2027-06-02') // a entrega gravada com os 3 cenários aplicados
+      expect(store.premissasVigentes.custoIndiretoDiario).toBe(9850)
+      store.undoScenario('overtime')
+      expect(store.state.appliedScenarios).toEqual(['crashing', 'fast-tracking'])
+      expect(store.state.calendarios[0].excecoes.filter((e) => e.intervalos.length > 0)).toEqual([]) // sem 24/10 e 31/10
+      store.undoScenario('fast-tracking')
+      expect(store.taskByUid.get(401)!.predecessors).toEqual([{ uid: 105, type: 'FS', lag: { tipo: 'util', minutos: 0 } }])
+      store.undoScenario('crashing')
+      expect(store.taskByUid.get(105)!.duracaoMin).toBe(7680)
+      expect(store.state.appliedScenarios).toEqual([])
+      expect(store.state.undo).toEqual([])
+      // PR-1 igual ao do seed, com as premissas migradas (indireto 9.850, margem 3)
+      expect([store.schedule.projectFinish, store.delay.delayDays]).toEqual(['2027-06-23', 16])
+      expect(store.evm.spi).toBeCloseTo(0.8883, 4)
+      expect(store.evm.cpi).toBeCloseTo(0.9349, 4)
+      expect(store.scenarios.crashing.extraCost).toBeCloseTo(12616.8, 2)
+      expect(store.scenarios['fast-tracking'].extraCost).toBeCloseTo(25350, 2)
+      expect(store.scenarios.overtime.extraCost).toBeCloseTo(22315.2, 2)
+      expect(store.scenarios.overtime.daysRecovered).toBe(2)
+      const dlp = store.supplies.find((x) => x.material.id === 'm-concreto')!
+      expect([dlp.needDate, dlp.dlp, dlp.status]).toEqual(['2026-11-05', '2026-10-30', 'atencao'])
+    })
+
+    it('P-2 (DLP): esquema 3 com indireto 11.000 e margem 7 mantém a DLP do m-concreto que o cálculo de antes dava (margem 7), e a v1 guarda os dois valores', async () => {
+      const { store } = await abrirEsquema3(esquema3Real({ dailyIndirectCost: 11000, safetyMarginDays: 7 }))
+      expect(store.avisosCarga).toEqual([])
+      expect(store.premissasVigentes.custoIndiretoDiario).toBe(11000)
+      expect(store.safetyMarginDays).toBe(7)
+      expect(store.state.premissas[0].valores.origens.margemDlpDias).toEqual({ origem: 'nao-documentada' })
+      const dlp = store.supplies.find((x) => x.material.id === 'm-concreto')!
+      // DLP = necessária − (lead time 3 + margem 7) = 2026-11-03 − 10 dias = 2026-10-24 (com os 3 cenários aplicados); antes da migração, o
+      // campo meta.safetyMarginDays = 7 dava a mesma conta (analyzeSupplies com a margem 7); com a margem padrão (3) seria 2026-10-28
+      const direto = analyzeSupplies(store.state.materials, store.state.tasks, store.schedule, store.state.meta.statusDate, store.state.restrictions, 7).find((x) => x.material.id === 'm-concreto')!
+      expect(dlp.dlp).toBe(direto.dlp)
+      expect([dlp.needDate, dlp.dlp, dlp.status]).toEqual(['2026-11-03', '2026-10-24', 'atencao'])
     })
 
     it('N-5: migra a v1 com apontamento aprovado (16/06/27, +11 d.u., UID 104 em 75%)', async () => {

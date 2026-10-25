@@ -18,6 +18,8 @@ export const MAX_TAXAS = 100
 export const MAX_FUNCAO = 60
 export const MAX_REFERENCIA = 120
 export const MAX_MOTIVO = 200
+/** Teto de versões por obra (o estado salvo cresce com cada uma). */
+export const MAX_VERSOES_PREMISSAS = 500
 const MAX_VALOR = 1e9
 
 export const ROTULO_ORIGEM_PREMISSA: Record<OrigemPremissa, string> = {
@@ -217,13 +219,14 @@ export function validarNovaVersao(versoes: readonly VersaoPremissas[], nova: Nov
 
 /** Valida a lista de versões lida do estado salvo: forma, sequência de números e valores. Lista vazia é inválida. */
 export function versoesValidas(v: unknown): boolean {
-  if (!Array.isArray(v) || v.length === 0) return false
+  if (!Array.isArray(v) || v.length === 0 || v.length > MAX_VERSOES_PREMISSAS) return false
   return v.every(
     (x, i) =>
       eObjeto(x) &&
       x.versao === i + 1 &&
       dataIsoExiste(x.vigencia) &&
       typeof x.motivo === 'string' &&
+      x.motivo.length <= MAX_MOTIVO &&
       (x.criadaEm === undefined || typeof x.criadaEm === 'string') &&
       validarPremissas(x.valores).length === 0,
   )

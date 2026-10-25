@@ -123,6 +123,7 @@ test('excluir pede confirmação e o Aurora migrado não volta, mesmo com a v1 a
   await expect(page.getByRole('row').filter({ hasText: NOME_AURORA })).toHaveCount(0)
 })
 
+// 7 → 8 módulos: entrou "Premissas" (ciclo 00005)
 test('os 8 módulos abrem na obra em branco sem erro de console', async ({ page }) => {
   await page.goto('/')
   await criarObraRecife(page)

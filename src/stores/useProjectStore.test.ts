@@ -579,3 +579,114 @@ describe('useProjectStore · hora extra por frente e meio período (ciclo 00005,
     expect(store.scenarioParams.overtime).toEqual({ saturdays: 2, jornada: 'integral', frentes: 'todas' })
   })
 })
+
+describe('useProjectStore · rodada 02 do ciclo 00005 (calendário de hora extra órfão, limites e reatividade)', () => {
+  beforeEach(() => {
+    globalThis.localStorage?.clear?.() // Node 26 pode expor localStorage indefinido
+    setActivePinia(createPinia())
+  })
+
+  const aplicarHE104 = (store: ReturnType<typeof useProjectStore>) => {
+    store.scenarioParams.overtime.frentes = [104]
+    expect(store.applyScenario(store.scenarios.overtime)).toEqual({ ok: true })
+  }
+  const MSG_HE = 'Este calendário foi criado por um cenário de hora extra e só vale para as frentes dele: não pode ser atribuído à mão (desfaça o cenário para removê-lo).'
+
+  it('B1(a): o calendário de hora extra não se atribui à mão, uma a uma nem em lote', () => {
+    const store = useProjectStore()
+    aplicarHE104(store)
+    expect(store.state.calendarios[1].origem).toBe('hora-extra')
+    expect(store.definirCalendarioTarefa(105, 2)).toEqual({ ok: false, erro: MSG_HE })
+    expect(store.atribuirCalendario([105, 106], 2)).toEqual({ ok: false, erro: MSG_HE })
+    expect(store.taskByUid.get(105)?.calendarioUid).toBeUndefined()
+  })
+
+  it('B1(b): desfazer a HE leva ao calendário padrão a tarefa que ainda aponta para o derivado, com registro no log', () => {
+    const store = useProjectStore()
+    aplicarHE104(store)
+    store.state.tasks.find((t) => t.uid === 105)!.calendarioUid = 2 // estado adulterado: atribuição que a tela já não permite
+    store.undoScenario('overtime')
+    expect(store.state.calendarios.map((c) => c.uid)).toEqual([1])
+    expect(store.taskByUid.get(105)?.calendarioUid).toBeUndefined()
+    expect(store.taskByUid.get(104)?.calendarioUid).toBeUndefined()
+    expect(store.erroCronograma).toBeUndefined()
+    expect(store.schedule.projectFinish).toBe('2027-06-23')
+    expect(store.state.log[0]).toMatchObject({ title: 'Calendários das tarefas ajustados ao desfazer' })
+    expect(store.state.log[0].detail).toBe('1 tarefa(s) apontavam para um calendário removido e voltaram ao calendário padrão: 03.01.03.')
+    // o MSPDI não sai com CalendarUID solto
+    expect(store.exportXml().xml).not.toContain('<CalendarUID>2</CalendarUID>')
+  })
+
+  it('B1(b): desfazer sobrescreve a atribuição feita depois da HE e avisa no log', () => {
+    const store = useProjectStore()
+    aplicarHE104(store)
+    store.criarCalendario({ nome: 'Fachada' }) // uid 3 (o 2 é o derivado)
+    expect(store.atribuirCalendario([104], 3)).toEqual({ ok: true })
+    store.undoScenario('overtime')
+    expect(store.taskByUid.get(104)?.calendarioUid).toBeUndefined() // voltou ao calendário de antes (o padrão)
+    expect(store.state.calendarios.map((c) => c.uid)).toEqual([1, 3])
+    expect(store.state.log[0].title).toBe('Calendários das tarefas ajustados ao desfazer')
+    expect(store.state.log[0].detail).toBe('[UID 104] 03.01.02: o calendário atribuído depois da hora extra foi desfeito; a tarefa voltou ao calendário de antes.')
+  })
+
+  it('Segurança 4: o undo adulterado nunca remove o calendário padrão nem aponta a tarefa para calendário inexistente', () => {
+    const store = useProjectStore()
+    aplicarHE104(store)
+    const u = store.state.undo[0]
+    u.calendariosCriados = [1, 2, 99, 2.5] // o 1 é o padrão
+    u.calendariosAntes = [{ uid: 104, calendarioUid: 999 }, { uid: 105, calendarioUid: 1.5 }]
+    store.undoScenario('overtime')
+    expect(store.state.calendarios.map((c) => c.uid)).toEqual([1]) // o padrão ficou; o derivado saiu
+    expect(store.taskByUid.get(104)?.calendarioUid).toBeUndefined()
+    expect(store.erroCronograma).toBeUndefined()
+  })
+
+  it('Segurança 2: aplicar uma simulação velha sem espaço para o calendário derivado é recusado (100 calendários)', () => {
+    const store = useProjectStore()
+    store.scenarioParams.overtime.frentes = [104]
+    const r = store.scenarios.overtime
+    expect(r.horaExtra?.calendariosNovos).toHaveLength(1)
+    while (store.state.calendarios.length < 100) store.state.calendarios.push({ ...store.state.calendarios[0], uid: 100 + store.state.calendarios.length, nome: `Cal ${store.state.calendarios.length}` })
+    expect(store.applyScenario(r)).toEqual({ ok: false, erro: 'Não há espaço para o calendário da hora extra: a obra já tem 100 calendários (máximo 100).' })
+    expect(store.state.appliedScenarios).toEqual([])
+    expect(store.scenarios.overtime.reason).toBe('Não há espaço para o calendário da hora extra: a obra já tem 100 calendários (máximo 100).')
+  })
+
+  it('Segurança 3: exportação com exceções demais (feriados da obra × calendários) é recusada com mensagem, e não gera arquivo que não reimporta inteiro', () => {
+    const store = useProjectStore()
+    expect(store.exportXml().validation.valid).toBe(true)
+    while (store.state.calendarios.length < 100) store.state.calendarios.push({ ...store.state.calendarios[0], uid: 100 + store.state.calendarios.length, nome: `Cal ${store.state.calendarios.length}` })
+    for (let i = 0; i < 200; i++) {
+      const d = new Date(Date.UTC(2026, 0, 1 + i))
+      store.state.feriados.manuais.push({ id: `f${i}`, data: d.toISOString().slice(0, 10), nome: `F${i}`, abrangencia: 'outro', fonte: 'Fonte fictícia', recorrenteAnual: true })
+    }
+    const x = store.exportXml()
+    expect(x.xml).toBe('')
+    expect(x.validation.valid).toBe(false)
+    expect(x.validation.errors[0]).toMatch(/^A exportação teria [\d.]+ exceções de calendário .* acima do limite de 10\.000 que o importador aceita\./)
+    expect(x.filename).toBe('')
+  })
+
+  it('Segurança 5: no máximo 500 versões de premissas por obra', () => {
+    const store = useProjectStore()
+    while (store.state.premissas.length < 500) store.state.premissas.push({ ...JSON.parse(JSON.stringify(store.state.premissas[0])), versao: store.state.premissas.length + 1 })
+    const r = store.criarVersaoPremissas({ vigencia: '2026-10-23', motivo: 'x', valores: JSON.parse(JSON.stringify(store.premissasVigentes)) })
+    expect(r).toEqual({ ok: false, erro: 'No máximo 500 versões de premissas por obra.' })
+    expect(store.state.premissas).toHaveLength(500)
+  })
+
+  // R-3: o simulador lê tarefas, calendários e meta por toRaw (sem o proxy do Vue, ~4x mais rápido com 3.000 tarefas) e só reavalia porque
+  // `schedule` (que lê tudo isso por clone) muda junto. Este teste trava a regressão: editar unidades de recurso ou BAC tem de refazer os cenários.
+  it('R-3 (guarda de reatividade): editar as unidades de um recurso ou o BAC de tarefas dos cenários muda o custo dos cenários', () => {
+    const store = useProjectStore()
+    const antes = { crashing: store.scenarios.crashing.extraCost, ft: store.scenarios['fast-tracking'].extraCost, he: store.scenarios.overtime.extraCost }
+    const t105 = store.taskByUid.get(105)!
+    expect(store.updateTask(105, { resources: t105.resources.map((r) => (r.resource === 'Pedreiro' ? { ...r, units: 10 } : { ...r })) })).toEqual({ ok: true })
+    expect(store.scenarios.crashing.extraCost).not.toBeCloseTo(antes.crashing, 2) // a equipe de 105 mudou: duração nova e custo de mão de obra
+    expect(store.updateTask(401, { bac: 1_000_000 })).toEqual({ ok: true })
+    expect(store.scenarios['fast-tracking'].extraCost).toBeCloseTo(1_000_000 * 0.04 * (13 / 16), 2) // contingência = BAC × 4% × sobreposição de 13/16
+    expect(store.scenarios['fast-tracking'].extraCost).not.toBeCloseTo(antes.ft, 2)
+    expect(store.updateTask(302, { resources: [{ resource: 'Pedreiro', units: 1 }] })).toEqual({ ok: true })
+    expect(store.scenarios.overtime.extraCost).not.toBeCloseTo(antes.he, 2) // a equipe do 302 convocada na hora extra mudou
+  })
+})

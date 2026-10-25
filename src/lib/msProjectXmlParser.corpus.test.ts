@@ -281,6 +281,9 @@ function relatorioMd(): string {
 // Teste
 // ---------------------------------------------------------------------------
 
+// Sem feriados no arquivo: o calendário do projeto está sem feriados, ou nem veio (aviso próprio, ciclo 00005, rodada 02)
+const SEM_FERIADOS = /^(O calendário do arquivo não traz feriados. O CronoAI não acrescentou nenhum|O calendário do projeto não veio no arquivo)/
+
 const arquivos = REF_DIR ? listXml(CORPUS_DIR) : []
 
 describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () => {
@@ -365,7 +368,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       confere(est.nulas, `${est.nulas} linha(s) em branco (tarefa nula) ignorada(s).`, /em branco/)
       // Calendário lido = o do arquivo (lista legada + exceções simples); arquivo sem feriado nenhum recebe os nacionais, com aviso
       if (est.folgas.length) expect(feriadosDe(r)).toEqual(est.folgas)
-      else expect(w.some((a) => a.startsWith('O calendário do arquivo não traz feriados. O CronoAI não acrescentou nenhum'))).toBe(true)
+      else expect(w.some((a) => SEM_FERIADOS.test(a))).toBe(true)
       // Ciclo 00005 (P3): o import não injeta mais feriados nacionais; antes, o aviso era "Calendário sem feriados no XML; aplicados os feriados nacionais brasileiros."
       expect(w.some((a) => a.startsWith('Calendário sem feriados'))).toBe(false)
       expect(r.meta.feriadosNacionaisAplicados).toBeUndefined()
@@ -444,7 +447,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       if (!importado || !importado.linha.vinculosArquivo) return
       const { linha, r } = importado
       const inicio = r.meta.startDate ?? '2026-01-05'
-      const semFeriadosNoArquivo = r.warnings.some((a) => a.startsWith('O calendário do arquivo não traz feriados'))
+      const semFeriadosNoArquivo = r.warnings.some((a) => SEM_FERIADOS.test(a))
       const calcular = (calendarios: CalendarioObra[]) =>
         computeSchedule(r.tasks, compilarCalendarios(inicio, calendarios, r.calendarioPadraoUid), { mode: 'baseline', statusDate: r.meta.statusDate ?? inicio })
       // O calendário importado COMO ESTÁ (o import não acrescenta feriados): é o que o CronoAI calcula hoje

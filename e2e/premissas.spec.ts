@@ -81,3 +81,23 @@ test('hora extra em meio período: 1 d.u. e R$ 11.158 (4 h de sábado, adicional
   await expect(he).toContainText(`+ R$${ESPACO}11.158`)
   await expect(he).toContainText('−1')
 })
+
+test('hora extra: com "Escolher as frentes" e nenhuma frente marcada o cartão não mostra risco, só a mensagem', async ({ page }) => {
+  await page.goto('/#/caminho-critico')
+  const he = cartaoCenario(page, 'Hora Extra (Sábados)')
+  await expect(he).toContainText('Risco Médio') // todas as frentes: o risco de sempre
+  await he.getByLabel('Escolher as frentes').check()
+  await expect(he).toContainText('Escolha ao menos uma frente')
+  await expect(he).not.toContainText('Risco Baixo')
+  await expect(he).not.toContainText('Risco Médio')
+  await expect(he).toContainText('Risco —')
+})
+
+test('premissas: a coluna Origem mostra o texto inteiro (sem cortar) a 800 px', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 900 })
+  await page.goto('/#/premissas')
+  const origem = page.getByLabel('Origem do custo indireto')
+  await expect(origem).toBeVisible()
+  const { cliente, rolagem } = await origem.evaluate((el) => ({ cliente: el.clientWidth, rolagem: el.scrollWidth }))
+  expect(rolagem).toBeLessThanOrEqual(cliente + 1)
+})

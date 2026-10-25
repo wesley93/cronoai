@@ -12,7 +12,7 @@ export function useMsProject() {
   function exportXml() {
     const { filename, xml, validation, avisos } = project.exportXml()
     if (!validation.valid) {
-      ui.notify('error', 'XML não exportado: falhou na validação MSPDI', validation.errors.slice(0, 2).join(' '))
+      ui.notify('error', 'XML não exportado', validation.errors.slice(0, 2).join(' '))
       return
     }
     downloadText(filename, xml)

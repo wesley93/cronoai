@@ -134,7 +134,7 @@ watch(
           </td>
           <td class="whitespace-nowrap text-zinc-500">R$ por dia útil</td>
           <td>
-            <select class="input py-1 text-xs" aria-label="Origem do custo indireto" :value="origemDe('custoIndiretoDiario')" @change="definirOrigem('custoIndiretoDiario', ($event.target as HTMLSelectElement).value)">
+            <select class="input min-w-[12.5rem] py-1 text-xs" aria-label="Origem do custo indireto" :value="origemDe('custoIndiretoDiario')" @change="definirOrigem('custoIndiretoDiario', ($event.target as HTMLSelectElement).value)">
               <option v-for="o in ORIGENS_PREMISSA" :key="o" :value="o">{{ ROTULO_ORIGEM_PREMISSA[o] }}</option>
             </select>
           </td>
@@ -160,7 +160,7 @@ watch(
           </td>
           <td class="whitespace-nowrap text-zinc-500">{{ l.unidade }}</td>
           <td>
-            <select class="input py-1 text-xs" :aria-label="`Origem: ${l.rotulo}`" :value="origemDe(l.chave)" @change="definirOrigem(l.chave, ($event.target as HTMLSelectElement).value)">
+            <select class="input min-w-[12.5rem] py-1 text-xs" :aria-label="`Origem: ${l.rotulo}`" :value="origemDe(l.chave)" @change="definirOrigem(l.chave, ($event.target as HTMLSelectElement).value)">
               <option v-if="l.opcional" value="">Não informada</option>
               <option v-for="o in ORIGENS_PREMISSA" :key="o" :value="o">{{ ROTULO_ORIGEM_PREMISSA[o] }}</option>
             </select>

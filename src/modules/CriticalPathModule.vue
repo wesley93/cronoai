@@ -222,7 +222,7 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
             </div>
             <fieldset class="space-y-1.5 text-[12px]">
               <legend class="label">Frentes convocadas</legend>
-              <label class="flex items-start gap-2"><input v-model="modoFrentes" type="radio" value="todas" class="mt-0.5 accent-amber-500" /> Todas as frentes (os sábados entram no calendário padrão)</label>
+              <label class="flex items-start gap-2"><input v-model="modoFrentes" type="radio" value="todas" class="mt-0.5 accent-amber-500" /> Todas as frentes do calendário padrão (os sábados entram nesse calendário)</label>
               <label class="flex items-start gap-2"><input v-model="modoFrentes" type="radio" value="escolher" class="mt-0.5 accent-amber-500" /> Escolher as frentes</label>
             </fieldset>
             <div v-if="modoFrentes === 'escolher'" class="space-y-2" data-testid="he-frentes">

@@ -210,3 +210,13 @@ describe('texto das premissas de cenário na tela', () => {
     expect(descreverPremissasDeCenario(doc)).toContain('adicional de 60% na hora extra vêm das premissas da obra.')
   })
 })
+
+describe('versões salvas: limites (segurança do estado lido do IndexedDB)', () => {
+  it('motivo de até 200 caracteres e no máximo 500 versões', () => {
+    const v = (n: number, motivo = 'ok'): VersaoPremissas => ({ ...versao(n, '2026-05-04'), motivo })
+    expect(versoesValidas([v(1, 'm'.repeat(200))])).toBe(true)
+    expect(versoesValidas([v(1, 'm'.repeat(201))])).toBe(false)
+    expect(versoesValidas(Array.from({ length: 500 }, (_, i) => v(i + 1)))).toBe(true)
+    expect(versoesValidas(Array.from({ length: 501 }, (_, i) => v(i + 1)))).toBe(false)
+  })
+})

@@ -58,7 +58,7 @@ import {
 import { computeSchedule, optsDaObra, withBaseline } from '@/lib/cpm'
 import { computeEvm, computePackageEvm, computeSCurve, eacVariants, forecastFinishBySpi, plannedFraction } from '@/lib/evm'
 import { interpretReport } from '@/lib/fieldAi'
-import { buildMspdiXml, buildTaskXml, lagParaMspdi, parseMspdiXml, validateMspdi, type MspdiValidation } from '@/lib/msProjectXmlParser'
+import { MAX_CALENDAR_DAYS, buildMspdiXml, buildTaskXml, lagParaMspdi, parseMspdiXml, validateMspdi, type MspdiValidation } from '@/lib/msProjectXmlParser'
 import {
   DEFAULT_SCENARIO_PARAMS,
   analyzeDelay,
@@ -72,7 +72,7 @@ import {
   type ScenarioResult,
 } from '@/lib/scenarios'
 import { analyzeSupplies } from '@/lib/supplies'
-import { premissasPadrao, validarNovaVersao, versaoVigente, type NovaVersaoPremissas } from '@/lib/premissas'
+import { MAX_VERSOES_PREMISSAS, premissasPadrao, validarNovaVersao, versaoVigente, type NovaVersaoPremissas } from '@/lib/premissas'
 import {
   calendariosParaExportar,
   configFeriadosPadrao,
@@ -856,6 +856,7 @@ export const useProjectStore = defineStore('project', () => {
     const expedienteHE = he?.jornada === 'meio' ? intervalosDaPredefinicao('quatro-horas') : undefined
     const novos = he?.calendariosNovos ?? []
     const atribuicoes = he?.atribuicoes ?? []
+    if (state.calendarios.length + novos.length > MAX_CALENDARIOS) return { ok: false, erro: `Não há espaço para o calendário da hora extra: a obra já tem ${state.calendarios.length} calendários (máximo ${MAX_CALENDARIOS}).` }
     if (novos.some((n) => state.calendarios.some((c) => c.uid === n.uid))) return { ok: false, erro: 'Os calendários mudaram desde a simulação: confira o cenário e aplique de novo.' }
     // Hipótese: a tarefa alterada e os calendários com os dias extras; recusa se estourar o horizonte
     const comPatch = result.taskPatch ? state.tasks.map((t) => (t.uid === result.taskPatch!.uid ? { ...t, ...clone(result.taskPatch!.patch) } : t)) : state.tasks
@@ -907,20 +908,43 @@ export const useProjectStore = defineStore('project', () => {
     const u = state.undo[idx]
     if (u.taskUid !== undefined && u.before) patchTask(u.taskUid, clone(u.before))
     if (u.addedDays) atualizarCalendarioPadrao((c) => semDiasExtras(c, u.addedDays!))
-    // Hora extra por frente: cada tarefa volta ao calendário de antes e os calendários derivados saem da obra
-    if (u.calendariosAntes?.length) {
+    // Hora extra por frente: cada tarefa volta ao calendário de antes e os calendários derivados saem da obra. O que veio do estado salvo é
+    // conferido: só sai da obra calendário criado por hora extra e nunca o calendário padrão.
+    const avisosHE: string[] = []
+    const criados = new Set((u.calendariosCriados ?? []).filter((id) => Number.isInteger(id) && id !== state.calendarioPadraoUid && state.calendarios.some((c) => c.uid === id && c.origem === 'hora-extra')))
+    if (criados.size || u.calendariosAntes?.length) {
+      const antesValidos = (u.calendariosAntes ?? []).filter(
+        (x) => !!x && Number.isInteger(x.uid) && (x.calendarioUid === undefined || (Number.isInteger(x.calendarioUid) && state.calendarios.some((c) => c.uid === x.calendarioUid && !criados.has(c.uid)))),
+      )
+      const derivadoDe = (taskUid: number) => u.result.horaExtra?.atribuicoes.find((x) => x.uid === taskUid)?.calendarioUid
       state.tasks = state.tasks.map((t) => {
-        const antes = u.calendariosAntes!.find((a) => a.uid === t.uid)
+        const antes = antesValidos.find((x) => x.uid === t.uid)
         if (!antes) return t
+        const esperado = derivadoDe(t.uid)
+        // atribuição feita depois da hora extra (a tarefa já não usa o derivado do cenário) é sobrescrita: avisa
+        if (esperado !== undefined && t.calendarioUid !== esperado) avisosHE.push(`[UID ${t.uid}] ${t.wbs}: o calendário atribuído depois da hora extra foi desfeito; a tarefa voltou ao calendário de antes.`)
         const { calendarioUid: _derivado, ...resto } = t
         return antes.calendarioUid === undefined ? resto : { ...resto, calendarioUid: antes.calendarioUid }
       })
+      state.calendarios = state.calendarios.filter((c) => !criados.has(c.uid))
+      // Tarefa que ainda aponte para um calendário removido (ex.: atribuída à mão ao derivado) volta ao calendário padrão
+      const existentes = new Set(state.calendarios.map((c) => c.uid))
+      const orfas = state.tasks.filter((t) => t.calendarioUid !== undefined && !existentes.has(t.calendarioUid))
+      if (orfas.length) {
+        const uidsOrfas = new Set(orfas.map((t) => t.uid))
+        state.tasks = state.tasks.map((t) => {
+          if (!uidsOrfas.has(t.uid)) return t
+          const { calendarioUid: _removido, ...resto } = t
+          return resto
+        })
+        avisosHE.push(`${orfas.length} tarefa(s) apontavam para um calendário removido e voltaram ao calendário padrão: ${orfas.map((t) => t.wbs).join(', ')}.`)
+      }
     }
-    if (u.calendariosCriados?.length) state.calendarios = state.calendarios.filter((c) => !u.calendariosCriados!.includes(c.uid))
     state.recoveryCosts = state.recoveryCosts.filter((c) => c.id !== u.costId)
     state.appliedScenarios = state.appliedScenarios.filter((k) => k !== kind)
     state.undo.splice(idx, 1)
     log('cenario', 'Cenário desfeito', `Cenário "${kind}" revertido; cronograma recalculado.`)
+    if (avisosHE.length) log('cenario', 'Calendários das tarefas ajustados ao desfazer', avisosHE.join(' '))
   }
 
   // ---------------------------------------------------------------- Módulo 3
@@ -949,6 +973,7 @@ export const useProjectStore = defineStore('project', () => {
    * grava a versão imutável e registra no log. As versões antigas nunca são alteradas nem apagadas.
    */
   function criarVersaoPremissas(nova: NovaVersaoPremissas): ResultadoAcao {
+    if (state.premissas.length >= MAX_VERSOES_PREMISSAS) return { ok: false, erro: `No máximo ${MAX_VERSOES_PREMISSAS} versões de premissas por obra.` }
     const erros = validarNovaVersao(state.premissas, nova)
     if (erros.length) return { ok: false, erro: erros[0] }
     const versao = state.premissas.reduce((m, v) => Math.max(m, v.versao), 0) + 1
@@ -1263,10 +1288,18 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function exportXml(): { filename: string; xml: string; validation: MspdiValidation; avisos: string[] } {
+    // Recusa o arquivo que o importador não reimportaria inteiro: a soma das exceções dos calendários (com os feriados da obra materializados)
+    // passa do limite do import (MAX_CALENDAR_DAYS). Recusar, e não cortar, evita um .xml com feriados faltando.
+    const calendariosExport = calendariosDeExportacao()
+    const excecoes = calendariosExport.reduce((n, c) => n + c.excecoes.length, 0)
+    if (excecoes > MAX_CALENDAR_DAYS) {
+      const erro = `A exportação teria ${excecoes.toLocaleString('pt-BR')} exceções de calendário (os feriados da obra viram exceções em cada calendário que os aplica), acima do limite de ${MAX_CALENDAR_DAYS.toLocaleString('pt-BR')} que o importador aceita. Reduza o número de calendários que aplicam os feriados da obra, os feriados cadastrados ou o prazo da obra.`
+      return { filename: '', xml: '', validation: { valid: false, errors: [erro], warnings: [], taskCount: 0, linkCount: 0 }, avisos: [] }
+    }
     const xml = buildMspdiXml({
       meta: state.meta,
       tasks: state.tasks,
-      calendarios: calendariosDeExportacao(),
+      calendarios: calendariosExport,
       calendarioPadraoUid: state.calendarioPadraoUid,
       schedule: schedule.value,
     })
@@ -1373,11 +1406,18 @@ export const useProjectStore = defineStore('project', () => {
     return { ok: true }
   }
 
+  const MSG_CALENDARIO_HE = 'Este calendário foi criado por um cenário de hora extra e só vale para as frentes dele: não pode ser atribuído à mão (desfaça o cenário para removê-lo).'
+  /** Calendário criado por um cenário de hora extra: só o cenário atribui e só o "desfazer" remove. */
+  function ehCalendarioDeHoraExtra(uidCal: number | undefined): boolean {
+    return uidCal !== undefined && state.calendarios.find((c) => c.uid === uidCal)?.origem === 'hora-extra'
+  }
+
   /** Escolhe um calendário existente para a tarefa (`undefined` = calendário padrão da obra). Criar e editar calendários: seção seguinte. */
   function definirCalendarioTarefa(taskUid: number, calendarioUid?: number): ResultadoAcao {
     const alvo = tarefaFolha(taskUid)
     if (!alvo.ok) return alvo
     if (!calendarioExiste(state.calendarios, calendarioUid)) return { ok: false, erro: 'O calendário escolhido não existe nesta obra.' }
+    if (ehCalendarioDeHoraExtra(calendarioUid)) return { ok: false, erro: MSG_CALENDARIO_HE }
     const { calendarioUid: _antigo, ...resto } = alvo.tarefa
     const idx = state.tasks.findIndex((t) => t.uid === taskUid)
     const nova: Task = calendarioUid !== undefined && calendarioUid !== state.calendarioPadraoUid ? { ...resto, calendarioUid } : resto
@@ -1511,6 +1551,7 @@ export const useProjectStore = defineStore('project', () => {
   function atribuirCalendario(uids: number[], calendarioUid?: number): ResultadoAcao {
     if (!uids.length) return { ok: false, erro: 'Nenhuma tarefa selecionada.' }
     if (!calendarioExiste(state.calendarios, calendarioUid)) return { ok: false, erro: 'O calendário escolhido não existe nesta obra.' }
+    if (ehCalendarioDeHoraExtra(calendarioUid)) return { ok: false, erro: MSG_CALENDARIO_HE }
     const alvos = new Set<number>()
     for (const u of uids) {
       const alvo = tarefaFolha(u)

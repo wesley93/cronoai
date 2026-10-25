@@ -54,7 +54,7 @@ function remover(i: number) {
           </td>
           <td class="text-right tabular-nums">{{ fmtBRLCents(taxaEfetiva(t, encargosSociaisPct)) }}</td>
           <td>
-            <select class="input py-1 text-xs" :aria-label="`Origem da taxa: ${t.funcao}`" :value="t.origem" @change="alterarOrigem(i, ($event.target as HTMLSelectElement).value)">
+            <select class="input min-w-[12.5rem] py-1 text-xs" :aria-label="`Origem da taxa: ${t.funcao}`" :value="t.origem" @change="alterarOrigem(i, ($event.target as HTMLSelectElement).value)">
               <option v-for="o in ORIGENS_PREMISSA" :key="o" :value="o">{{ ROTULO_ORIGEM_PREMISSA[o] }}</option>
             </select>
           </td>

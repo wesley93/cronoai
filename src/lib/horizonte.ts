@@ -53,7 +53,8 @@ export function calcularObra(
   calendarioPadraoUid: number,
   opcoes: { comLinhaDeBase?: boolean; feriados?: ConfigFeriadosObra } = {},
 ): CalculoObra {
-  // Feriados da obra: gerados por ano para os calendários com `aplicaFeriadosObra` (sem configuração, nenhum é aplicado)
+  // Feriados da obra: gerados por ano para os calendários com `aplicaFeriadosObra`; sem configuração, a compilação usa a padrão
+  // (nacionais, Carnaval e Corpus Christi), como numa obra sem `feriados` salvo
   const feriadosPorAno = opcoes.feriados ? criarFeriadosPorAno(opcoes.feriados) : undefined
   const cals = compilarCalendarios(meta.startDate, calendarios, calendarioPadraoUid, { feriadosPorAno })
   const calsPv = compilarCalendarios(meta.startDate, calendarios, calendarioPadraoUid, { semExcecoesUteis: true, feriadosPorAno })

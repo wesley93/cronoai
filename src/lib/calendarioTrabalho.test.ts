@@ -387,3 +387,24 @@ describe('calendários alternativos do editor (ciclo 00005, CS-1 a CS-5)', () =>
     expect(proximoUidCalendario([])).toBe(1)
   })
 })
+
+// D3 (ciclo 00005): calendário com `aplicaFeriadosObra` e SEM gerador de feriados usa a configuração padrão (nacionais, Carnaval e Corpus
+// Christi), como a obra sem `feriados` salvo. Sem a marca, nenhum feriado é aplicado.
+describe('compilarCalendarios: feriados da obra sem gerador (regra D3)', () => {
+  const marcado: CalendarioObra = { ...calendarioPadrao([]), aplicaFeriadosObra: true }
+  const livre = calendarioPadrao([])
+  it('com a marca e sem gerador: Natal, Carnaval e Corpus Christi não são úteis (padrão ligado)', () => {
+    const c = compilarCalendarios('2026-08-03', [marcado], 1).padrao
+    expect(['2026-12-25', '2027-02-08', '2027-02-09', '2027-05-27', '2026-11-20'].map((d) => c.dataUtil(d))).toEqual([false, false, false, false, false])
+    expect(c.dataUtil('2026-12-24')).toBe(true)
+  })
+  it('sem a marca: nenhum feriado é aplicado, mesmo sem gerador', () => {
+    const c = compilarCalendarios('2026-08-03', [livre], 1).padrao
+    expect(['2026-12-25', '2027-02-08', '2027-05-27'].map((d) => c.dataUtil(d))).toEqual([true, true, true])
+  })
+  it('com um gerador explícito, vale o gerador (Carnaval desligado: 08/02/2027 volta a ser útil)', () => {
+    const semCarnaval = (ano: number) => new Set(ano === 2027 ? ['2027-05-27'] : [])
+    const c = compilarCalendarios('2026-08-03', [marcado], 1, { feriadosPorAno: semCarnaval }).padrao
+    expect([c.dataUtil('2027-02-08'), c.dataUtil('2027-05-27'), c.dataUtil('2026-12-25')]).toEqual([true, false, true])
+  })
+})

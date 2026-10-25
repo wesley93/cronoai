@@ -133,6 +133,7 @@ const cellInput =
         <span class="font-mono text-zinc-500">DLP = Necessária − Lead time −</span>
         <span class="font-mono tabular-nums" aria-label="Margem de segurança em dias">{{ project.safetyMarginDays }}</span>
         <span class="font-mono text-zinc-500">dias (definida nas premissas da obra)</span>
+        <button type="button" class="font-sans text-[11px] font-semibold underline" @click="ui.current = 'premissas'">Alterar nas premissas</button>
       </label>
       <button class="btn-primary" @click="showForm = !showForm"><PackagePlus class="h-3.5 w-3.5" /> Novo insumo</button>
     </ModuleHeader>

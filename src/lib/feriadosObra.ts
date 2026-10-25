@@ -17,18 +17,48 @@ export function configFeriadosPadrao(): ConfigFeriadosObra {
   return { nacionais: true, carnaval: true, corpusChristi: true, manuais: [] }
 }
 
-/** Confere a forma da configuração lida do estado salvo (o conteúdo dos feriados manuais é validado por `validarFeriadoManual`). */
+const eObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/**
+ * Lê a configuração do estado salvo (dado externo): a forma (três opções booleanas e a lista) e cada feriado manual com as mesmas regras de
+ * `validarFeriadoManual` (tipos e tamanhos). Feriado inválido é descartado e contado; mais de 200 também. Sem a forma, `config` é
+ * indefinido. Os feriados válidos são recriados campo a campo (campo desconhecido não passa).
+ */
+export function sanearConfigFeriados(v: unknown): { config?: ConfigFeriadosObra; descartados: number } {
+  if (!eObj(v) || typeof v.nacionais !== 'boolean' || typeof v.carnaval !== 'boolean' || typeof v.corpusChristi !== 'boolean' || !Array.isArray(v.manuais)) {
+    return { descartados: 0 }
+  }
+  const manuais: FeriadoManual[] = []
+  let descartados = 0
+  for (const m of v.manuais) {
+    if (!eObj(m) || typeof m.id !== 'string' || m.id === '' || m.id.length > 60 || validarFeriadoManual(m).length > 0 || manuais.length >= MAX_FERIADOS_MANUAIS) {
+      descartados++
+      continue
+    }
+    const abrangencia = ABRANGENCIAS_FERIADO.find((a) => a === m.abrangencia)
+    if (!abrangencia || typeof m.data !== 'string' || typeof m.nome !== 'string' || typeof m.fonte !== 'string' || typeof m.recorrenteAnual !== 'boolean') {
+      descartados++
+      continue
+    }
+    const uf = UFS.find((u) => u.sigla === m.uf)?.sigla
+    manuais.push({
+      id: m.id,
+      data: m.data,
+      nome: m.nome.trim(),
+      abrangencia,
+      fonte: m.fonte.trim(),
+      recorrenteAnual: m.recorrenteAnual,
+      ...(uf ? { uf } : {}),
+      ...(typeof m.municipio === 'string' && m.municipio.trim() ? { municipio: m.municipio.trim() } : {}),
+    })
+  }
+  return { config: { nacionais: v.nacionais, carnaval: v.carnaval, corpusChristi: v.corpusChristi, manuais }, descartados }
+}
+
+/** A configuração está íntegra: forma certa e nenhum feriado manual descartável. */
 export function configFeriadosValida(v: unknown): boolean {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
-  const c = v as Record<string, unknown>
-  return (
-    typeof c.nacionais === 'boolean' &&
-    typeof c.carnaval === 'boolean' &&
-    typeof c.corpusChristi === 'boolean' &&
-    Array.isArray(c.manuais) &&
-    c.manuais.length <= MAX_FERIADOS_MANUAIS &&
-    c.manuais.every((m) => typeof m === 'object' && m !== null && typeof (m as FeriadoManual).data === 'string' && typeof (m as FeriadoManual).recorrenteAnual === 'boolean')
-  )
+  const r = sanearConfigFeriados(v)
+  return r.config !== undefined && r.descartados === 0
 }
 
 const anoBissexto = (ano: number) => (ano % 4 === 0 && ano % 100 !== 0) || ano % 400 === 0
@@ -81,24 +111,33 @@ export function faixaDeAnosDaExportacao(anoInicio: number, anoTerminoPrevisto: n
 
 export type NovoFeriadoManual = Omit<FeriadoManual, 'id'>
 
-/** Valida um feriado manual (dado do usuário); lista vazia = válido. A fonte é obrigatória. */
-export function validarFeriadoManual(f: NovoFeriadoManual, existentes: readonly FeriadoManual[] = []): string[] {
+/**
+ * Valida um feriado manual (dado do usuário ou do estado salvo, por isso `unknown`); lista vazia = válido. A fonte é obrigatória e os textos
+ * têm limite de tamanho.
+ */
+export function validarFeriadoManual(entrada: unknown, existentes: readonly FeriadoManual[] = []): string[] {
+  if (!eObj(entrada)) return ['O feriado está em formato inválido.']
   const erros: string[] = []
-  const dataOk = typeof f.data === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f.data) && toISO(parseISO(f.data)) === f.data
+  const data = entrada.data
+  const dataOk = typeof data === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data) && toISO(parseISO(data)) === data
   if (!dataOk) erros.push('Informe uma data válida para o feriado.')
-  else if (Number(f.data.slice(0, 4)) < ANO_MIN || Number(f.data.slice(0, 4)) > ANO_MAX) erros.push(`O ano do feriado deve estar entre ${ANO_MIN} e ${ANO_MAX}.`)
-  const nome = (f.nome ?? '').trim()
-  if (!nome) erros.push('Informe o nome do feriado.')
+  else if (Number(data.slice(0, 4)) < ANO_MIN || Number(data.slice(0, 4)) > ANO_MAX) erros.push(`O ano do feriado deve estar entre ${ANO_MIN} e ${ANO_MAX}.`)
+  const nome = typeof entrada.nome === 'string' ? entrada.nome.trim() : undefined
+  if (nome === undefined) erros.push('O nome do feriado deve ser um texto.')
+  else if (!nome) erros.push('Informe o nome do feriado.')
   else if (nome.length > MAX_NOME_FERIADO) erros.push(`O nome do feriado deve ter no máximo ${MAX_NOME_FERIADO} caracteres.`)
-  const fonte = (f.fonte ?? '').trim()
-  if (!fonte) erros.push('Informe a fonte do feriado (lei, decreto ou ato oficial).')
+  const fonte = typeof entrada.fonte === 'string' ? entrada.fonte.trim() : undefined
+  if (fonte === undefined) erros.push('A fonte do feriado deve ser um texto.')
+  else if (!fonte) erros.push('Informe a fonte do feriado (lei, decreto ou ato oficial).')
   else if (fonte.length > MAX_FONTE_FERIADO) erros.push(`A fonte deve ter no máximo ${MAX_FONTE_FERIADO} caracteres.`)
-  if (!ABRANGENCIAS_FERIADO.some((a) => a === f.abrangencia)) erros.push('Selecione a abrangência do feriado.')
-  if (f.uf !== undefined && !UFS.some((u) => u.sigla === f.uf)) erros.push('Selecione uma UF válida.')
-  if ((f.municipio ?? '').trim().length > MAX_MUNICIPIO_FERIADO) erros.push(`O município deve ter no máximo ${MAX_MUNICIPIO_FERIADO} caracteres.`)
-  if (typeof f.recorrenteAnual !== 'boolean') erros.push('Informe se o feriado se repete todo ano.')
+  if (!ABRANGENCIAS_FERIADO.some((a) => a === entrada.abrangencia)) erros.push('Selecione a abrangência do feriado.')
+  if (entrada.uf !== undefined && !UFS.some((u) => u.sigla === entrada.uf)) erros.push('Selecione uma UF válida.')
+  if (entrada.municipio !== undefined && (typeof entrada.municipio !== 'string' || entrada.municipio.trim().length > MAX_MUNICIPIO_FERIADO)) {
+    erros.push(typeof entrada.municipio !== 'string' ? 'O município deve ser um texto.' : `O município deve ter no máximo ${MAX_MUNICIPIO_FERIADO} caracteres.`)
+  }
+  if (typeof entrada.recorrenteAnual !== 'boolean') erros.push('Informe se o feriado se repete todo ano.')
   if (existentes.length >= MAX_FERIADOS_MANUAIS) erros.push(`No máximo ${MAX_FERIADOS_MANUAIS} feriados manuais por obra.`)
-  if (dataOk && existentes.some((e) => e.data === f.data && e.nome.trim().toLowerCase() === nome.toLowerCase())) erros.push('Este feriado já está cadastrado.')
+  if (dataOk && nome && existentes.some((e) => e.data === data && e.nome.trim().toLowerCase() === nome.toLowerCase())) erros.push('Este feriado já está cadastrado.')
   return erros
 }
 

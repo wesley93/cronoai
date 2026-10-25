@@ -131,7 +131,9 @@ export function erroDoCalendario(cal: CalendarioObra): string | undefined {
   return temTempoNaSemana ? undefined : 'a semana do calendário não tem nenhum tempo útil.'
 }
 
-const somaIntervalos = (ivs: readonly IntervaloTrabalho[]) => ivs.reduce((a, iv) => a + (iv.ate - iv.de), 0)
+/** Minutos úteis de uma lista de intervalos do dia. */
+export const minutosDeIntervalos = (ivs: readonly IntervaloTrabalho[]) => ivs.reduce((a, iv) => a + (iv.ate - iv.de), 0)
+const somaIntervalos = minutosDeIntervalos
 
 /**
  * Calendário compilado: aritmética de minutos úteis por busca binária sobre minutos úteis acumulados por dia.
@@ -437,7 +439,8 @@ export function semDiasExtras(cal: CalendarioObra, dias: string[]): CalendarioOb
 }
 
 const NOMES_DIA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'] as const
-const horasTexto = (minutos: number) => (minutos === 0 ? '—' : `${(minutos / 60).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h`)
+/** Horas do dia para a tela: 480 → "8 h", 270 → "4,5 h", 0 → "—". */
+export const horasDoDiaTexto = (minutos: number) => (minutos === 0 ? '—' : `${(minutos / 60).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h`)
 
 /**
  * Resumo da jornada semanal para a tela: dias seguidos com a mesma carga viram uma faixa ("seg–sex 8 h; sáb–dom —").
@@ -452,7 +455,7 @@ export function resumoJornadaSemana(cal: CalendarioObra): string {
     if (ultimo && ultimo.minutos === minutos) ultimo.ate = d
     else grupos.push({ de: d, ate: d, minutos })
   }
-  return grupos.map((g) => `${g.de === g.ate ? NOMES_DIA[g.de] : `${NOMES_DIA[g.de]}–${NOMES_DIA[g.ate]}`} ${horasTexto(g.minutos)}`).join('; ')
+  return grupos.map((g) => `${g.de === g.ate ? NOMES_DIA[g.de] : `${NOMES_DIA[g.de]}–${NOMES_DIA[g.ate]}`} ${horasDoDiaTexto(g.minutos)}`).join('; ')
 }
 
 // ---------------------------------------------------------------------------

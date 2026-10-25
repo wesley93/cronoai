@@ -22,7 +22,8 @@ const versaoUsada = computed(() => (props.result.premissas ? rotuloVersao(props.
         <div class="grid h-8 w-8 place-items-center rounded-lg bg-amber-400/15"><component :is="icon" class="h-4 w-4 text-amber-500" /></div>
         <div>
           <h3 class="text-sm font-semibold">{{ result.title }}</h3>
-          <p class="text-[11px] text-zinc-500">Risco <span :class="riskClass">{{ result.risk }}</span></p>
+          <p v-if="result.applicable || applied" class="text-[11px] text-zinc-500">Risco <span :class="riskClass">{{ result.risk }}</span></p>
+          <p v-else class="text-[11px] text-zinc-500">Risco —</p>
         </div>
       </div>
       <span v-if="applied" class="chip-ok"><CheckCircle2 class="h-3 w-3" /> Aplicado</span>

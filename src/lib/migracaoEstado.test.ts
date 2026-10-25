@@ -13,6 +13,7 @@ import {
 import { defaultHolidays } from './calendar'
 import { compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
+import type { CalendarioObra } from '@/types/domain'
 import type { PersistedState, RegistroObra } from '@/types/obra'
 import { buildSeedState } from '@/stores/useProjectStore'
 import { premissasPadrao } from './premissas'
@@ -377,24 +378,36 @@ describe('esquema 3 → 4: premissas versionadas e feriados da obra (ciclo 00005
     return { ...resto, meta: { ...resto.meta, dailyIndirectCost: 9850, ...meta } }
   }
 
-  it('P-1: esquema 3 vira esquema 4 com a v1 padrão, calendários intactos e o mesmo cronograma', () => {
-    const base = esquema3()
-    const m = migrarRegistro(registro(JSON.stringify(base), 3))
+  /**
+   * Registro REAL do esquema 3, no formato que o ciclo 00004 gravava: a fixture do esquema 2 (Aurora com os 3 cenários aplicados: crashing,
+   * fast tracking e a hora extra, esta como 2 sábados úteis) passada pelo passo 2 → 3 da cadeia. O calendário tem as 52 exceções fixas de
+   * feriado e NÃO tem `aplicaFeriadosObra`; o indireto está no meta.
+   */
+  const esquema3Real = (meta: Record<string, unknown> = {}): Record<string, unknown> => {
+    const e = MIGRACOES.find((x) => x.de === 2)!.aplicar(JSON.parse(auroraCenarios))
+    return { ...e, meta: { ...(e.meta as Record<string, unknown>), ...meta } }
+  }
+
+  it('P-1 (registro real do esquema 3): vira esquema 4 com a v1 padrão, calendário sem a marca e com as exceções de antes, mesmas datas e undo intacto', () => {
+    const real = esquema3Real()
+    const cal0 = (real.calendarios as CalendarioObra[])[0]
+    expect(cal0.aplicaFeriadosObra).toBeUndefined()
+    expect(cal0.excecoes.filter((x) => x.intervalos.length === 0)).toHaveLength(52)
+    expect(cal0.excecoes.filter((x) => x.intervalos.length > 0).map((x) => x.data)).toEqual(['2026-10-24', '2026-10-31']) // a HE do 00004
+    expect((real.meta as Record<string, unknown>).dailyIndirectCost).toBe(9850)
+    const m = migrarRegistro(registro(JSON.stringify(real), 3))
     expect(m.tipo).toBe('ok')
     if (m.tipo !== 'ok') return
     expect(m.avisos).toEqual([])
     expect(m.estado.premissas).toHaveLength(1)
-    expect(m.estado.premissas[0]).toMatchObject({
-      versao: 1,
-      vigencia: '2026-05-04',
-      motivo: 'Premissas salvas antes do versionamento (migradas)',
-      valores: premissasPadrao(),
-    })
+    expect(m.estado.premissas[0]).toMatchObject({ versao: 1, vigencia: '2026-05-04', motivo: 'Premissas salvas antes do versionamento (migradas)', valores: premissasPadrao() })
     expect(Object.keys(m.estado.meta)).not.toContain('dailyIndirectCost')
-    expect(Object.keys(m.estado.meta)).not.toContain('safetyMarginDays')
     expect(m.estado.feriados).toEqual({ nacionais: true, carnaval: true, corpusChristi: true, manuais: [] })
-    expect(m.estado.calendarios).toEqual(JSON.parse(JSON.stringify(base.calendarios)))
-    expect(entrega(m.estado)).toBe('2027-06-23')
+    expect(m.estado.calendarios).toEqual(JSON.parse(JSON.stringify(real.calendarios))) // nenhuma data muda: o calendário não é tocado
+    expect(m.estado.appliedScenarios).toEqual(['crashing', 'fast-tracking', 'overtime'])
+    expect(m.estado.undo.map((u) => u.kind)).toEqual(['crashing', 'fast-tracking', 'overtime'])
+    expect(m.estado.undo.find((u) => u.kind === 'overtime')!.addedDays).toEqual(['2026-10-24', '2026-10-31'])
+    expect(entrega(m.estado)).toBe('2027-06-02') // a entrega gravada com os 3 cenários aplicados
   })
 
   it('P-2: indireto 11.000 e margem 7 viram a v1 com origem "nao-documentada"; valores iguais ao padrão ficam "ilustrativa"', () => {
@@ -429,6 +442,43 @@ describe('esquema 3 → 4: premissas versionadas e feriados da obra (ciclo 00005
     expect(r.estado.premissas[0].valores.custoIndiretoDiario).toBe(9850)
     expect(r.estado.premissas[0].valores.origens.custoIndiretoDiario).toEqual({ origem: 'ilustrativa' })
     expect(entrega(r.estado)).toBe('2027-06-23')
+  })
+
+  it('Segurança 1: feriado manual com tipo errado (nome ou município numérico) ou tamanho acima do limite é descartado com aviso', () => {
+    const base = JSON.parse(JSON.stringify(buildSeedState()))
+    const bom = { id: 'f1', data: '2026-08-20', nome: 'Feriado fictício', abrangencia: 'municipal', fonte: 'Lei municipal fictícia', recorrenteAnual: true, uf: 'PE', municipio: 'Cidade Fictícia', extra: 'lixo' }
+    base.feriados.manuais = [
+      bom,
+      { ...bom, id: 'f2', nome: 123 },
+      { ...bom, id: 'f3', municipio: 5 },
+      { ...bom, id: 'f4', fonte: 'f'.repeat(201) },
+      { ...bom, id: 'f5', abrangencia: 'inventada' },
+      { ...bom, id: 'f6', data: '2026-02-30' },
+      { ...bom, id: '' },
+      'texto',
+    ]
+    const m = migrarRegistro(registro(JSON.stringify(base), 4))
+    expect(m.tipo).toBe('ok')
+    if (m.tipo !== 'ok') return
+    expect(m.avisos).toEqual(['7 feriado(s) manual(is) inválido(s) descartado(s) do estado salvo.'])
+    expect(m.estado.feriados.manuais).toEqual([{ id: 'f1', data: '2026-08-20', nome: 'Feriado fictício', abrangencia: 'municipal', fonte: 'Lei municipal fictícia', recorrenteAnual: true, uf: 'PE', municipio: 'Cidade Fictícia' }])
+    // feriados válidos: nenhum aviso
+    const ok = migrarRegistro(registro(JSON.stringify({ ...base, feriados: { ...base.feriados, manuais: [bom] } }), 4))
+    if (ok.tipo !== 'ok') throw new Error('esperava ok')
+    expect(ok.avisos).toEqual([])
+  })
+
+  it('Segurança 4: esquema 4 com mais de 500 versões de premissas ou motivo acima de 200 caracteres volta à v1 padrão, com aviso', () => {
+    const base = JSON.parse(JSON.stringify(buildSeedState()))
+    const v = base.premissas[0]
+    const muitas = Array.from({ length: 501 }, (_, i) => ({ ...v, versao: i + 1 }))
+    const m = migrarRegistro(registro(JSON.stringify({ ...base, premissas: muitas }), 4))
+    if (m.tipo !== 'ok') throw new Error('esperava ok')
+    expect(m.avisos).toEqual(['Campos ausentes ou inválidos no estado salvo foram preenchidos como vazios: premissas.'])
+    expect(m.estado.premissas).toHaveLength(1)
+    const longo = migrarRegistro(registro(JSON.stringify({ ...base, premissas: [{ ...v, motivo: 'm'.repeat(201) }] }), 4))
+    if (longo.tipo !== 'ok') throw new Error('esperava ok')
+    expect(longo.estado.premissas[0].motivo).not.toHaveLength(201)
   })
 
   it('P-4: esquema 5 é recusado (e nunca sobrescrito)', () => {
