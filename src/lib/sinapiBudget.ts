@@ -134,7 +134,7 @@ export interface CsvImportResult {
  * RUP, custo e profissional são completados pelo catálogo quando ausentes.
  */
 export function parseBudgetCsv(text: string, catalog: SinapiItem[] = SINAPI_CATALOG, defaultTeam = 6): CsvImportResult {
-  const rows = text.replace(/^﻿/, '').split(/\r?\n/).filter((r) => r.trim())
+  const rows = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((r) => r.trim())
   if (!rows.length) return { lines: [], errors: ['Arquivo vazio.'] }
   const sep = (rows[0].match(/;/g)?.length ?? 0) >= (rows[0].match(/,/g)?.length ?? 0) ? ';' : ','
   const header = splitCsvLine(rows[0], sep).map((h) => normalizeText(h))
