@@ -29,7 +29,7 @@ inicio: 2026-10-25
 - **O que você precisa fazer:**
   - revisar no PR as decisões acima e a mudança de suprimentos causada pelo restante exato;
   - levar à **Engenharia de planejamento** a conferência no MS Project real (M-5/M-6).
-- **Estado:** validado. Rodadas 04 e 05 revalidadas por `testes` e `especialista-obra` (255dca3); a auditoria reprovou a rodada 03 e as rodadas 04 e 05 corrigiram; reauditoria abaixo.
+- **Estado:** aprovado. Validadores e auditoria independente aprovados (34bd885). Antes do merge, o usuário decide sobre a D-ed, as emendas 02 e 03 e as dívidas R-F e R-C.
 
 ## Pedido
 "Pode fazer todas as fases" → PLANO-FASE-1 §3.4, ciclo 00004.
@@ -75,7 +75,8 @@ inicio: 2026-10-25
 | 02 (875c518) | APROVADO | APROVADO (4 baixos) | APROVADO COM RESSALVAS (R-1..R-3) | APROVADO (1 baixo) | — |
 | 03 (20e01fa) | — | — | REPROVADO (R-A: marco tardio entre tarefas) | — | REPROVADO (cobertura vermelha por timeout; sem revalidação; registro) |
 | 04 (e8b4dae) | APROVADO (cobertura 2× verde) | — | APROVADO COM RESSALVAS (R-E) | — | — |
-| 05 (255dca3) | APROVADO (cobertura 2× verde; export do seed 0 linhas) | — | APROVADO COM RESSALVAS (R-F, registrada como dívida) | — | reauditoria |
+| 05 (255dca3) | APROVADO (cobertura 2× verde; export do seed 0 linhas) | — | APROVADO COM RESSALVAS (R-F, registrada como dívida) | — | REPROVADO (4 pequenos) → 34bd885 |
+| final (34bd885) | — | — | — | — | **APROVADO** |
 
 ## Ressalvas e destino
 | Origem | Ressalva | Destino |
@@ -146,8 +147,8 @@ inicio: 2026-10-25
 | V-1, V-2 | Painel com a fixture importada; folga em "d" com decimal | `npm run dev` | não | NOT_RUN | importar arquivo exige seletor de arquivo; V-1 coberto pelo E2E |
 | M-5 | `.xml` abre no MS Project real | manual | não | NOT_RUN | sem acesso |
 | M-6 | Regras no MS Project real (P1, HonorConstraints, ALAP, LinkLag %, início de tarefa corrida) | manual | não | NOT_RUN | Engenharia de planejamento, antes do piloto |
-| PERF-CI | Teste de desempenho sem teto frágil no CI | `cpm.desempenho.test.ts` | sim | PASS | o teste que roda no CI só afirma a edição aceita e o recálculo; o tempo fica no teste local `CRONOAI_PERF` (sem cobertura). Antes: teto fixo de 5.000 ms com ~20% de folga sob cobertura (reauditoria) |
-| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | (pendente) | reauditoria final |
+| PERF-CI | Teste de desempenho sem teto frágil no CI | `cpm.desempenho.test.ts` | sim | PASS | o teste que roda no CI só afirma a edição aceita (o efeito no cronograma é provado pelo E2E e pelos testes de número); o tempo fica no teste local `CRONOAI_PERF` (sem cobertura). Antes: teto fixo de 5.000 ms com ~20% de folga sob cobertura (reauditoria) |
+| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | PASS | **APROVADO** na conferência final (34bd885), sem achado novo; EVIDENCIAS-CONFERIDAS 25 de 27 (V-3 e V-4 visuais, Obrig. não, conferidas pelo orquestrador). Histórico: reprovou a rodada 03 (cobertura instável, sem revalidação, registro) e a reauditoria da 05 (margem do teste no CI, docs, registro) |
 
 ## Números que mudaram de propósito (antes → depois)
 Conta independente do `especialista-obra` rodando os mesmos casos em `68a9401` (antes da rodada 02) e no código atual. Base 03/08/2026; previsão com data de status 05/08.
