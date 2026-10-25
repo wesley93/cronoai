@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildSeedState } from '@/stores/useProjectStore'
 import { easterSunday } from './calendar'
+import { calendariosParaExportar } from './feriadosObra'
 import { calendarioDeDias, compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
 import { computeEvm } from './evm'
@@ -106,7 +107,9 @@ describe('MSPDI', () => {
     expect(minutosParaDuracao(1)).toBe('PT0H1M0S')
   })
   it('exporta e reimporta sem perda', () => {
-    const xml = buildMspdiXml({ meta: seed.meta, tasks: seed.tasks, calendarios: seed.calendarios, calendarioPadraoUid: seed.calendarioPadraoUid, schedule: forecast })
+    // O calendário do exemplo aplica os feriados da obra: a exportação (como a da store) os materializa como exceções de 2026 a 2029
+    const calendarios = calendariosParaExportar(seed.calendarios, seed.feriados, 2026, 2029)
+    const xml = buildMspdiXml({ meta: seed.meta, tasks: seed.tasks, calendarios, calendarioPadraoUid: seed.calendarioPadraoUid, schedule: forecast })
     expect(xml).toContain('<Project xmlns="http://schemas.microsoft.com/project">')
     expect(xml).toContain('<PredecessorLink>')
     const back = parseMspdiXml(xml)

@@ -6,7 +6,7 @@
 import { lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { addCalendarDays } from './calendar'
+import { addCalendarDays, carnaval, corpusChristi, feriadosNacionais } from './calendar'
 import { compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule, optsDaObra } from './cpm'
 import type { CalendarioObra, ProjectMeta, Task } from '@/types/domain'
@@ -201,7 +201,7 @@ interface Linha {
   timephased: number
   est: Estatico
   idaVoltaOk: boolean
-  datas?: { total: number; iguais: number; iguaisSemFeriadosNacionais: number; diferencas: string[] }
+  datas?: { total: number; iguais: number; iguaisComNacionaisInjetados: number; diferencas: string[] }
   resultado: 'importado' | 'recusado'
   uidsUnicos: boolean
   avisos: string[]
@@ -266,9 +266,9 @@ function relatorioMd(): string {
     '',
     '## Datas das folhas: arquivo x CronoAI (modo baseline), arquivos com vínculos',
     '',
-    '| Arquivo | Folhas com datas | Iguais (calendário importado) | Iguais (sem feriados nacionais) | Diferenças (calendário importado) |',
+    '| Arquivo | Folhas com datas | Iguais (calendário importado, como está) | Iguais (se o import injetasse os feriados nacionais, como antes do ciclo 00005) | Diferenças (calendário importado, como está) |',
     '|' + ' --- |'.repeat(5),
-    ...linhas.filter((l) => l.datas).map((l) => `| ${l.arquivo} | ${l.datas!.total} | ${l.datas!.iguais} | ${l.datas!.iguaisSemFeriadosNacionais} | ${l.datas!.diferencas.map((d) => d.split(':')[0]).join(', ') || '—'} |`),
+    ...linhas.filter((l) => l.datas).map((l) => `| ${l.arquivo} | ${l.datas!.total} | ${l.datas!.iguais} | ${l.datas!.iguaisComNacionaisInjetados} | ${l.datas!.diferencas.map((d) => d.split(':')[0]).join(', ') || '—'} |`),
     '',
     '## Avisos por arquivo',
     '',
@@ -365,7 +365,10 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       confere(est.nulas, `${est.nulas} linha(s) em branco (tarefa nula) ignorada(s).`, /em branco/)
       // Calendário lido = o do arquivo (lista legada + exceções simples); arquivo sem feriado nenhum recebe os nacionais, com aviso
       if (est.folgas.length) expect(feriadosDe(r)).toEqual(est.folgas)
-      else expect(w.some((a) => a.startsWith('Calendário sem feriados'))).toBe(true)
+      else expect(w.some((a) => a.startsWith('O calendário do arquivo não traz feriados. O CronoAI não acrescentou nenhum'))).toBe(true)
+      // Ciclo 00005 (P3): o import não injeta mais feriados nacionais; antes, o aviso era "Calendário sem feriados no XML; aplicados os feriados nacionais brasileiros."
+      expect(w.some((a) => a.startsWith('Calendário sem feriados'))).toBe(false)
+      expect(r.meta.feriadosNacionaisAplicados).toBeUndefined()
       expect(extrasDe(r)).toEqual(est.extras)
       const informativo = [
         est.timephased && `${est.timephased} registro(s) distribuído(s) no tempo (TimephasedData)`,
@@ -441,25 +444,37 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       if (!importado || !importado.linha.vinculosArquivo) return
       const { linha, r } = importado
       const inicio = r.meta.startDate ?? '2026-01-05'
-      const semFeriadosNoArquivo = r.warnings.some((a) => a.startsWith('Calendário sem feriados'))
+      const semFeriadosNoArquivo = r.warnings.some((a) => a.startsWith('O calendário do arquivo não traz feriados'))
       const calcular = (calendarios: CalendarioObra[]) =>
         computeSchedule(r.tasks, compilarCalendarios(inicio, calendarios, r.calendarioPadraoUid), { mode: 'baseline', statusDate: r.meta.statusDate ?? inicio })
+      // O calendário importado COMO ESTÁ (o import não acrescenta feriados): é o que o CronoAI calcula hoje
       const comImportado = calcular(r.calendarios)
-      // Sem os feriados nacionais que o import aplica quando o arquivo não traz nenhum: o calendário do projeto fica só com os dias úteis extras
-      const semNacionais = semFeriadosNoArquivo
-        ? calcular(r.calendarios.map((c) => (c.uid === r.calendarioPadraoUid ? { ...c, excecoes: c.excecoes.filter((ex) => ex.intervalos.length > 0) } : c)))
+      // Alternativa de antes do ciclo 00005, só para o antes → depois: o import acrescentava os feriados nacionais (com o 20/11 em todo ano,
+      // Carnaval e Corpus Christi) ao calendário do projeto sem feriados, de fromYear a fromYear + 4
+      const anos = [Number(inicio.slice(0, 4)), new Date().getFullYear(), ...linha.est.datasFolhas.map((d) => Number(d.inicio.slice(0, 4))).filter((a) => a > 1990)]
+      const fromYear = anos.reduce((m, a) => Math.min(m, a), anos[0])
+      const nacionaisDeAntes: string[] = []
+      for (let a = fromYear; a <= fromYear + 4; a++) nacionaisDeAntes.push(...feriadosNacionais(a), ...(a < 2024 ? [`${a}-11-20`] : []), ...carnaval(a), ...corpusChristi(a))
+      const comNacionais = semFeriadosNoArquivo
+        ? calcular(
+            r.calendarios.map((c) => {
+              if (c.uid !== r.calendarioPadraoUid) return c
+              const proprias = new Set(c.excecoes.map((ex) => ex.data))
+              return { ...c, excecoes: [...c.excecoes, ...nacionaisDeAntes.filter((d) => !proprias.has(d)).map((data) => ({ data, intervalos: [] }))] }
+            }),
+          )
         : comImportado
       const diferencas: string[] = []
       let iguais = 0
-      let iguaisSemNacionais = 0
+      let iguaisComNacionais = 0
       for (const d of linha.est.datasFolhas) {
         const a = comImportado.byUid.get(d.uid)
-        const b = semNacionais.byUid.get(d.uid)
+        const b = comNacionais.byUid.get(d.uid)
         if (a?.start === d.inicio && a.finish === d.termino) iguais++
         else diferencas.push(`uid ${d.uid}: arquivo ${d.inicio}..${d.termino}, calculado ${a?.start}..${a?.finish}`)
-        if (b?.start === d.inicio && b.finish === d.termino) iguaisSemNacionais++
+        if (b?.start === d.inicio && b.finish === d.termino) iguaisComNacionais++
       }
-      linha.datas = { total: linha.est.datasFolhas.length, iguais, iguaisSemFeriadosNacionais: iguaisSemNacionais, diferencas }
+      linha.datas = { total: linha.est.datasFolhas.length, iguais, iguaisComNacionaisInjetados: iguaisComNacionais, diferencas }
     })
   })
 
@@ -567,15 +582,16 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       }
     })
 
-    // Caracterização de 25/10/2026 (CPM atual, modo baseline). Diferenças conhecidas: Carnaval 2016 e Finados 2018 aplicados pelo import,
-    // tarefa de 1 dia que cruza o fim de semana (efeito de hora) e durações guiadas por recurso. Mudam de propósito na 00004/00005.
-    it('datas das folhas dos 8 arquivos com vínculos: 83 de 104 iguais; 100 de 104 sem os feriados nacionais (AC-8)', () => {
+    // Antes → depois do ciclo 00005 (achado a, P3): o import não injeta mais os feriados nacionais. As datas das folhas dos 8 arquivos com
+    // vínculos batem em 100 de 104 com o calendário importado como está (antes, com os feriados injetados: 83 de 104). Diferenças que sobram
+    // (4): tarefa de 1 dia que cruza o fim de semana (efeito de hora) e durações guiadas por recurso.
+    it('datas das folhas dos 8 arquivos com vínculos: 100 de 104 iguais com o calendário do arquivo como está (antes do ciclo 00005: 83 de 104 com os feriados injetados)', () => {
       const comDatas = linhas.filter((l) => l.datas)
       expect(comDatas).toHaveLength(8)
-      const soma = (campo: 'total' | 'iguais' | 'iguaisSemFeriadosNacionais') => comDatas.reduce((acc, l) => acc + l.datas![campo], 0)
+      const soma = (campo: 'total' | 'iguais' | 'iguaisComNacionaisInjetados') => comDatas.reduce((acc, l) => acc + l.datas![campo], 0)
       expect(soma('total')).toBe(104)
-      expect(soma('iguais')).toBe(83)
-      expect(soma('iguaisSemFeriadosNacionais')).toBe(100)
+      expect(soma('iguais')).toBe(100)
+      expect(soma('iguaisComNacionaisInjetados')).toBe(83) // o que o import antigo teria dado
     })
 
     it('tem o número de arquivos por versão da medição', () => {

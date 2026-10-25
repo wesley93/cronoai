@@ -43,19 +43,34 @@ export function easterSunday(year: number): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
-/** Feriados nacionais + Carnaval e Corpus Christi (pontos facultativos usuais na construção civil). */
-export function brazilianHolidays(year: number): string[] {
+/** Primeiro ano em que o 20/11 (Dia da Consciência Negra) é feriado nacional: Lei 14.759/2023 (a confirmar com o Jurídico). */
+export const ANO_FERIADO_20_NOV = 2024
+
+/**
+ * Feriados nacionais do ano: datas fixas, Sexta-feira Santa (Páscoa − 2) e, a partir de 2024, o 20/11.
+ * Carnaval e Corpus Christi NÃO entram: dependem de lei estadual ou municipal (ver `carnaval` e `corpusChristi`).
+ */
+export function feriadosNacionais(year: number): string[] {
   const easter = easterSunday(year)
-  const fixed = ['01-01', '04-21', '05-01', '09-07', '10-12', '11-02', '11-15', '11-20', '12-25'].map(
-    (md) => `${year}-${md}`,
-  )
-  const mobile = [
-    addCalendarDays(easter, -48), // segunda de Carnaval
-    addCalendarDays(easter, -47), // terça de Carnaval
-    addCalendarDays(easter, -2), // Sexta-feira Santa
-    addCalendarDays(easter, 60), // Corpus Christi
-  ]
-  return [...fixed, ...mobile].sort()
+  const fixos = ['01-01', '04-21', '05-01', '09-07', '10-12', '11-02', '11-15', '12-25']
+  if (year >= ANO_FERIADO_20_NOV) fixos.push('11-20')
+  return [...fixos.map((md) => `${year}-${md}`), addCalendarDays(easter, -2)].sort() // Sexta-feira Santa
+}
+
+/** Segunda e terça de Carnaval (Páscoa − 48 e − 47): ponto facultativo. */
+export function carnaval(year: number): string[] {
+  const easter = easterSunday(year)
+  return [addCalendarDays(easter, -48), addCalendarDays(easter, -47)]
+}
+
+/** Corpus Christi (Páscoa + 60): ponto facultativo, depende de lei estadual ou municipal. */
+export function corpusChristi(year: number): string[] {
+  return [addCalendarDays(easterSunday(year), 60)]
+}
+
+/** Feriados nacionais + Carnaval e Corpus Christi (pontos facultativos usuais na construção civil): a união, para os usos legados. */
+export function brazilianHolidays(year: number): string[] {
+  return [...feriadosNacionais(year), ...carnaval(year), ...corpusChristi(year)].sort()
 }
 
 export function defaultHolidays(fromYear: number, toYear: number): string[] {

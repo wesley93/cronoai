@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import fixtureDivergencias from '@/lib/__fixtures__/mspdi-divergencias.xml?raw'
 import type { PremissasObra } from '@/types/domain'
 import { rotuloVersao } from '@/lib/premissas'
+import { parseMspdiXml } from '@/lib/msProjectXmlParser'
 import { useProjectStore } from './useProjectStore'
 
 describe('useProjectStore · visão MS Project', () => {
@@ -110,15 +111,14 @@ describe('useProjectStore · visão MS Project', () => {
     expect(store.divergencias).toEqual([]) // obra de exemplo: nada veio de arquivo
     store.importXml(fixtureDivergencias)
     const d = (uid: number) => store.divergencias.find((x) => x.uid === uid)!
-    expect(store.divergencias.map((x) => x.uid)).toEqual([2, 3, 4, 5]) // D-1 (T1) é igual ao arquivo
-    expect([d(2).causa, d(2).diferencaTerminoDu]).toEqual(['feriado', 1]) // D-2
-    expect([d(3).causa, d(3).predecessoraUid, d(3).diferencaTerminoDu]).toEqual(['predecessora', 2, 1]) // D-3
-    expect([d(4).causa, d(4).diferencaTerminoDu]).toEqual(['manual', -4]) // D-4
-    expect([d(5).causa, d(5).predecessoraUid, d(5).diferencaTerminoDu]).toEqual(['predecessora', 4, -4]) // D-6
-    // D-5: depois de importar, a duração da T1 passa a 6 d
+    // Ciclo 00005: o import não injeta feriados. Antes: [2, 3, 4, 5] com D-2 +1, D-3 +1, D-4 −4, D-6 −4; depois: D-2 e D-3 sumiram (iguais ao arquivo)
+    expect(store.divergencias.map((x) => x.uid)).toEqual([4, 5]) // D-1, D-2 e D-3 iguais ao arquivo
+    expect([d(4).causa, d(4).diferencaTerminoDu]).toEqual(['manual', -5]) // D-4
+    expect([d(5).causa, d(5).predecessoraUid, d(5).diferencaTerminoDu]).toEqual(['predecessora', 4, -5]) // D-6
+    // D-5: depois de importar, a duração da T1 passa a 6 d (sem o feriado de 07/09, termina em 07/09)
     store.updateTask(1, { duracaoMin: 6 * 480 })
-    expect([d(1).terminoCalculado, d(1).terminoArquivo, d(1).diferencaTerminoDu, d(1).causa]).toEqual(['2026-09-08', '2026-09-04', 1, 'alterada'])
-    expect(store.state.meta.feriadosNacionaisAplicados).toBe(true)
+    expect([d(1).terminoCalculado, d(1).terminoArquivo, d(1).diferencaTerminoDu, d(1).causa]).toEqual(['2026-09-07', '2026-09-04', 1, 'alterada'])
+    expect(store.state.meta.feriadosNacionaisAplicados).toBeUndefined()
   })
 
   it('AC-13: definirRestricao valida tipo e data, recusa resumo e tarefa inexistente, e ASAP remove a restrição', () => {
@@ -269,5 +269,214 @@ describe('useProjectStore · premissas versionadas (ciclo 00005, E1)', () => {
     store.criarVersaoPremissas({ vigencia: '2026-10-23', motivo: 'taxa', valores: valores(store, { taxas }) })
     // 302: 8 carpinteiros, 6 armadores e 4 pedreiros; 104: 4 pedreiros → só os 8 pedreiros-dia de cada sábado mudam (+8,60/h)
     expect(store.scenarios.overtime.extraCost).toBeCloseTo(22315.2 + 8.6 * 8 * 1.5 * 8 * 2, 2) // + R$ 8,60/h × 8 h × 1,5 × 8 pedreiros × 2 sábados = R$ 1.651,20
+  })
+})
+
+describe('useProjectStore · feriados da obra, calendários e prévias (ciclo 00005, E3)', () => {
+  beforeEach(() => {
+    globalThis.localStorage?.clear?.() // Node 26 pode expor localStorage indefinido
+    setActivePinia(createPinia())
+  })
+
+  const entrega = (store: ReturnType<typeof useProjectStore>) => [store.schedule.projectFinish, store.delay.delayDays]
+  const dataDe = (store: ReturnType<typeof useProjectStore>, uid: number) => store.schedule.byUid.get(uid)!
+
+  it('CF-1: com a configuração padrão o Aurora dá os mesmos números e o MSPDI exporta os feriados de 2026 a 2029', () => {
+    const store = useProjectStore()
+    expect(store.state.feriados).toEqual({ nacionais: true, carnaval: true, corpusChristi: true, manuais: [] })
+    expect(store.state.calendarios[0].aplicaFeriadosObra).toBe(true)
+    expect(store.state.calendarios[0].excecoes).toEqual([])
+    expect(entrega(store)).toEqual(['2027-06-23', 16])
+    expect(store.evm.pv).toBeCloseTo(7259250, 2)
+    const x = store.exportXml()
+    expect(x.validation.valid).toBe(true)
+    const back = parseMspdiXml(x.xml)
+    const naoUteis = back.calendarios[0].excecoes.filter((e) => e.intervalos.length === 0).map((e) => e.data)
+    expect(naoUteis).toHaveLength(52) // 13 por ano × 4 anos
+    expect(naoUteis[0]).toBe('2026-01-01')
+    expect(naoUteis.at(-1)).toBe('2029-12-25')
+  })
+
+  // O plano media o início do 701 antes do restante exato do ciclo 00004 (15/03 → 11/03); na base de hoje são 12/03 09:36 → 10/03 09:36
+  // (os mesmos 2 d.u. a menos). Entrega e atraso são os do plano.
+  it('CF-2: sem Carnaval o 701 começa 10/03/2027 (antes, 12/03); entrega 21/06/2027, atraso de 14 d.u. (antes, 16); PV igual', () => {
+    const store = useProjectStore()
+    expect(dataDe(store, 701).start).toBe('2027-03-12')
+    expect(store.definirConfigFeriados({ carnaval: false })).toEqual({ ok: true })
+    expect(dataDe(store, 701).start).toBe('2027-03-10') // o lag SS+30 de 502 → 701 atravessa 08 e 09/02/2027
+    expect(entrega(store)).toEqual(['2027-06-21', 14])
+    expect(store.evm.pv).toBeCloseTo(7259250, 2) // a linha de base gravada não muda
+  })
+
+  it('CF-3: sem Corpus Christi o 701 termina 08/06/2027; entrega 22/06/2027, atraso de 15 d.u.', () => {
+    const store = useProjectStore()
+    store.definirConfigFeriados({ corpusChristi: false })
+    expect(dataDe(store, 701).finish).toBe('2027-06-08') // 27/05/2027 vira dia útil
+    expect(entrega(store)).toEqual(['2027-06-22', 15])
+  })
+
+  it('CF-4: sem Carnaval e sem Corpus Christi: entrega 18/06/2027, atraso de 13 d.u.; religar volta a 23/06/2027', () => {
+    const store = useProjectStore()
+    store.definirConfigFeriados({ carnaval: false, corpusChristi: false })
+    expect(entrega(store)).toEqual(['2027-06-18', 13])
+    store.definirConfigFeriados({ carnaval: true, corpusChristi: true })
+    expect(entrega(store)).toEqual(['2027-06-23', 16])
+    expect(store.state.log[0].title).toBe('Feriados da obra alterados')
+  })
+
+  it('CF-6: feriado municipal manual com fonte muda as datas; sem fonte é recusado; remover desfaz', () => {
+    const store = useProjectStore()
+    store.state.meta = { ...store.state.meta, startDate: '2026-08-17', statusDate: '2026-08-14' }
+    store.state.tasks = [{ uid: 1, wbs: '1', name: 'A', outlineLevel: 1, isSummary: false, duracaoMin: 5 * 480, predecessors: [], percentComplete: 0, bac: 0, actualCost: 0, resources: [] }]
+    expect(dataDe(store, 1).finish).toBe('2026-08-21')
+    const feriado = { data: '2026-08-20', nome: 'Feriado municipal fictício', abrangencia: 'municipal' as const, fonte: 'Lei municipal fictícia de teste', recorrenteAnual: true }
+    expect(store.adicionarFeriadoManual({ ...feriado, fonte: '' })).toEqual({ ok: false, erro: 'Informe a fonte do feriado (lei, decreto ou ato oficial).' })
+    expect(store.adicionarFeriadoManual(feriado)).toEqual({ ok: true })
+    expect(dataDe(store, 1).finish).toBe('2026-08-24')
+    expect(store.state.feriados.manuais[0]).toMatchObject({ nome: 'Feriado municipal fictício', fonte: 'Lei municipal fictícia de teste' })
+    expect(store.adicionarFeriadoManual(feriado).ok).toBe(false) // repetido
+    expect(store.removerFeriadoManual(store.state.feriados.manuais[0].id)).toEqual({ ok: true })
+    expect(dataDe(store, 1).finish).toBe('2026-08-21')
+    expect(store.removerFeriadoManual('nao-existe').ok).toBe(false)
+  })
+
+  it('CF-8: troca de UF lista o feriado estadual cadastrado, mostra o impacto de removê-lo (13/07 → 10/07); manter não muda nada', () => {
+    const store = useProjectStore()
+    store.state.meta = { ...store.state.meta, startDate: '2026-07-06', statusDate: '2026-07-03', uf: 'PE' }
+    store.state.tasks = [{ uid: 1, wbs: '1', name: 'A', outlineLevel: 1, isSummary: false, duracaoMin: 5 * 480, predecessors: [], percentComplete: 0, bac: 0, actualCost: 0, resources: [] }]
+    expect(store.adicionarFeriadoManual({ data: '2026-07-09', nome: 'Feriado estadual fictício', abrangencia: 'estadual', fonte: 'Lei estadual fictícia de teste', recorrenteAnual: true })).toEqual({ ok: true })
+    expect(store.state.feriados.manuais[0].uf).toBe('PE') // guarda a UF da obra
+    expect(dataDe(store, 1).finish).toBe('2026-07-13')
+    // mesma UF: nada a avisar
+    expect(store.previaTrocaLocal('PE', '').foraDoLocal).toEqual([])
+    const previa = store.previaTrocaLocal('BA', '')
+    expect(previa.foraDoLocal.map((f) => f.nome)).toEqual(['Feriado estadual fictício'])
+    expect(previa.semFeriadosLocais).toBe(false)
+    const impacto = previa.impactoDeRemover
+    if (!impacto || impacto.erro !== undefined) throw new Error('a prévia do impacto de remover não deveria ter erro')
+    expect([impacto.entregaAntes, impacto.entregaDepois, impacto.deltaDiasUteis, impacto.tarefas.map((t) => [t.uid, t.terminoAntes, t.terminoDepois])]).toEqual([
+      '2026-07-13', '2026-07-10', -1, [[1, '2026-07-13', '2026-07-10']],
+    ])
+    const dados = { nome: store.state.meta.name, uf: 'BA' as const, municipio: '', dataInicio: '2026-07-06', dataStatus: '2026-07-03', responsavel: '' }
+    // "manter" (padrão): a UF muda e o feriado fica
+    expect(store.atualizarDadosObra(dados)).toEqual({ ok: true })
+    expect(store.state.meta.uf).toBe('BA')
+    expect(store.state.feriados.manuais).toHaveLength(1)
+    expect(dataDe(store, 1).finish).toBe('2026-07-13')
+    // "remover": o feriado de outra UF sai e a data volta
+    expect(store.atualizarDadosObra({ ...dados, uf: 'BA' }, { removerFeriadosDeOutroLocal: true })).toEqual({ ok: true })
+    expect(store.state.feriados.manuais).toHaveLength(0)
+    expect(dataDe(store, 1).finish).toBe('2026-07-10')
+  })
+
+  it('sem feriado local cadastrado a prévia da troca avisa que eles não são carregados automaticamente', () => {
+    const store = useProjectStore()
+    const previa = store.previaTrocaLocal('SP', 'Cidade Fictícia')
+    expect(previa).toEqual({ foraDoLocal: [], semFeriadosLocais: true })
+  })
+
+  it('CS-1: calendário criado pela ação (cópia do padrão + sábado 08–12) e atribuído: 12 d desde 03/08 terminam 17/08 17:00 (padrão: 18/08)', () => {
+    const store = useProjectStore()
+    store.state.meta = { ...store.state.meta, startDate: '2026-08-03', statusDate: '2026-07-31' }
+    store.state.tasks = [{ uid: 1, wbs: '1', name: 'A', outlineLevel: 1, isSummary: false, duracaoMin: 12 * 480, predecessors: [], percentComplete: 0, bac: 0, actualCost: 0, resources: [] }]
+    expect([dataDe(store, 1).finish, dataDe(store, 1).terminoHora]).toEqual(['2026-08-18', '17:00'])
+    const criado = store.criarCalendario({ nome: 'Concretagem — sábado manhã' })
+    expect(criado).toEqual({ ok: true, uid: 2 })
+    const padrao = store.state.calendarios[0]
+    expect(store.editarCalendario(2, { semana: padrao.semana.map((d, i) => (i === 6 ? [{ de: 480, ate: 720 }] : d)) })).toEqual({ ok: true })
+    expect(store.atribuirCalendario([1], 2)).toEqual({ ok: true })
+    expect(store.taskByUid.get(1)?.calendarioUid).toBe(2)
+    expect([dataDe(store, 1).finish, dataDe(store, 1).terminoHora]).toEqual(['2026-08-17', '17:00'])
+    // a cópia é independente: o padrão não mudou e a cópia herdou a marca de feriados da obra
+    expect(store.state.calendarios[0].semana[6]).toEqual([])
+    expect(store.state.calendarios[1].aplicaFeriadosObra).toBe(true)
+    // atribuir ao calendário padrão remove o campo da tarefa
+    expect(store.atribuirCalendario([1], undefined)).toEqual({ ok: true })
+    expect(store.taskByUid.get(1)?.calendarioUid).toBeUndefined()
+  })
+
+  it('exceção por data: sábado de 4 h no calendário padrão (CS-2 pela ação) e remoção', () => {
+    const store = useProjectStore()
+    store.state.meta = { ...store.state.meta, startDate: '2026-08-03', statusDate: '2026-07-31' }
+    store.state.tasks = [{ uid: 1, wbs: '1', name: 'A', outlineLevel: 1, isSummary: false, duracaoMin: 12 * 480, predecessors: [], percentComplete: 0, bac: 0, actualCost: 0, resources: [] }]
+    expect(store.definirExcecao(1, { data: '2026-08-08', intervalos: [{ de: 480, ate: 720 }], descricao: 'Sábado de 4 h' })).toEqual({ ok: true })
+    expect([dataDe(store, 1).finish, dataDe(store, 1).terminoHora]).toEqual(['2026-08-18', '12:00'])
+    expect(store.definirExcecao(1, { data: '2026-08-08', intervalos: [{ de: 480, ate: 1500 }] }).ok).toBe(false) // 25:00
+    expect(store.definirExcecao(1, { data: '2026-08-08', intervalos: [], descricao: 'd'.repeat(81) }).ok).toBe(false)
+    expect(store.removerExcecao(1, '2026-08-08')).toEqual({ ok: true })
+    expect([dataDe(store, 1).finish, dataDe(store, 1).terminoHora]).toEqual(['2026-08-18', '17:00'])
+    expect(store.removerExcecao(1, '2026-08-08').ok).toBe(false)
+  })
+
+  it('CS-4: atribuição em lote ao pacote 03.01 (103, 104, 105): as 3 tarefas ganham o calendário; a concluída não muda de data', () => {
+    const store = useProjectStore()
+    const padrao = store.state.calendarios[0]
+    store.criarCalendario({ nome: 'Sábado 4 h' })
+    store.editarCalendario(2, { semana: padrao.semana.map((d, i) => (i === 6 ? [{ de: 480, ate: 720 }] : d)) })
+    const antes = { 103: { ...dataDe(store, 103) } }
+    expect(store.atribuirCalendario([103, 104, 105], 2)).toEqual({ ok: true })
+    expect([103, 104, 105].map((u) => store.taskByUid.get(u)?.calendarioUid)).toEqual([2, 2, 2])
+    expect([dataDe(store, 103).start, dataDe(store, 103).finish]).toEqual([antes[103].start, antes[103].finish])
+    // calendário inexistente, tarefa inexistente e resumo são recusados sem alterar nada (tudo ou nada)
+    expect(store.atribuirCalendario([104], 99)).toEqual({ ok: false, erro: 'O calendário escolhido não existe nesta obra.' })
+    expect(store.atribuirCalendario([104, 99999], 1)).toEqual({ ok: false, erro: 'Tarefa não encontrada.' })
+    expect(store.atribuirCalendario([1], 1).ok).toBe(false) // resumo
+    expect(store.atribuirCalendario([]).ok).toBe(false)
+    expect(store.taskByUid.get(104)?.calendarioUid).toBe(2)
+  })
+
+  it('criar e excluir calendários: nome único, limite de 100, padrão e calendário em uso protegidos', () => {
+    const store = useProjectStore()
+    expect(store.criarCalendario({ nome: 'Padrão Obra (seg-sex, 8h)' })).toEqual({ ok: false, erro: 'Já existe um calendário com este nome.' })
+    expect(store.criarCalendario({ nome: ' ' }).ok).toBe(false)
+    expect(store.criarCalendario({ nome: 'X', copiarDeUid: 99 })).toEqual({ ok: false, erro: 'O calendário de origem não existe nesta obra.' })
+    store.criarCalendario({ nome: 'Fachada' })
+    store.atribuirCalendario([104], 2)
+    expect(store.excluirCalendario(1)).toEqual({ ok: false, erro: 'O calendário padrão da obra não pode ser excluído.' })
+    expect(store.excluirCalendario(2)).toEqual({ ok: false, erro: 'O calendário está em uso por 1 tarefa(s): confirme para movê-las ao calendário padrão.' })
+    expect(store.excluirCalendario(2, { moverTarefasParaPadrao: true })).toEqual({ ok: true })
+    expect(store.state.calendarios.map((c) => c.uid)).toEqual([1])
+    expect(store.taskByUid.get(104)?.calendarioUid).toBeUndefined()
+    expect(store.excluirCalendario(2).ok).toBe(false)
+    // preenche até 100 sem passar pela ação (cada criação simula a obra inteira)
+    while (store.state.calendarios.length < 100) store.state.calendarios.push({ ...store.state.calendarios[0], uid: 100 + store.state.calendarios.length, nome: `Cal ${store.state.calendarios.length}` })
+    expect(store.state.calendarios).toHaveLength(100)
+    expect(store.criarCalendario({ nome: 'Um a mais' })).toEqual({ ok: false, erro: 'No máximo 100 calendários por obra.' })
+  })
+
+  it('calendário de hora extra só sai pelo desfazer do cenário', () => {
+    const store = useProjectStore()
+    store.criarCalendario({ nome: 'Derivado' })
+    store.state.calendarios[1].origem = 'hora-extra'
+    expect(store.excluirCalendario(2).ok).toBe(false)
+  })
+
+  it('CF-7: importar a fixture sem feriados avisa, não injeta, e "Aplicar feriados da obra" mostra a prévia e traz D-2 de volta', () => {
+    const store = useProjectStore()
+    const avisos = store.importXml(fixtureDivergencias)
+    expect(avisos).toContain('O calendário do arquivo não traz feriados. O CronoAI não acrescentou nenhum: use "Aplicar feriados da obra" em Premissas › Calendários para ver o impacto antes.')
+    expect(avisos.some((a) => a.startsWith('Calendário sem feriados'))).toBe(false)
+    expect(store.state.calendarios[0].aplicaFeriadosObra).toBeUndefined()
+    expect(store.state.calendarios[0].excecoes.filter((e) => e.intervalos.length === 0)).toEqual([])
+    expect(store.divergencias.map((x) => x.uid)).toEqual([4, 5])
+    const entregaAntes = store.schedule.projectFinish
+    const previa = store.previaAplicarFeriados(1)
+    expect(previa.erro).toBeUndefined()
+    if (previa.erro !== undefined) return
+    expect(previa.entregaAntes).toBe(entregaAntes)
+    expect(previa.tarefas.map((t) => t.uid).sort()).toEqual([2, 3, 4, 5]) // T1 não muda: o feriado de 07/09 cai depois dela
+    const t2 = previa.tarefas.find((t) => t.uid === 2)!
+    expect([t2.inicioAntes, t2.inicioDepois, t2.terminoAntes, t2.terminoDepois]).toEqual(['2026-09-07', '2026-09-08', '2026-09-11', '2026-09-14'])
+    expect(store.schedule.projectFinish).toBe(entregaAntes) // a prévia não grava nada
+    expect(store.aplicarFeriadosObra(1)).toEqual({ ok: true })
+    expect(store.state.calendarios[0].aplicaFeriadosObra).toBe(true)
+    expect(store.divergencias.map((x) => x.uid)).toEqual([2, 3, 4, 5])
+    expect(store.divergencias.find((x) => x.uid === 2)).toMatchObject({ causa: 'feriado', detalhe: 'Feriados da obra aplicados ao calendário importado.', diferencaTerminoDu: 1 })
+    expect(store.divergencias.find((x) => x.uid === 4)?.diferencaTerminoDu).toBe(-4)
+    expect(store.schedule.projectFinish).toBe(previa.entregaDepois)
+    // remover os feriados da obra do calendário volta ao estado do arquivo
+    expect(store.aplicarFeriadosObra(1, false)).toEqual({ ok: true })
+    expect(store.divergencias.map((x) => x.uid)).toEqual([4, 5])
+    expect(store.previaAplicarFeriados(99)).toEqual({ erro: 'O calendário não existe nesta obra.' })
   })
 })

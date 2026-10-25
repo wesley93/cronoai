@@ -2,7 +2,7 @@
 import type { IndiceObras, PersistedState, ResumoObra } from '@/types/obra'
 import type { ProjectMeta } from '@/types/domain'
 import { REGIMES_SINAPI, ROTULO_REGIME_SINAPI, UFS, type RegimeSinapi, type UF } from '@/data/ufs'
-import { defaultHolidays, diffCalendarDays, parseISO, toISO } from './calendar'
+import { diffCalendarDays, parseISO, toISO } from './calendar'
 import { JANELA_ANOS_DATAS, UID_CALENDARIO_PADRAO, calendarioPadrao } from './calendarioTrabalho'
 import { configFeriadosPadrao } from './feriadosObra'
 import { premissasPadrao } from './premissas'
@@ -119,7 +119,6 @@ export function validarDadosObra(d: DadosObra, contexto?: ContextoInicio): strin
  * As premissas nascem na versão 1 padrão (ilustrativas), com vigência na data de início da obra.
  */
 export function estadoObraVazia(d: DadosObra): PersistedState {
-  const ano = Number(d.dataInicio.slice(0, 4))
   const meta: PersistedState['meta'] = {
     name: d.nome.trim(),
     company: '',
@@ -134,7 +133,7 @@ export function estadoObraVazia(d: DadosObra): PersistedState {
   return {
     meta,
     tasks: [],
-    calendarios: [calendarioPadrao(defaultHolidays(ano, ano + 3))],
+    calendarios: [{ ...calendarioPadrao([]), aplicaFeriadosObra: true }], // os feriados vêm da configuração da obra (`feriados`)
     calendarioPadraoUid: UID_CALENDARIO_PADRAO,
     premissas: [{ versao: 1, vigencia: d.dataInicio, motivo: 'Premissas iniciais da obra (ilustrativas)', valores: premissasPadrao() }],
     feriados: configFeriadosPadrao(),

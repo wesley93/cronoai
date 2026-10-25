@@ -3,7 +3,11 @@ import { defineStore } from 'pinia'
 import { computed, nextTick, reactive, ref, toRaw, watch } from 'vue'
 import type {
   CalendarioObra,
+  ConfigFeriadosObra,
   DecisionLogEntry,
+  ExcecaoCalendario,
+  FeriadoManual,
+  IntervaloTrabalho,
   OpcoesCronograma,
   DetectedRestriction,
   FieldReport,
@@ -19,7 +23,7 @@ import type {
 } from '@/types/domain'
 import type { MSProjectPredecessor, MSProjectTask } from '@/types/msProject'
 import type { IndiceObras, MigracaoV1, PersistedState, ResumoObra, ScenarioUndo } from '@/types/obra'
-import { SEED_HOLIDAYS, SEED_MATERIALS, SEED_META, SEED_PREMISSAS, SEED_REPORTS, SEED_TASKS } from '@/data/seed'
+import { SEED_MATERIALS, SEED_META, SEED_PREMISSAS, SEED_REPORTS, SEED_TASKS } from '@/data/seed'
 import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
 import {
   DEFAULT_BATCH_OPTIONS,
@@ -34,13 +38,18 @@ import {
 } from '@/lib/sinapiBudget'
 import { addCalendarDays, defaultHolidays, type WorkCalendar } from '@/lib/calendar'
 import {
+  MAX_CALENDARIOS,
   MINUTOS_POR_DIA_PADRAO,
   UID_CALENDARIO_PADRAO,
   calendarioDeDias,
   calendarioPadrao,
   comDiasExtras,
   compilarCalendarios,
+  copiarCalendario,
   diasParaMinutos,
+  erroDoCalendario,
+  erroDoNomeCalendario,
+  proximoUidCalendario,
   type CalendariosCompilados,
   minutosParaDias,
   semDiasExtras,
@@ -62,10 +71,19 @@ import {
 } from '@/lib/scenarios'
 import { analyzeSupplies } from '@/lib/supplies'
 import { premissasPadrao, validarNovaVersao, versaoVigente, type NovaVersaoPremissas } from '@/lib/premissas'
-import { configFeriadosPadrao } from '@/lib/feriadosObra'
+import {
+  calendariosParaExportar,
+  configFeriadosPadrao,
+  criarFeriadosPorAno,
+  faixaDeAnosDaExportacao,
+  feriadosForaDoLocal,
+  validarFeriadoManual,
+  type NovoFeriadoManual,
+} from '@/lib/feriadosObra'
+import { compararCronogramas } from '@/lib/previaImpacto'
 import { fmtBRL, fmtMonth, uid } from '@/lib/format'
 import { calcularDivergencias } from '@/lib/divergencias'
-import type { PreviaPlanilha, PreviaProgresso, PreviaSinapi } from '@/types/previas'
+import type { PreviaImpacto, PreviaPlanilha, PreviaProgresso, PreviaSinapi } from '@/types/previas'
 import { calcularObra, mensagemDoCalculo, verificarCalculo } from '@/lib/horizonte'
 import { ROTULO_RESTRICAO, calendarioExiste, montarRestricao, tarefasManuaisAlteradas, validarPrazoFinal, validarRestricao, type TipoRestricaoTela } from '@/lib/restricoes'
 import { lagEmDias, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
@@ -81,6 +99,14 @@ const INTERVALO_COTA_MS = 60_000
 
 export type EstadoGravacao = 'salvo' | 'pendente' | 'erro'
 export type ResultadoAcao = { ok: true } | { ok: false; erro: string }
+export type ResultadoCalendario = { ok: true; uid: number } | { ok: false; erro: string }
+/** Prévia da troca de UF ou município: os feriados manuais de outro local e, se houver, o impacto de removê-los. */
+export interface PreviaTrocaLocal {
+  foraDoLocal: FeriadoManual[]
+  /** Não há nenhum feriado estadual ou municipal cadastrado: eles não são carregados automaticamente nesta fase. */
+  semFeriadosLocais: boolean
+  impactoDeRemover?: PreviaImpacto
+}
 export type ResultadoCriacao = { ok: true; id: string } | { ok: false; erro: string; erros?: string[] }
 export type NovaObra = { modelo: 'exemplo' } | { modelo: 'branco'; dados: DadosObra }
 
@@ -98,15 +124,17 @@ function clone<T>(v: T): T {
 }
 
 /** Linha de base: cálculo sem avanço e sem dias úteis extras (hora extra não entra na linha de base). */
-function baselineFor(tasks: Task[], meta: ProjectState['meta'], calendarios: CalendarioObra[], padraoUid: number, onlyMissing = false): Task[] {
-  const cals = compilarCalendarios(meta.startDate, calendarios, padraoUid, { semExcecoesUteis: true })
+function baselineFor(tasks: Task[], meta: ProjectState['meta'], calendarios: CalendarioObra[], padraoUid: number, feriados: ConfigFeriadosObra, onlyMissing = false): Task[] {
+  const cals = compilarCalendarios(meta.startDate, calendarios, padraoUid, { semExcecoesUteis: true, feriadosPorAno: criarFeriadosPorAno(feriados) })
   return withBaseline(tasks, computeSchedule(tasks, cals, optsDaObra(meta, 'baseline')), onlyMissing)
 }
 
 export function buildSeedState(): PersistedState {
   const meta = clone(SEED_META)
-  const calendarios = [calendarioPadrao(SEED_HOLIDAYS)]
-  const tasks = baselineFor(clone(SEED_TASKS), meta, calendarios, UID_CALENDARIO_PADRAO)
+  // O calendário do exemplo aplica os feriados da obra (os mesmos de 2026 a 2029 que antes eram exceções fixas; agora valem em qualquer ano)
+  const calendarios = [{ ...calendarioPadrao([]), aplicaFeriadosObra: true }]
+  const feriados = configFeriadosPadrao()
+  const tasks = baselineFor(clone(SEED_TASKS), meta, calendarios, UID_CALENDARIO_PADRAO, feriados)
   const materials = clone(SEED_MATERIALS).map((m) => {
     if (m.id !== 'm-porcelanato') return m
     const t = tasks.find((x) => x.uid === m.taskUid)
@@ -118,7 +146,7 @@ export function buildSeedState(): PersistedState {
     calendarios,
     calendarioPadraoUid: UID_CALENDARIO_PADRAO,
     premissas: clone(SEED_PREMISSAS),
-    feriados: configFeriadosPadrao(),
+    feriados,
     reports: clone(SEED_REPORTS),
     restrictions: [],
     materials,
@@ -473,7 +501,7 @@ export const useProjectStore = defineStore('project', () => {
     try {
       // Cópia simples do estado: ler 3.000 tarefas pelo proxy reativo do Vue custa ~4x mais que ler objetos comuns, e a cópia (JSON) também
       // registra a dependência de todos os campos que o cálculo usa
-      return { ...calcularObra(clone(state.tasks), clone(state.meta), clone(state.calendarios), state.calendarioPadraoUid), erro: undefined as string | undefined }
+      return { ...calcularObra(clone(state.tasks), clone(state.meta), clone(state.calendarios), state.calendarioPadraoUid, { feriados: clone(state.feriados) }), erro: undefined as string | undefined }
     } catch (e) {
       const seguros = calendariosSeguros()
       const sch = computeSchedule([], seguros, optsDaObra(state.meta, 'forecast', state.meta.statusDate))
@@ -514,7 +542,7 @@ export const useProjectStore = defineStore('project', () => {
   }
   const schedule = computed(() => calculo.value.sch)
   /** Tarefas cuja data difere da do arquivo importado, com a causa provável (RF-05.8). */
-  const divergencias = computed(() => tentar(() => calcularDivergencias(state.tasks, schedule.value, calendarios.value, state.meta), () => []))
+  const divergencias = computed(() => tentar(() => calcularDivergencias(state.tasks, schedule.value, calendarios.value, state.meta, { calendarios: state.calendarios, calendarioPadraoUid: state.calendarioPadraoUid, feriados: state.feriados }), () => []))
   const rollups = computed(() => rollupSummaries(state.tasks, schedule.value))
   const tasksByWbs = computed(() => sortByWbs(state.tasks))
   const leaves = computed(() => tasksByWbs.value.filter((t) => !t.isSummary))
@@ -590,6 +618,7 @@ export const useProjectStore = defineStore('project', () => {
     forecast: schedule.value,
     origin: delay.value.origin,
     premissas: premissasVigentes.value,
+    feriados: toRaw(state.feriados),
     versaoPremissas: { versao: versaoPremissasVigente.value.versao, vigencia: versaoPremissasVigente.value.vigencia },
   }))
   const scenarios = computed(() =>
@@ -746,7 +775,7 @@ export const useProjectStore = defineStore('project', () => {
     const simulado = simular(tasks)
     if (simulado.erro !== undefined) return undefined // a prévia de datas já mostra o erro da hipótese
     const after = simulado.sch
-    const comum = { meta: state.meta, calendarios: state.calendarios, calendarioPadraoUid: state.calendarioPadraoUid }
+    const comum = { meta: state.meta, calendarios: calendariosDeExportacao(), calendarioPadraoUid: state.calendarioPadraoUid }
     return {
       before: buildTaskXml(current, { ...comum, tasks: state.tasks, schedule: schedule.value }),
       after: buildTaskXml(tasks.find((t) => t.uid === taskUid)!, { ...comum, tasks, schedule: after }),
@@ -1155,9 +1184,9 @@ export const useProjectStore = defineStore('project', () => {
 
   // ---------------------------------------------------------------- EAP / XML
   /** Recusa a edição que, aplicada, estouraria o horizonte de 50 anos (simula antes de gravar). */
-  function erroSeAplicar(tasks: Task[], meta: ProjectState['meta'] = state.meta, calendariosHipotese: CalendarioObra[] = state.calendarios): string | undefined {
+  function erroSeAplicar(tasks: Task[], meta: ProjectState['meta'] = state.meta, calendariosHipotese: CalendarioObra[] = state.calendarios, feriadosHipotese: ConfigFeriadosObra = state.feriados): string | undefined {
     // toRaw: a simulação não precisa de reatividade e o proxy do Vue deixa o cálculo de 3.000 tarefas várias vezes mais lento
-    return verificarCalculo(tasks.map((t) => toRaw(t)), toRaw(meta), calendariosHipotese.map((c) => toRaw(c)), state.calendarioPadraoUid)
+    return verificarCalculo(tasks.map((t) => toRaw(t)), toRaw(meta), calendariosHipotese.map((c) => toRaw(c)), state.calendarioPadraoUid, toRaw(feriadosHipotese))
   }
 
   function updateTask(taskUid: number, patch: Partial<Task>): ResultadoAcao {
@@ -1194,11 +1223,21 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /** Gera o .xml MSPDI do estado atual e valida estrutura e ordem dos elementos antes de entregar. */
+  /**
+   * Calendários prontos para o MSPDI: os feriados da obra viram exceções não úteis dos calendários que os aplicam, de 2026 (ano de início)
+   * a max(início + 3, término previsto + 1): no exemplo, 2026–2029, como as exceções fixas de antes (a exportação do exemplo não muda).
+   */
+  function calendariosDeExportacao(): CalendarioObra[] {
+    const inicio = Number(state.meta.startDate.slice(0, 4))
+    const [de, ate] = faixaDeAnosDaExportacao(inicio, Number(schedule.value.projectFinish.slice(0, 4)) || inicio)
+    return calendariosParaExportar(state.calendarios, state.feriados, de, ate)
+  }
+
   function exportXml(): { filename: string; xml: string; validation: MspdiValidation; avisos: string[] } {
     const xml = buildMspdiXml({
       meta: state.meta,
       tasks: state.tasks,
-      calendarios: state.calendarios,
+      calendarios: calendariosDeExportacao(),
       calendarioPadraoUid: state.calendarioPadraoUid,
       schedule: schedule.value,
     })
@@ -1224,12 +1263,12 @@ export const useProjectStore = defineStore('project', () => {
     }
     let tasks: Task[]
     try {
-      tasks = baselineFor(result.tasks, meta, result.calendarios, result.calendarioPadraoUid, true)
+      tasks = baselineFor(result.tasks, meta, result.calendarios, result.calendarioPadraoUid, state.feriados, true)
     } catch (e) {
       throw new Error(`Arquivo não importado: ${mensagemDoCalculo(e)}`)
     }
     // O cálculo previsto (data de status), o EVM e a Curva S do estado novo também precisam caber no horizonte de 50 anos
-    const erroHorizonte = verificarCalculo(tasks, meta, result.calendarios, result.calendarioPadraoUid)
+    const erroHorizonte = verificarCalculo(tasks, meta, result.calendarios, result.calendarioPadraoUid, state.feriados)
     if (erroHorizonte) throw new Error(`Arquivo não importado: ${erroHorizonte}`)
     const uids = new Set(tasks.map((t) => t.uid))
     state.meta = meta
@@ -1305,7 +1344,7 @@ export const useProjectStore = defineStore('project', () => {
     return { ok: true }
   }
 
-  /** Escolhe um calendário existente para a tarefa (`undefined` = calendário padrão da obra). Criar calendário é do 00005. */
+  /** Escolhe um calendário existente para a tarefa (`undefined` = calendário padrão da obra). Criar e editar calendários: seção seguinte. */
   function definirCalendarioTarefa(taskUid: number, calendarioUid?: number): ResultadoAcao {
     const alvo = tarefaFolha(taskUid)
     if (!alvo.ok) return alvo
@@ -1329,6 +1368,216 @@ export const useProjectStore = defineStore('project', () => {
     if (estouro) return { ok: false, erro: estouro }
     gravarOpcoesCronograma(opcoes)
     return { ok: true }
+  }
+
+  // ---------------------------------------------------------------- Calendários e feriados da obra (ciclo 00005, RF-03.4 e RF-03.5)
+  const dataBR = (iso: string) => iso.split('-').reverse().join('/')
+  const calendarioDaObra = (uid: number) => state.calendarios.find((c) => c.uid === uid)
+
+  /** Entrega e tarefas que mudam de data se a obra tivesse estes calendários e estes feriados (nada é gravado). */
+  function impactoDaHipotese(calendariosHipotese: CalendarioObra[], feriadosHipotese: ConfigFeriadosObra): PreviaImpacto {
+    if (calculo.value.erro) return { erro: calculo.value.erro }
+    try {
+      const cals = compilarCalendarios(state.meta.startDate, calendariosHipotese.map((c) => toRaw(c)), state.calendarioPadraoUid, {
+        feriadosPorAno: criarFeriadosPorAno(toRaw(feriadosHipotese)),
+      })
+      const depois = computeSchedule(state.tasks.map((t) => toRaw(t)), cals, optsDaObra(state.meta, 'forecast', state.meta.statusDate))
+      return compararCronogramas(schedule.value, depois, calendarioDeDias(cals.padrao))
+    } catch (e) {
+      return { erro: mensagemDoCalculo(e) }
+    }
+  }
+
+  /** Cria um calendário como cópia de outro (padrão da obra, se não informado). Nome único, até 100 calendários. */
+  function criarCalendario(dados: { nome: string; copiarDeUid?: number }): ResultadoCalendario {
+    if (state.calendarios.length >= MAX_CALENDARIOS) return { ok: false, erro: `No máximo ${MAX_CALENDARIOS} calendários por obra.` }
+    const erroNome = erroDoNomeCalendario(dados.nome, state.calendarios)
+    if (erroNome) return { ok: false, erro: erroNome }
+    const origem = calendarioDaObra(dados.copiarDeUid ?? state.calendarioPadraoUid)
+    if (!origem) return { ok: false, erro: 'O calendário de origem não existe nesta obra.' }
+    const novo = copiarCalendario(origem, proximoUidCalendario(state.calendarios), dados.nome.trim())
+    const estouro = erroSeAplicar(state.tasks, state.meta, [...state.calendarios, novo])
+    if (estouro) return { ok: false, erro: estouro }
+    state.calendarios.push(novo)
+    log('sistema', `Calendário criado: ${novo.nome}`, `Cópia de "${origem.nome}".`)
+    return { ok: true, uid: novo.uid }
+  }
+
+  /** Grava um calendário alterado, depois de validar o calendário e de simular o cronograma (recusa o que estoura o horizonte). */
+  function gravarCalendario(atual: CalendarioObra, novo: CalendarioObra): ResultadoAcao {
+    const erro = erroDoCalendario(novo)
+    if (erro) return { ok: false, erro: `Calendário inválido: ${erro}` }
+    const estouro = erroSeAplicar(state.tasks, state.meta, state.calendarios.map((c) => (c.uid === atual.uid ? novo : c)))
+    if (estouro) return { ok: false, erro: estouro }
+    state.calendarios = state.calendarios.map((c) => (c.uid === atual.uid ? novo : c))
+    return { ok: true }
+  }
+
+  /** Renomeia o calendário e/ou troca a jornada da semana (7 posições, domingo a sábado, até 5 intervalos por dia). */
+  function editarCalendario(uid: number, dados: { nome?: string; semana?: IntervaloTrabalho[][] }): ResultadoAcao {
+    const atual = calendarioDaObra(uid)
+    if (!atual) return { ok: false, erro: 'O calendário não existe nesta obra.' }
+    if (dados.nome !== undefined) {
+      const erroNome = erroDoNomeCalendario(dados.nome, state.calendarios, uid)
+      if (erroNome) return { ok: false, erro: erroNome }
+    }
+    const novo: CalendarioObra = {
+      ...atual,
+      nome: dados.nome !== undefined ? dados.nome.trim() : atual.nome,
+      semana: dados.semana ? dados.semana.map((d) => d.map((iv) => ({ ...iv }))) : atual.semana,
+    }
+    const r = gravarCalendario(atual, novo)
+    if (r.ok) log('sistema', `Calendário alterado: ${novo.nome}`, dados.semana ? 'Jornada da semana alterada.' : `Renomeado de "${atual.nome}".`)
+    return r
+  }
+
+  /** Define (ou troca) a exceção de uma data: horário próprio (intervalos) ou dia não útil (lista vazia). Descrição de até 80 caracteres. */
+  function definirExcecao(uid: number, excecao: ExcecaoCalendario): ResultadoAcao {
+    const atual = calendarioDaObra(uid)
+    if (!atual) return { ok: false, erro: 'O calendário não existe nesta obra.' }
+    const descricao = excecao.descricao?.trim()
+    const nova: ExcecaoCalendario = { data: excecao.data, intervalos: excecao.intervalos.map((iv) => ({ ...iv })), ...(descricao ? { descricao } : {}) }
+    const novo: CalendarioObra = { ...atual, excecoes: [...atual.excecoes.filter((e) => e.data !== nova.data), nova].sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0)) }
+    const r = gravarCalendario(atual, novo)
+    if (r.ok) log('sistema', `Exceção definida: ${atual.nome}`, `${dataBR(nova.data)}: ${nova.intervalos.length ? 'horário próprio' : 'dia não útil'}.`)
+    return r
+  }
+
+  function removerExcecao(uid: number, data: string): ResultadoAcao {
+    const atual = calendarioDaObra(uid)
+    if (!atual) return { ok: false, erro: 'O calendário não existe nesta obra.' }
+    if (!atual.excecoes.some((e) => e.data === data)) return { ok: false, erro: 'Não há exceção nesta data.' }
+    const r = gravarCalendario(atual, { ...atual, excecoes: atual.excecoes.filter((e) => e.data !== data) })
+    if (r.ok) log('sistema', `Exceção removida: ${atual.nome}`, `${dataBR(data)}.`)
+    return r
+  }
+
+  /**
+   * Exclui um calendário. O padrão não se exclui; o de hora extra só sai pelo "desfazer" do cenário; um calendário em uso só se exclui
+   * movendo as tarefas para o calendário padrão (`moverTarefasParaPadrao`, depois da confirmação do usuário).
+   */
+  function excluirCalendario(uid: number, opcoes: { moverTarefasParaPadrao?: boolean } = {}): ResultadoAcao {
+    const atual = calendarioDaObra(uid)
+    if (!atual) return { ok: false, erro: 'O calendário não existe nesta obra.' }
+    if (uid === state.calendarioPadraoUid) return { ok: false, erro: 'O calendário padrão da obra não pode ser excluído.' }
+    if (atual.origem === 'hora-extra') return { ok: false, erro: 'Este calendário foi criado por um cenário de hora extra: desfaça o cenário para removê-lo.' }
+    const emUso = state.tasks.filter((t) => t.calendarioUid === uid)
+    if (emUso.length && !opcoes.moverTarefasParaPadrao) {
+      return { ok: false, erro: `O calendário está em uso por ${emUso.length} tarefa(s): confirme para movê-las ao calendário padrão.` }
+    }
+    const tarefas = state.tasks.map((t) => {
+      if (t.calendarioUid !== uid) return t
+      const { calendarioUid: _removido, ...resto } = t
+      return resto
+    })
+    const estouro = erroSeAplicar(tarefas, state.meta, state.calendarios.filter((c) => c.uid !== uid))
+    if (estouro) return { ok: false, erro: estouro }
+    state.tasks = tarefas
+    state.calendarios = state.calendarios.filter((c) => c.uid !== uid)
+    log('sistema', `Calendário excluído: ${atual.nome}`, emUso.length ? `${emUso.length} tarefa(s) passaram ao calendário padrão.` : 'Sem tarefas atribuídas.')
+    return { ok: true }
+  }
+
+  /** Atribui um calendário a várias tarefas folha de uma vez (`undefined` = calendário padrão). Tudo ou nada: uma tarefa inválida recusa o lote. */
+  function atribuirCalendario(uids: number[], calendarioUid?: number): ResultadoAcao {
+    if (!uids.length) return { ok: false, erro: 'Nenhuma tarefa selecionada.' }
+    if (!calendarioExiste(state.calendarios, calendarioUid)) return { ok: false, erro: 'O calendário escolhido não existe nesta obra.' }
+    const alvos = new Set<number>()
+    for (const u of uids) {
+      const alvo = tarefaFolha(u)
+      if (!alvo.ok) return alvo
+      alvos.add(u)
+    }
+    const atribuir = calendarioUid !== undefined && calendarioUid !== state.calendarioPadraoUid
+    const tarefas = state.tasks.map((t) => {
+      if (!alvos.has(t.uid)) return t
+      const { calendarioUid: _antigo, ...resto } = t
+      return atribuir ? { ...resto, calendarioUid } : resto
+    })
+    const estouro = erroSeAplicar(tarefas)
+    if (estouro) return { ok: false, erro: estouro }
+    state.tasks = tarefas
+    const nome = calendarioDaObra(calendarioUid ?? state.calendarioPadraoUid)?.nome ?? ''
+    log('sistema', `Calendário atribuído a ${alvos.size} tarefa(s)`, `Calendário "${nome}".`)
+    return { ok: true }
+  }
+
+  /** Liga ou desliga os nacionais, o Carnaval e o Corpus Christi da obra (os manuais têm ação própria). */
+  function definirConfigFeriados(parcial: Partial<Pick<ConfigFeriadosObra, 'nacionais' | 'carnaval' | 'corpusChristi'>>): ResultadoAcao {
+    const nova: ConfigFeriadosObra = { ...clone(state.feriados), ...parcial }
+    const estouro = erroSeAplicar(state.tasks, state.meta, state.calendarios, nova)
+    if (estouro) return { ok: false, erro: estouro }
+    state.feriados = nova
+    const rotulo = (v: boolean) => (v ? 'sim' : 'não')
+    log('sistema', 'Feriados da obra alterados', `Nacionais: ${rotulo(nova.nacionais)}; Carnaval: ${rotulo(nova.carnaval)}; Corpus Christi: ${rotulo(nova.corpusChristi)}.`)
+    return { ok: true }
+  }
+
+  /** Cadastra um feriado à mão (fonte obrigatória). Feriado estadual ou municipal guarda a UF e o município da obra, se não informados. */
+  function adicionarFeriadoManual(dados: NovoFeriadoManual): ResultadoAcao {
+    const local = dados.abrangencia === 'estadual' || dados.abrangencia === 'municipal'
+    const feriado: NovoFeriadoManual = {
+      ...dados,
+      nome: dados.nome.trim(),
+      fonte: dados.fonte.trim(),
+      ...(local && dados.uf === undefined && state.meta.uf ? { uf: state.meta.uf } : {}),
+      ...(dados.abrangencia === 'municipal' && dados.municipio === undefined && state.meta.municipio ? { municipio: state.meta.municipio } : {}),
+    }
+    const erros = validarFeriadoManual(feriado, state.feriados.manuais)
+    if (erros.length) return { ok: false, erro: erros[0] }
+    const nova: ConfigFeriadosObra = { ...clone(state.feriados), manuais: [...clone(state.feriados.manuais), { ...feriado, id: uid('fer') }] }
+    const estouro = erroSeAplicar(state.tasks, state.meta, state.calendarios, nova)
+    if (estouro) return { ok: false, erro: estouro }
+    state.feriados = nova
+    log('sistema', `Feriado cadastrado: ${feriado.nome}`, `${dataBR(feriado.data)}${feriado.recorrenteAnual ? ' (todo ano)' : ''}. Fonte: ${feriado.fonte}`)
+    return { ok: true }
+  }
+
+  function removerFeriadoManual(id: string): ResultadoAcao {
+    const f = state.feriados.manuais.find((x) => x.id === id)
+    if (!f) return { ok: false, erro: 'Feriado não encontrado.' }
+    const nova: ConfigFeriadosObra = { ...clone(state.feriados), manuais: state.feriados.manuais.filter((x) => x.id !== id).map((x) => clone(x)) }
+    const estouro = erroSeAplicar(state.tasks, state.meta, state.calendarios, nova)
+    if (estouro) return { ok: false, erro: estouro }
+    state.feriados = nova
+    log('sistema', `Feriado removido: ${f.nome}`, `${dataBR(f.data)}.`)
+    return { ok: true }
+  }
+
+  function comAplicaFeriados(uid: number, aplicar: boolean): CalendarioObra[] {
+    return state.calendarios.map((c) => {
+      if (c.uid !== uid) return c
+      const { aplicaFeriadosObra: _antigo, ...resto } = c
+      return aplicar ? { ...resto, aplicaFeriadosObra: true } : resto
+    })
+  }
+
+  /** Prévia de "Aplicar feriados da obra" (ou de removê-los) a um calendário: entrega antes → depois e tarefas que mudam de data. */
+  function previaAplicarFeriados(uid: number, aplicar = true): PreviaImpacto {
+    if (!calendarioDaObra(uid)) return { erro: 'O calendário não existe nesta obra.' }
+    return impactoDaHipotese(comAplicaFeriados(uid, aplicar), state.feriados)
+  }
+
+  /** Aplica (ou remove) os feriados da obra num calendário: ação explícita do usuário, depois de ver a prévia. */
+  function aplicarFeriadosObra(uid: number, aplicar = true): ResultadoAcao {
+    const atual = calendarioDaObra(uid)
+    if (!atual) return { ok: false, erro: 'O calendário não existe nesta obra.' }
+    const calendariosNovos = comAplicaFeriados(uid, aplicar)
+    const estouro = erroSeAplicar(state.tasks, state.meta, calendariosNovos)
+    if (estouro) return { ok: false, erro: estouro }
+    state.calendarios = calendariosNovos
+    log('sistema', aplicar ? `Feriados da obra aplicados: ${atual.nome}` : `Feriados da obra removidos: ${atual.nome}`, aplicar ? 'O calendário passou a considerar os feriados da obra.' : 'O calendário deixou de considerar os feriados da obra.')
+    return { ok: true }
+  }
+
+  /** Feriados manuais de outro local (UF ou município) e o impacto de removê-los, para a troca de local da obra. */
+  function previaTrocaLocal(uf?: string, municipio?: string): PreviaTrocaLocal {
+    const foraDoLocal = feriadosForaDoLocal(state.feriados, uf || undefined, municipio)
+    const semFeriadosLocais = !state.feriados.manuais.some((f) => f.abrangencia === 'estadual' || f.abrangencia === 'municipal')
+    if (!foraDoLocal.length) return { foraDoLocal, semFeriadosLocais }
+    const ids = new Set(foraDoLocal.map((f) => f.id))
+    const semEles: ConfigFeriadosObra = { ...clone(state.feriados), manuais: state.feriados.manuais.filter((f) => !ids.has(f.id)).map((f) => clone(f)) }
+    return { foraDoLocal, semFeriadosLocais, impactoDeRemover: impactoDaHipotese(state.calendarios, semEles) }
   }
 
   // ---------------------------------------------------------------- Obras (SPEC-14)
@@ -1476,7 +1725,7 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /** Edita os dados da obra ativa. A data de status passa por `setStatusDate` (com registro no log). */
-  function atualizarDadosObra(dados: DadosObra): { ok: true } | { ok: false; erros: string[] } {
+  function atualizarDadosObra(dados: DadosObra, opcoes: { removerFeriadosDeOutroLocal?: boolean } = {}): { ok: true } | { ok: false; erros: string[] } {
     const erros = validarDadosObra(dados, {
       inicioOriginal: state.meta.startDate,
       statusOriginal: state.meta.statusDate,
@@ -1511,6 +1760,15 @@ export const useProjectStore = defineStore('project', () => {
     else delete meta.regimeSinapi
     if (dados.dataBaseSinapi) meta.dataBaseSinapi = dados.dataBaseSinapi
     else delete meta.dataBaseSinapi
+    // Troca de local: os feriados manuais de outra UF ou município ficam ("manter") ou saem ("remover"), por escolha do usuário na prévia
+    if (opcoes.removerFeriadosDeOutroLocal) {
+      const fora = feriadosForaDoLocal(state.feriados, dados.uf || undefined, dados.municipio?.trim())
+      if (fora.length) {
+        const ids = new Set(fora.map((f) => f.id))
+        state.feriados = { ...clone(state.feriados), manuais: state.feriados.manuais.filter((f) => !ids.has(f.id)).map((f) => clone(f)) }
+        log('sistema', 'Feriados de outro local removidos', `${fora.length} feriado(s) estadual(is) ou municipal(is) de outra UF ou município saíram da obra.`)
+      }
+    }
     if (dados.dataStatus !== meta.statusDate) setStatusDate(dados.dataStatus)
     if (dados.logicaProgresso !== undefined || dados.moverRestante !== undefined) {
       const atual = meta.opcoesCronograma
@@ -1534,6 +1792,18 @@ export const useProjectStore = defineStore('project', () => {
     definirRestricao,
     definirPrazoFinal,
     definirCalendarioTarefa,
+    criarCalendario,
+    editarCalendario,
+    excluirCalendario,
+    definirExcecao,
+    removerExcecao,
+    atribuirCalendario,
+    definirConfigFeriados,
+    adicionarFeriadoManual,
+    removerFeriadoManual,
+    previaAplicarFeriados,
+    aplicarFeriadosObra,
+    previaTrocaLocal,
     definirOpcoesCronograma,
     rollups,
     tasksByWbs,

@@ -73,6 +73,19 @@ function mudarCalendario(t: Task, valor: string) {
   responder(project.definirCalendarioTarefa(t.uid, valor === '' ? undefined : Number(valor)))
 }
 
+// Atribuição em lote: o calendário escolhido vale para todas as tarefas folha do pacote (grupo da EAP)
+const pacoteLote = ref('')
+const calendarioLote = ref('')
+const pacotes = computed(() => project.tasksByWbs.filter((t) => t.isSummary))
+const uidsDoPacote = computed(() => (pacoteLote.value ? project.leaves.filter((t) => t.wbs.startsWith(pacoteLote.value + '.')).map((t) => t.uid) : []))
+
+function aplicarEmLote() {
+  const uids = uidsDoPacote.value
+  const r = project.atribuirCalendario(uids, calendarioLote.value === '' ? undefined : Number(calendarioLote.value))
+  if (!r.ok) return responder(r)
+  ui.notify('success', 'Calendário atribuído', `${uids.length} tarefa(s) do pacote ${pacoteLote.value}. Datas recalculadas.`)
+}
+
 const calendariosAlternativos = computed(() => project.state.calendarios.filter((c) => c.uid !== project.state.calendarioPadraoUid))
 const nomeCalendarioPadrao = computed(() => project.state.calendarios.find((c) => c.uid === project.state.calendarioPadraoUid)?.nome ?? '')
 
@@ -133,6 +146,26 @@ const ac = (t: Task) => (t.isSummary ? (project.rollups.get(t.uid)?.actualCost ?
         </div>
       </div>
       <button class="btn-secondary" @click="saveBaseline"><Save class="h-3.5 w-3.5" /> Salvar linha de base</button>
+    </div>
+
+    <div class="card flex flex-wrap items-end gap-4 p-4" data-testid="atribuicao-lote">
+      <div class="min-w-[220px] flex-1">
+        <label class="label" for="lote-pacote">Pacote da EAP</label>
+        <select id="lote-pacote" v-model="pacoteLote" class="input">
+          <option value="">Escolha um pacote</option>
+          <option v-for="p in pacotes" :key="p.uid" :value="p.wbs">{{ p.wbs }} {{ p.name }}</option>
+        </select>
+      </div>
+      <div class="min-w-[220px]">
+        <label class="label" for="lote-calendario">Calendário</label>
+        <select id="lote-calendario" v-model="calendarioLote" class="input">
+          <option value="">Padrão da obra ({{ nomeCalendarioPadrao }})</option>
+          <option v-for="c in calendariosAlternativos" :key="c.uid" :value="c.uid">{{ c.nome }}</option>
+        </select>
+      </div>
+      <button type="button" class="btn-secondary" :disabled="!uidsDoPacote.length" @click="aplicarEmLote">
+        Aplicar calendário às {{ uidsDoPacote.length }} tarefas do pacote
+      </button>
     </div>
 
     <SectionCard title="Estrutura Analítica do Projeto" :subtitle="`${project.leaves.length} tarefas · ${project.tasksByWbs.length - project.leaves.length} resumos · BAC ${fmtBRL(project.evm.bac)}`" :icon="TableProperties" body-class="overflow-x-auto">

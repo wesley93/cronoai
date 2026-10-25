@@ -1,5 +1,5 @@
 // Efeito dominó e simulador de recuperação (Crashing, Fast Tracking e Hora Extra).
-import type { CalendarioObra, PremissasObra, ProjectMeta, ScenarioKind, ScheduleResult, Task, VersaoPremissas } from '@/types/domain'
+import type { CalendarioObra, ConfigFeriadosObra, PremissasObra, ProjectMeta, ScenarioKind, ScheduleResult, Task, VersaoPremissas } from '@/types/domain'
 import { WorkCalendar, diffCalendarDays, nextSaturdays } from './calendar'
 import {
   MINUTOS_NO_DIA_CORRIDO,
@@ -13,6 +13,7 @@ import {
   minutosParaDias,
 } from './calendarioTrabalho'
 import { computeSchedule, downstreamOf, optsDaObra } from './cpm'
+import { criarFeriadosPorAno, ehFeriadoDaObra } from './feriadosObra'
 import { memoriaPremissas, premissasPadrao, taxaHora } from './premissas'
 import { normalizeText, rotuloLag } from './wbs'
 
@@ -145,6 +146,8 @@ interface Ctx {
   origin?: Task
   /** Premissas vigentes da obra; ausente = premissas padrão (ilustrativas). */
   premissas?: PremissasObra
+  /** Feriados da obra (aplicados aos calendários com `aplicaFeriadosObra`); ausente = nenhum. */
+  feriados?: ConfigFeriadosObra
   /** Versão das premissas vigentes (registrada no resultado do cenário). */
   versaoPremissas?: Pick<VersaoPremissas, 'versao' | 'vigencia'>
 }
@@ -165,14 +168,17 @@ const minutosPorDiaDe = (ctx: Ctx) => ctx.meta.minutosPorDia ?? MINUTOS_POR_DIA_
 /** Horas por dia do custo: jornada do calendário, minutos por dia ÷ 60 (480 → 8 h). */
 const horasPorDiaDe = (ctx: Ctx) => minutosPorDiaDe(ctx) / 60
 
+const compilar = (ctx: Ctx, calendarios: CalendarioObra[]) =>
+  compilarCalendarios(ctx.meta.startDate, calendarios, ctx.calendarioPadraoUid, { feriadosPorAno: ctx.feriados ? criarFeriadosPorAno(ctx.feriados) : undefined })
+
 function reschedule(ctx: Ctx, tasks: Task[], calendarios: CalendarioObra[]) {
-  const cals = compilarCalendarios(ctx.meta.startDate, calendarios, ctx.calendarioPadraoUid)
+  const cals = compilar(ctx, calendarios)
   const schedule = computeSchedule(tasks, cals, optsDaObra(ctx.meta, 'forecast', ctx.meta.statusDate))
   return { cals, schedule }
 }
 
 function recovered(ctx: Ctx, newFinish: string): number {
-  const cals = compilarCalendarios(ctx.meta.startDate, ctx.calendarios, ctx.calendarioPadraoUid)
+  const cals = compilar(ctx, ctx.calendarios)
   return workingVariance(calendarioDeDias(cals.padrao), newFinish, ctx.forecast.projectFinish)
 }
 
@@ -388,7 +394,7 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
   const extras = diasExtrasDo(padrao)
   const feriados = padrao.excecoes.filter((ex) => ex.intervalos.length === 0).map((ex) => ex.data)
   const days = nextSaturdays(ctx.meta.statusDate, wanted + extras.length + 4)
-    .filter((d) => !extras.includes(d) && !feriados.includes(d))
+    .filter((d) => !extras.includes(d) && !feriados.includes(d) && !(padrao.aplicaFeriadosObra && ctx.feriados && ehFeriadoDaObra(ctx.feriados, d)))
     .slice(0, wanted)
   if (!days.length) return notApplicable('overtime', title, 'Os próximos sábados já estão no calendário de trabalho.', ctx)
 

@@ -5,6 +5,7 @@
 // Hora local da obra, sem fuso: a aritmética de dia usa UTC só como relógio (como calendar.ts).
 // Cada calendário converte "momento" ↔ "minuto útil": W(m) = minutos úteis antes do momento m (relativo à data-base).
 import type { CalendarioObra, ExcecaoCalendario, IntervaloTrabalho } from '@/types/domain'
+import { configFeriadosPadrao, criarFeriadosPorAno } from './feriadosObra'
 import { MSG_TETO, TETO_DIAS, WorkCalendar, addCalendarDays, diffCalendarDays, parseISO } from './calendar'
 
 export { TETO_DIAS }
@@ -124,6 +125,7 @@ export function erroDoCalendario(cal: CalendarioObra): string | undefined {
     if (!Array.isArray(ex.intervalos)) return 'exceção com horário inválido.'
     const e = erroDeIntervalos(ex.intervalos, 'exceção')
     if (e) return e
+    if (ex.descricao !== undefined && (typeof ex.descricao !== 'string' || ex.descricao.length > MAX_DESCRICAO_EXCECAO)) return 'exceção com descrição inválida.'
   }
   // A semana precisa ter tempo útil: só com exceções úteis o motor varreria dezenas de anos de dias sem trabalho
   return temTempoNaSemana ? undefined : 'a semana do calendário não tem nenhum tempo útil.'
@@ -139,6 +141,8 @@ export class CalendarioCompilado {
   private readonly semana: IntervaloTrabalho[][]
   private readonly excecoes = new Map<number, IntervaloTrabalho[]>()
   private readonly dowBase: number
+  /** Dia (relativo à data-base) → é feriado da obra? Memorizado: `intervalosDoDia` roda a cada consulta do motor. */
+  private readonly feriados = new Map<number, boolean>()
   /** pos[i] = minutos úteis acumulados antes do dia i (i ≥ 0). */
   private readonly pos: number[] = [0]
   /** neg[j] = minutos úteis acumulados antes do dia −j, com sinal (≤ 0). */
@@ -150,14 +154,29 @@ export class CalendarioCompilado {
     readonly nome: string,
     semana: IntervaloTrabalho[][],
     excecoes: { data: string; intervalos: IntervaloTrabalho[] }[],
+    /** Feriados da obra (se o calendário os aplica): o dia sem exceção própria que é feriado fica sem tempo útil. */
+    private readonly feriadoDaObra?: (iso: string) => boolean,
   ) {
     this.semana = semana
     this.dowBase = parseISO(base).getUTCDay()
     for (const ex of excecoes) this.excecoes.set(diaRelativo(base, ex.data), ex.intervalos) // a última exceção da data vale
   }
 
+  /** Semana → feriados da obra (se aplicados) → exceções próprias do calendário (prevalecem sobre os feriados). */
   intervalosDoDia(dia: number): readonly IntervaloTrabalho[] {
-    return this.excecoes.get(dia) ?? this.semana[(((this.dowBase + dia) % 7) + 7) % 7]
+    const propria = this.excecoes.get(dia)
+    if (propria) return propria
+    if (this.feriadoDaObra && this.ehFeriado(dia)) return []
+    return this.semana[(((this.dowBase + dia) % 7) + 7) % 7]
+  }
+
+  private ehFeriado(dia: number): boolean {
+    let f = this.feriados.get(dia)
+    if (f === undefined) {
+      f = this.feriadoDaObra!(addCalendarDays(this.base, dia))
+      this.feriados.set(dia, f)
+    }
+    return f
   }
 
   minutosNoDia(dia: number): number {
@@ -309,9 +328,17 @@ export class CalendarioCompilado {
   }
 }
 
+let geradorPadrao: ((ano: number) => ReadonlySet<string>) | undefined
+const feriadosPadraoPorAno = () => (geradorPadrao ??= criarFeriadosPorAno(configFeriadosPadrao()))
+
 export interface OpcoesCompilacao {
   /** Ignora as exceções úteis (dia útil extra, sábado de hora extra): regra do PV (CR-2d). */
   semExcecoesUteis?: boolean
+  /**
+   * Gerador de feriados da obra por ano (ver `criarFeriadosPorAno`), aplicado aos calendários com `aplicaFeriadosObra`.
+   * Sem gerador, vale a configuração padrão (nacionais, Carnaval e Corpus Christi), como na obra sem `feriados` salvo.
+   */
+  feriadosPorAno?: (ano: number) => ReadonlySet<string>
 }
 
 export interface CalendariosCompilados {
@@ -337,7 +364,9 @@ export function compilarCalendarios(
     const erro = erroDoCalendario(c)
     if (erro) throw new Error(`Calendário inválido: ${erro}`)
     const excecoes = opcoes.semExcecoesUteis ? c.excecoes.filter((ex) => ex.intervalos.length === 0) : c.excecoes
-    porUid.set(c.uid, new CalendarioCompilado(base, c.uid, c.nome, c.semana, excecoes))
+    const gerador = opcoes.feriadosPorAno ?? feriadosPadraoPorAno()
+    const feriado = c.aplicaFeriadosObra && gerador ? (iso: string) => gerador(Number(iso.slice(0, 4))).has(iso) : undefined
+    porUid.set(c.uid, new CalendarioCompilado(base, c.uid, c.nome, c.semana, excecoes, feriado))
   }
   const padrao = porUid.get(padraoUid)
   if (!padrao) throw new Error('O calendário padrão da obra não existe.')
@@ -421,4 +450,71 @@ export function resumoJornadaSemana(cal: CalendarioObra): string {
     else grupos.push({ de: d, ate: d, minutos })
   }
   return grupos.map((g) => `${g.de === g.ate ? NOMES_DIA[g.de] : `${NOMES_DIA[g.de]}–${NOMES_DIA[g.ate]}`} ${horasTexto(g.minutos)}`).join('; ')
+}
+
+// ---------------------------------------------------------------------------
+// Editor de calendários (ciclo 00005): predefinições, texto → intervalo, cópia e nome
+// ---------------------------------------------------------------------------
+
+/** Máximo de calendários por obra (o mesmo limite do import do MSPDI). */
+export const MAX_CALENDARIOS = 100
+export const MAX_NOME_CALENDARIO = 60
+export const MAX_DESCRICAO_EXCECAO = 80
+
+/** Jornadas prontas do editor: sem expediente, meio período (4 h, 08:00–12:00) e dia inteiro de 8 h (08:00–12:00 e 13:00–17:00). */
+export const PREDEFINICOES_JORNADA = ['sem-expediente', 'quatro-horas', 'oito-horas'] as const
+export type PredefinicaoJornada = (typeof PREDEFINICOES_JORNADA)[number]
+export const ROTULO_PREDEFINICAO: Record<PredefinicaoJornada, string> = {
+  'sem-expediente': 'Sem expediente',
+  'quatro-horas': '4 h (08:00–12:00)',
+  'oito-horas': '8 h (08:00–12:00 e 13:00–17:00)',
+}
+
+export function intervalosDaPredefinicao(p: PredefinicaoJornada): IntervaloTrabalho[] {
+  if (p === 'sem-expediente') return []
+  if (p === 'quatro-horas') return [{ de: 480, ate: 720 }]
+  return EXPEDIENTE_PADRAO.map((iv) => ({ ...iv }))
+}
+
+/** Predefinição que corresponde exatamente aos intervalos (ou `undefined` = personalizado). */
+export function predefinicaoDe(intervalos: readonly IntervaloTrabalho[]): PredefinicaoJornada | undefined {
+  return PREDEFINICOES_JORNADA.find((p) => JSON.stringify(intervaloOrdenado(intervalosDaPredefinicao(p))) === JSON.stringify(intervaloOrdenado(intervalos)))
+}
+const intervaloOrdenado = (ivs: readonly IntervaloTrabalho[]) => ivs.map((iv) => [iv.de, iv.ate])
+
+/**
+ * Horário digitado (`hh:mm` de início e de fim) → intervalo em minutos. Fim `00:00` vale 24:00 (1.440): `22:00–00:00` são 120 min e
+ * `00:00–00:00` é o dia inteiro. A ordem e a sobreposição dos intervalos são validadas depois desta conversão (`erroDoCalendario`).
+ */
+export function intervaloDeTextos(de: string, ate: string): { intervalo: IntervaloTrabalho } | { erro: string } {
+  const d = horaParaMinutos(de)
+  const a = horaParaMinutos(ate)
+  if (d === undefined || a === undefined) return { erro: 'Informe horários válidos (hh:mm).' }
+  const fim = a === 0 ? MINUTOS_NO_DIA_CORRIDO : a
+  if (fim <= d) return { erro: 'O fim do intervalo deve ser depois do início.' }
+  return { intervalo: { de: d, ate: fim } }
+}
+
+/** Nome do calendário: 1 a 60 caracteres e único na obra (sem diferenciar maiúsculas). Devolve a mensagem ou `undefined`. */
+export function erroDoNomeCalendario(nome: string, calendarios: readonly CalendarioObra[], uidIgnorado?: number): string | undefined {
+  const n = nome.trim()
+  if (!n) return 'Informe o nome do calendário.'
+  if (n.length > MAX_NOME_CALENDARIO) return `O nome do calendário deve ter no máximo ${MAX_NOME_CALENDARIO} caracteres.`
+  if (calendarios.some((c) => c.uid !== uidIgnorado && c.nome.trim().toLowerCase() === n.toLowerCase())) return 'Já existe um calendário com este nome.'
+  return undefined
+}
+
+/** Próximo UID livre de calendário (maior + 1). */
+export const proximoUidCalendario = (calendarios: readonly CalendarioObra[]) => calendarios.reduce((m, c) => Math.max(m, c.uid), 0) + 1
+
+/** Cópia independente do calendário com novo UID e nome (não herda a origem de hora extra). */
+export function copiarCalendario(cal: CalendarioObra, uid: number, nome: string): CalendarioObra {
+  const { origem: _origem, derivadoDe: _derivadoDe, ...resto } = cal
+  return {
+    ...resto,
+    uid,
+    nome,
+    semana: cal.semana.map((d) => d.map((iv) => ({ ...iv }))),
+    excecoes: cal.excecoes.map((ex) => ({ ...ex, intervalos: ex.intervalos.map((iv) => ({ ...iv })) })),
+  }
 }

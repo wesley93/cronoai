@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { WorkCalendar, brazilianHolidays } from './calendar'
+import { WorkCalendar, brazilianHolidays, carnaval, corpusChristi, defaultHolidays, feriadosNacionais } from './calendar'
 
 // Obra fictícia: base 04/05/2026 (segunda); 01/05 é feriado; 09/05 (sábado) vira dia útil de hora extra.
 const cal = () => new WorkCalendar('2026-05-04', { holidays: brazilianHolidays(2026), extraWorkingDays: ['2026-05-09'] })
@@ -66,5 +66,33 @@ describe('indexOnOrBefore antes da data-base (CR-11)', () => {
     const c = new WorkCalendar('2026-10-26', { holidays: brazilianHolidays(2026), extraWorkingDays: [] })
     expect(c.dateAt(c.indexOnOrBefore('2026-10-21'))).toBe('2026-10-21')
     expect(c.indexOnOrBefore('2026-10-21')).toBe(-3)
+  })
+})
+
+describe('feriados nacionais, Carnaval e Corpus Christi separados (ciclo 00005, achados b e c)', () => {
+  it('CF-5: o 20/11 só é feriado nacional a partir de 2024 (Lei 14.759/2023, a confirmar com o Jurídico)', () => {
+    expect(feriadosNacionais(2023)).not.toContain('2023-11-20')
+    expect(feriadosNacionais(2024)).toContain('2024-11-20')
+    expect(feriadosNacionais(2026)).toContain('2026-11-20')
+  })
+
+  it('2026: nacionais com Sexta-feira Santa, sem Carnaval nem Corpus Christi', () => {
+    expect(feriadosNacionais(2026)).toEqual(['2026-01-01', '2026-04-03', '2026-04-21', '2026-05-01', '2026-09-07', '2026-10-12', '2026-11-02', '2026-11-15', '2026-11-20', '2026-12-25'])
+    expect(carnaval(2026)).toEqual(['2026-02-16', '2026-02-17']) // Páscoa 05/04/2026
+    expect(corpusChristi(2026)).toEqual(['2026-06-04'])
+  })
+
+  it('2027 (Páscoa em 28/03): Carnaval 08 e 09/02 e Corpus Christi 27/05', () => {
+    expect(carnaval(2027)).toEqual(['2027-02-08', '2027-02-09'])
+    expect(corpusChristi(2027)).toEqual(['2027-05-27'])
+    expect(feriadosNacionais(2027)).toContain('2027-03-26') // Sexta-feira Santa
+  })
+
+  it('a união (legado) de 2026 é a lista de antes; de 2026 a 2029 são 52 datas; em 2023, sem o 20/11, 12', () => {
+    expect(brazilianHolidays(2026)).toEqual([
+      '2026-01-01', '2026-02-16', '2026-02-17', '2026-04-03', '2026-04-21', '2026-05-01', '2026-06-04', '2026-09-07', '2026-10-12', '2026-11-02', '2026-11-15', '2026-11-20', '2026-12-25',
+    ])
+    expect(defaultHolidays(2026, 2029)).toHaveLength(52)
+    expect(brazilianHolidays(2023)).toHaveLength(12)
   })
 })

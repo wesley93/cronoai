@@ -2,7 +2,7 @@
 // Referência do esquema: https://learn.microsoft.com/office-project/xml-data-interchange/project-xml-data-interchange-schema-reference
 // A ordem dos elementos segue as sequências (xs:sequence) do esquema MSPDI; o validador abaixo confere essa ordem.
 import type { CalendarioObra, IntervaloTrabalho, Lag, LinkType, ProjectMeta, Restricao, ScheduleResult, Task } from '@/types/domain'
-import { WorkCalendar, addCalendarDays, defaultHolidays, diffCalendarDays } from './calendar'
+import { WorkCalendar, addCalendarDays, diffCalendarDays } from './calendar'
 import {
   EXPEDIENTE_PADRAO,
   JANELA_ANOS_DATAS,
@@ -888,29 +888,16 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   }
   const calendariosNaoImportados = calendariosEl.length - importados.size - rejeitados - calendariosAcimaDoLimite
 
-  // Calendário padrão da obra: o do projeto. Sem ele (ausente ou rejeitado), o padrão seg–sex com os feriados nacionais.
+  // Calendário padrão da obra: o do projeto. Sem ele (ausente ou rejeitado), o padrão seg–sex, SEM feriados. O CronoAI nunca acrescenta
+  // feriados a um calendário que veio do arquivo: o arquivo foi calculado sem eles (no corpus, as datas batem em 100 de 104 sem os
+  // feriados nacionais e em 83 de 104 com eles). "Aplicar feriados da obra" é ação explícita do usuário, com prévia (ciclo 00005, P3).
   const uidPadrao = Number.isInteger(Number(uidProjetoTexto)) && uidProjetoTexto !== undefined ? Number(uidProjetoTexto) : UID_CALENDARIO_PADRAO
-  const years = taskNodes.map((n) => Number((isoDate(text(n, 'Start')) ?? baseDaFaixa).slice(0, 4))).filter((y) => y > 1990)
-  // Laço no lugar de Math.min(...years): milhares de tarefas estourariam a pilha de argumentos
-  let fromYear = Math.min(Number(baseDaFaixa.slice(0, 4)), new Date().getFullYear())
-  for (const y of years) if (y < fromYear) fromYear = y
-  const nacionais = defaultHolidays(fromYear, fromYear + 4)
   let calPadrao = importados.get(uidPadrao)
-  let semFeriados = false
   if (!calPadrao) {
-    calPadrao = calendarioPadrao(nacionais, [], uidPadrao)
+    calPadrao = calendarioPadrao([], [], uidPadrao)
     importados.set(uidPadrao, calPadrao)
-    semFeriados = true
-  } else if (!calPadrao.excecoes.some((ex) => ex.intervalos.length === 0)) {
-    // O arquivo não traz feriado: o CronoAI aplica os nacionais (feriado do arquivo, quando há, nunca é trocado)
-    const datasUteis = new Set(calPadrao.excecoes.map((ex) => ex.data))
-    calPadrao = {
-      ...calPadrao,
-      excecoes: [...calPadrao.excecoes, ...nacionais.filter((d) => !datasUteis.has(d)).map((data) => ({ data, intervalos: [] }))].sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0)),
-    }
-    importados.set(uidPadrao, calPadrao)
-    semFeriados = true
   }
+  const semFeriados = !calPadrao.excecoes.some((ex) => ex.intervalos.length === 0)
   if (total.recorrentes) warnings.push(`${total.recorrentes} exceção(ões) recorrente(s) do calendário não aplicada(s): confira feriados e dias úteis extras.`)
   if (total.invalidas) warnings.push(`${total.invalidas} exceção(ões) do calendário com data inválida ignorada(s).`)
   if (total.truncadas) warnings.push(`${total.truncadas} exceção(ões) do calendário com mais de ${MAX_EXCEPTION_DAYS} dias: lidas apenas nos primeiros ${MAX_EXCEPTION_DAYS} dias.`)
@@ -1140,8 +1127,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   }
   if (!meta.statusDate) warnings.push('Data de status ausente no XML; mantida a data de status atual do CronoAI.')
   if (semFeriados) {
-    warnings.push('Calendário sem feriados no XML; aplicados os feriados nacionais brasileiros.')
-    meta.feriadosNacionaisAplicados = true
+    warnings.push('O calendário do arquivo não traz feriados. O CronoAI não acrescentou nenhum: use "Aplicar feriados da obra" em Premissas › Calendários para ver o impacto antes.')
   }
 
   return {

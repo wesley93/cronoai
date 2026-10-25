@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { Task } from '@/types/domain'
+import type { CalendarioObra, ConfigFeriadosObra, ProjectMeta, Task } from '@/types/domain'
 import { buildSeedState } from '@/stores/useProjectStore'
 import fixtureCalendarios from './__fixtures__/mspdi-calendarios-restricoes.xml?raw'
 import { addCalendarDays } from './calendar'
-import { compilarCalendarios } from './calendarioTrabalho'
+import { calendarioPadrao, compilarCalendarios, copiarCalendario, diasParaMinutos } from './calendarioTrabalho'
+import { calendariosParaExportar, configFeriadosPadrao, criarFeriadosPorAno } from './feriadosObra'
 import { computeSchedule, optsDaObra } from './cpm'
 import { calcularDivergencias } from './divergencias'
 import {
@@ -17,6 +18,8 @@ import {
   parseMspdiXml,
   validateMspdi,
 } from './msProjectXmlParser'
+
+const AVISO_SEM_FERIADOS = 'O calendário do arquivo não traz feriados. O CronoAI não acrescentou nenhum: use "Aplicar feriados da obra" em Premissas › Calendários para ver o impacto antes.'
 
 const seed = buildSeedState()
 const cals = compilarCalendarios(seed.meta.startDate, seed.calendarios, seed.calendarioPadraoUid)
@@ -798,13 +801,15 @@ describe('limites do import de calendários, restrições e lags (S-1 e S-2)', (
     expect(r.tasks.filter((t) => t.calendarioUid !== undefined)).toHaveLength(99)
   })
 
-  it('calendário do projeto rejeitado: usa o padrão seg–sex com os feriados nacionais e avisa', () => {
+  it('calendário do projeto rejeitado: usa o padrão seg–sex SEM feriados e avisa que nenhum foi acrescentado (antes: com os nacionais)', () => {
     const r = parseMspdiXml(projeto({ head: `<StartDate>2026-03-02T08:00:00</StartDate><CalendarUID>1</CalendarUID><Calendars>${base(1, 'Ruim', semanaDe(horas(['08:00:00', '25:00:00'])))}</Calendars>` }))
     expect(r.calendarioPadraoUid).toBe(1)
     expect(r.calendarios[0].semana[1]).toEqual([{ de: 480, ate: 720 }, { de: 780, ate: 1020 }])
-    expect(r.calendarios[0].excecoes.some((ex) => ex.data === '2026-12-25' && ex.intervalos.length === 0)).toBe(true)
+    expect(r.calendarios[0].excecoes).toEqual([]) // antes do ciclo 00005: os feriados nacionais de 5 anos como exceções
+    expect(r.calendarios[0].aplicaFeriadosObra).toBeUndefined()
     expect(r.warnings.some((w) => w.startsWith('1 calendário(s) rejeitado(s)'))).toBe(true)
-    expect(r.warnings).toContain('Calendário sem feriados no XML; aplicados os feriados nacionais brasileiros.')
+    expect(r.warnings).toContain(AVISO_SEM_FERIADOS)
+    expect(r.meta.feriadosNacionaisAplicados).toBeUndefined()
   })
 
   it('exceções com horário (legadas e em <Exceptions>) e WorkWeeks: o horário vale, as semanas alternativas avisam', () => {
@@ -947,5 +952,78 @@ describe('parseMspdiXml: rodada 02 (faixas de Duration e MinutesPerDay, calendá
     const calsVolta = compilarCalendarios(metaVolta.startDate, volta.calendarios, volta.calendarioPadraoUid)
     const schVolta = computeSchedule(volta.tasks, calsVolta, optsDaObra(metaVolta, 'forecast', metaVolta.statusDate))
     expect(calcularDivergencias(volta.tasks, schVolta, calsVolta, metaVolta)).toEqual([])
+  })
+})
+
+// Ciclo 00005 (M-2): ida e volta do que a tela cria: calendário alternativo, feriado manual da obra, calendário de hora extra e o
+// CalendarUID das tarefas. Os feriados da obra viram exceções não úteis na exportação (a origem do feriado e a descrição da exceção não
+// existem no formato do arquivo e não voltam).
+describe('MSPDI de ida e volta com calendários do ciclo 00005 (M-2)', () => {
+  const padraoObra: CalendarioObra = { ...calendarioPadrao([]), aplicaFeriadosObra: true }
+  const sabadoManha: CalendarioObra = {
+    ...copiarCalendario(padraoObra, 2, 'Concretagem — sábado manhã'),
+    semana: padraoObra.semana.map((d, i) => (i === 6 ? [{ de: 480, ate: 720 }] : d)),
+  }
+  const horaExtra: CalendarioObra = {
+    ...copiarCalendario(padraoObra, 3, 'Padrão Obra (seg-sex, 8h) + HE 22/08 e 29/08'),
+    origem: 'hora-extra',
+    derivadoDe: 1,
+    excecoes: ['2026-08-22', '2026-08-29'].map((data) => ({ data, intervalos: [{ de: 480, ate: 720 }, { de: 780, ate: 1020 }] })),
+  }
+  const feriados: ConfigFeriadosObra = {
+    ...configFeriadosPadrao(),
+    manuais: [{ id: 'f1', data: '2026-08-20', nome: 'Feriado municipal fictício', abrangencia: 'municipal', fonte: 'Lei municipal fictícia de teste', recorrenteAnual: true, uf: 'PE', municipio: 'Cidade Fictícia' }],
+  }
+  const tarefa = (uid: number, dias: number, extra: Partial<Task> = {}): Task => ({
+    uid, wbs: String(uid), name: `T${uid}`, outlineLevel: 1, isSummary: false, duracaoMin: diasParaMinutos(dias), predecessors: [],
+    percentComplete: 0, bac: 1000, actualCost: 0, resources: [], ...extra,
+  })
+  const tasks = [
+    tarefa(1, 12, { calendarioUid: 2 }),
+    tarefa(2, 5, { calendarioUid: 3, predecessors: [{ uid: 1, type: 'FS', lag: { tipo: 'util', minutos: 0 } }] }),
+    tarefa(3, 3),
+  ]
+  const meta = { name: 'Obra fictícia', company: '', manager: '', startDate: '2026-08-03', statusDate: '2026-07-31' }
+  const calendariosObra = [padraoObra, sabadoManha, horaExtra]
+  const cals = compilarCalendarios(meta.startDate, calendariosObra, 1, { feriadosPorAno: criarFeriadosPorAno(feriados) })
+  const schedule = computeSchedule(tasks, cals, optsDaObra(meta, 'forecast', meta.statusDate))
+  const exportados = calendariosParaExportar(calendariosObra, feriados, 2026, 2029)
+
+  it('exporta com strictOrder sem erros e os calendários, as exceções e o CalendarUID voltam', () => {
+    const xml = buildMspdiXml({ meta, tasks, calendarios: exportados, calendarioPadraoUid: 1, schedule })
+    expect(validateMspdi(xml, { strictOrder: true }).errors).toEqual([])
+    const back = parseMspdiXml(xml)
+    expect(back.warnings.filter((w) => /rejeitado|inválida/.test(w))).toEqual([])
+    expect(back.calendarios.map((c) => [c.uid, c.nome])).toEqual([[1, 'Padrão Obra (seg-sex, 8h)'], [2, 'Concretagem — sábado manhã'], [3, 'Padrão Obra (seg-sex, 8h) + HE 22/08 e 29/08']])
+    const por = (uid: number) => back.calendarios.find((c) => c.uid === uid)!
+    expect(por(2).semana[6]).toEqual([{ de: 480, ate: 720 }]) // sábado de 4 h
+    expect(por(1).semana).toEqual(padraoObra.semana)
+    // Feriado manual (20/08/2026) e os nacionais viram exceções não úteis do calendário que aplica os feriados da obra
+    const naoUteis = (uid: number) => por(uid).excecoes.filter((e) => e.intervalos.length === 0).map((e) => e.data)
+    expect(naoUteis(1)).toContain('2026-08-20')
+    expect(naoUteis(1)).toContain('2026-09-07')
+    expect(naoUteis(1)).toHaveLength(52 + 4) // 13 por ano em 4 anos + o municipal recorrente (uma vez por ano)
+    expect(naoUteis(2)).toContain('2026-08-20') // a cópia também aplica os feriados da obra
+    // Calendário de hora extra: sábados como exceção útil
+    expect(por(3).excecoes.filter((e) => e.intervalos.length > 0).map((e) => e.data)).toEqual(['2026-08-22', '2026-08-29'])
+    // CalendarUID das tarefas
+    expect([1, 2, 3].map((u) => back.tasks.find((t) => t.uid === u)!.calendarioUid)).toEqual([2, 3, undefined])
+    // O que não existe no formato não volta: marca de feriados da obra, origem e descrição da exceção
+    expect(por(1).aplicaFeriadosObra).toBeUndefined()
+    expect(por(3).origem).toBeUndefined()
+  })
+
+  it('reimportar dá as mesmas datas: o cronograma do arquivo tem os mesmos início e término de cada tarefa', () => {
+    const xml = buildMspdiXml({ meta, tasks, calendarios: exportados, calendarioPadraoUid: 1, schedule })
+    const back = parseMspdiXml(xml)
+    const reCals = compilarCalendarios(meta.startDate, back.calendarios, back.calendarioPadraoUid)
+    const re = computeSchedule(back.tasks, reCals, optsDaObra({ ...meta, ...back.meta } as ProjectMeta, 'forecast', meta.statusDate))
+    for (const t of tasks) {
+      expect([re.byUid.get(t.uid)!.start, re.byUid.get(t.uid)!.finish]).toEqual([schedule.byUid.get(t.uid)!.start, schedule.byUid.get(t.uid)!.finish])
+    }
+    // T1: 12 d no calendário com sábado de 4 h, de 03/08 a 17/08. T2 (5 d no calendário de hora extra): 18, 19, 21 (o 20/08 é feriado
+    // municipal), 22 (sábado de hora extra) e 24/08; sem o feriado terminaria em 22/08
+    expect(schedule.byUid.get(1)!.finish).toBe('2026-08-17')
+    expect(schedule.byUid.get(2)!.finish).toBe('2026-08-24')
   })
 })

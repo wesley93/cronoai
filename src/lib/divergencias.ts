@@ -1,9 +1,10 @@
 // Painel "Divergências com o MS Project" (RF-05.8): onde e por que o CronoAI calcula uma data diferente da do arquivo importado.
 // Compara as datas (yyyy-mm-dd) do início e do término calculados (modo previsão) com as do arquivo (`Task.arquivo`).
 // A diferença sai em dias úteis do calendário padrão da obra. Cada causa é rastreável a um campo, sem heurística de texto.
-import type { ProjectMeta, ScheduleResult, ScheduledTask, Task } from '@/types/domain'
+import type { CalendarioObra, ConfigFeriadosObra, ProjectMeta, ScheduleResult, ScheduledTask, Task } from '@/types/domain'
 import { addCalendarDays, defaultHolidays } from './calendar'
 import { calendarioDeDias, type CalendariosCompilados } from './calendarioTrabalho'
+import { ehFeriadoDaObra } from './feriadosObra'
 import { workingVariance } from './scenarios'
 import { alteradaDepoisDaImportacao } from './restricoes'
 import { sortByWbs } from './wbs'
@@ -41,7 +42,14 @@ export interface Divergencia {
   predecessoraUid?: number
 }
 
-export function calcularDivergencias(tasks: Task[], schedule: ScheduleResult, cals: CalendariosCompilados, meta: ProjectMeta): Divergencia[] {
+/** Calendários e feriados da obra: quando um calendário importado aplica os feriados da obra (por ação do usuário), isso explica a diferença de datas. */
+export interface ObraParaDivergencias {
+  calendarios: CalendarioObra[]
+  calendarioPadraoUid: number
+  feriados: ConfigFeriadosObra
+}
+
+export function calcularDivergencias(tasks: Task[], schedule: ScheduleResult, cals: CalendariosCompilados, meta: ProjectMeta, obra?: ObraParaDivergencias): Divergencia[] {
   const cal = calendarioDeDias(cals.padrao)
   const folhas = sortByWbs(tasks.filter((t) => !t.isSummary))
   const byUid = new Map(folhas.map((t) => [t.uid, t]))
@@ -56,8 +64,17 @@ export function calcularDivergencias(tasks: Task[], schedule: ScheduleResult, ca
   }
 
   const moverRestante = meta.opcoesCronograma?.moverRestante ?? true
-  // Feriados nacionais que o CronoAI aplicou (o arquivo não trazia nenhum): dias de semana não úteis no calendário padrão
-  const feriadosAplicados = (de: string, ate: string): boolean => {
+  // Feriados da obra aplicados ao calendário importado pelo usuário ("Aplicar feriados da obra"): dias não úteis por causa deles
+  const feriadosDaObraAplicados = (t: Task, de: string, ate: string): boolean => {
+    if (!obra) return false
+    const uidCal = t.calendarioUid ?? obra.calendarioPadraoUid
+    if (!obra.calendarios.find((c) => c.uid === uidCal)?.aplicaFeriadosObra) return false
+    const cal = cals.de(t.calendarioUid)
+    for (let d = de; d <= ate; d = addCalendarDays(d, 1)) if (ehFeriadoDaObra(obra.feriados, d) && !cal.dataUtil(d)) return true
+    return false
+  }
+  // Legado: obra importada por uma versão anterior, que acrescentava os feriados nacionais quando o arquivo não trazia nenhum
+  const feriadosNacionaisInjetados = (de: string, ate: string): boolean => {
     if (!meta.feriadosNacionaisAplicados) return false
     const nacionais = new Set(defaultHolidays(Number(de.slice(0, 4)), Number(ate.slice(0, 4))))
     for (let d = de; d <= ate; d = addCalendarDays(d, 1)) if (nacionais.has(d) && !cals.padrao.dataUtil(d)) return true
@@ -91,9 +108,13 @@ export function calcularDivergencias(tasks: Task[], schedule: ScheduleResult, ca
     } else if (t.arquivo?.manual) {
       causa = 'manual'
       detalhe = 'Agendada manualmente no MS Project: o CronoAI a calcula automaticamente.'
-    } else if (feriadosAplicados(de, ate) || t.calendarioUid !== undefined) {
+    } else if (feriadosDaObraAplicados(t, de, ate) || feriadosNacionaisInjetados(de, ate) || t.calendarioUid !== undefined) {
       causa = 'feriado'
-      detalhe = t.calendarioUid !== undefined ? 'Calendário da tarefa (UID do calendário em ' + t.calendarioUid + ').' : 'Feriado nacional aplicado pelo CronoAI (o arquivo não trazia feriados).'
+      detalhe = feriadosDaObraAplicados(t, de, ate)
+        ? 'Feriados da obra aplicados ao calendário importado.'
+        : t.calendarioUid !== undefined
+          ? 'Calendário da tarefa (UID do calendário em ' + t.calendarioUid + ').'
+          : 'Feriados nacionais aplicados na importação por uma versão anterior do CronoAI (o arquivo não trazia feriados).'
     } else if (s.restricaoConflito) {
       causa = 'restricao'
       detalhe = 'Restrição em conflito com vínculo: a restrição prevalece sobre a predecessora.'

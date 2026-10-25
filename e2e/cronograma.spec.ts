@@ -17,7 +17,8 @@ test('os KPIs do Aurora continuam os mesmos e o painel avisa que não há arquiv
   await expect(page.getByTestId('divergencias-sem-arquivo')).toContainText('não veio de um arquivo do MS Project')
 })
 
-test('importar o .xml de divergências mostra D-2, D-3, D-4 e D-6 com as causas, e a T1 igual ao arquivo fica de fora', async ({ page }) => {
+// Ciclo 00005: o import não injeta feriados. Antes: D-2, D-3, D-4 e D-6 (4 linhas); depois: só D-4 e D-6 (D-2 e D-3 iguais ao arquivo).
+test('importar o .xml de divergências mostra D-4 e D-6 com as causas; T1, D-2 e D-3 ficam de fora (sem feriados injetados)', async ({ page }) => {
   await page.goto('/')
   const seletor = page.waitForEvent('filechooser')
   await topo(page).getByRole('button', { name: 'Importar .xml' }).click()
@@ -27,16 +28,11 @@ test('importar o .xml de divergências mostra D-2, D-3, D-4 e D-6 com as causas,
   await page.goto('/#/caminho-critico')
   const tabela = page.getByTestId('divergencias-tabela')
   await expect(tabela).toBeVisible()
-  await expect(tabela.getByRole('row')).toHaveCount(5) // cabeçalho + 4 tarefas (a T1 é igual ao arquivo)
+  await expect(tabela.getByRole('row')).toHaveCount(3) // cabeçalho + 2 tarefas (T1, D-2 e D-3 são iguais ao arquivo)
   const linha = (uid: number) => tabela.getByRole('row').filter({ has: page.getByRole('cell', { name: String(uid), exact: true }) })
-  // D-2: feriado nacional aplicado (o arquivo não trazia feriados), +1 d.u.
-  await expect(linha(2)).toContainText('Feriado nacional aplicado pelo CronoAI')
-  await expect(linha(2)).toContainText('+1')
-  // D-3: efeito da predecessora UID 2
-  await expect(linha(3)).toContainText('Efeito da predecessora UID 2.')
-  // D-4: agendada manualmente, -4 d.u.
+  // D-4: agendada manualmente, −5 d.u. (antes, com o feriado de 07/09 injetado: −4)
   await expect(linha(4)).toContainText('Agendada manualmente no MS Project')
-  await expect(linha(4)).toContainText('−4')
+  await expect(linha(4)).toContainText('−5')
   // D-6: a sucessora aponta para o UID da manual
   await expect(linha(5)).toContainText('Predecessora UID 4 agendada manualmente.')
 

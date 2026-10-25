@@ -1,10 +1,11 @@
 // Cálculo completo da obra e verificação do horizonte (50 anos a partir da data-base).
 // Uma só lista de cálculos serve ao derivado `calculo` da store e à simulação antes de gravar uma edição ou um arquivo importado.
-import type { CalendarioObra, ProjectMeta, Task } from '@/types/domain'
+import type { CalendarioObra, ConfigFeriadosObra, ProjectMeta, Task } from '@/types/domain'
 import { MSG_TETO, type WorkCalendar } from './calendar'
 import { calendarioDeDias, compilarCalendarios, type CalendariosCompilados } from './calendarioTrabalho'
 import { computeSchedule, optsDaObra } from './cpm'
 import { computeEvm } from './evm'
+import { criarFeriadosPorAno } from './feriadosObra'
 import { analyzeDelay } from './scenarios'
 
 export const MSG_CALCULO_GENERICA = 'Não foi possível calcular o cronograma desta obra.'
@@ -50,10 +51,12 @@ export function calcularObra(
   meta: ProjectMeta,
   calendarios: CalendarioObra[],
   calendarioPadraoUid: number,
-  opcoes: { comLinhaDeBase?: boolean } = {},
+  opcoes: { comLinhaDeBase?: boolean; feriados?: ConfigFeriadosObra } = {},
 ): CalculoObra {
-  const cals = compilarCalendarios(meta.startDate, calendarios, calendarioPadraoUid)
-  const calsPv = compilarCalendarios(meta.startDate, calendarios, calendarioPadraoUid, { semExcecoesUteis: true })
+  // Feriados da obra: gerados por ano para os calendários com `aplicaFeriadosObra` (sem configuração, nenhum é aplicado)
+  const feriadosPorAno = opcoes.feriados ? criarFeriadosPorAno(opcoes.feriados) : undefined
+  const cals = compilarCalendarios(meta.startDate, calendarios, calendarioPadraoUid, { feriadosPorAno })
+  const calsPv = compilarCalendarios(meta.startDate, calendarios, calendarioPadraoUid, { semExcecoesUteis: true, feriadosPorAno })
   const sch = computeSchedule(tasks, cals, optsDaObra(meta, 'forecast', meta.statusDate))
   if (opcoes.comLinhaDeBase) computeSchedule(tasks, calsPv, optsDaObra(meta, 'baseline'))
   const evm = computeEvm(tasks, calsPv, meta.statusDate)
@@ -64,9 +67,15 @@ export function calcularObra(
 }
 
 /** `undefined` = o estado (real ou hipotético) cabe no horizonte e calcula; senão, a mensagem em português. */
-export function verificarCalculo(tasks: Task[], meta: ProjectMeta, calendarios: CalendarioObra[], calendarioPadraoUid: number): string | undefined {
+export function verificarCalculo(
+  tasks: Task[],
+  meta: ProjectMeta,
+  calendarios: CalendarioObra[],
+  calendarioPadraoUid: number,
+  feriados?: ConfigFeriadosObra,
+): string | undefined {
   try {
-    calcularObra(tasks, meta, calendarios, calendarioPadraoUid, { comLinhaDeBase: true })
+    calcularObra(tasks, meta, calendarios, calendarioPadraoUid, { comLinhaDeBase: true, feriados })
     return undefined
   } catch (e) {
     return mensagemDoCalculo(e)

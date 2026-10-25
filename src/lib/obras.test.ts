@@ -124,8 +124,14 @@ describe('estadoObraVazia', () => {
     })
     expect(e.calendarioPadraoUid).toBe(1)
     expect(e.calendarios).toHaveLength(1)
-    expect(e.calendarios[0].excecoes).toContainEqual({ data: '2026-12-25', intervalos: [] })
-    expect(e.calendarios[0].excecoes.filter((ex) => ex.intervalos.length > 0)).toEqual([]) // sem dias extras
+    // Antes do ciclo 00005 os feriados eram exceções fixas de 4 anos; agora o calendário aplica os feriados da obra (qualquer ano)
+    expect(e.calendarios[0].aplicaFeriadosObra).toBe(true)
+    expect(e.calendarios[0].excecoes).toEqual([])
+    expect(e.feriados).toEqual({ nacionais: true, carnaval: true, corpusChristi: true, manuais: [] })
+    const cals = compilarCalendarios(e.meta.startDate, e.calendarios, e.calendarioPadraoUid)
+    expect(cals.padrao.dataUtil('2026-12-25')).toBe(false) // Natal
+    expect(cals.padrao.dataUtil('2030-12-25')).toBe(false) // além dos 4 anos de antes
+    expect(cals.padrao.dataUtil('2026-12-24')).toBe(true)
   })
 
   it('sem UF, município, regime e data-base, esses campos não existem', () => {

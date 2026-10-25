@@ -87,7 +87,7 @@ function enviar() {
         </div>
       </div>
     </fieldset>
-    <p class="text-[11px] text-zinc-500">Calendário com feriados nacionais; feriados estaduais e municipais ainda não são considerados.</p>
+    <p class="text-[11px] text-zinc-500">Os feriados nacionais são calculados. Os estaduais e municipais não são carregados automaticamente: cadastre-os, com a fonte, em Premissas › Feriados.</p>
     <ul v-if="tentou && erros.length" role="alert" class="list-disc space-y-0.5 pl-5 text-xs text-coral-600 dark:text-coral-400">
       <li v-for="e in erros" :key="e">{{ e }}</li>
     </ul>

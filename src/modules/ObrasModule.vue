@@ -6,6 +6,8 @@ import { useUiStore } from '@/stores/ui'
 import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import ObraDadosForm from './obras/ObraDadosForm.vue'
+import PreviaImpacto from './premissas/PreviaImpacto.vue'
+import type { PreviaTrocaLocal } from '@/stores/useProjectStore'
 import { dataLocalISO, type DadosObra } from '@/lib/obras'
 
 const project = useProjectStore()
@@ -80,10 +82,34 @@ async function excluir(id: string, nome: string) {
   else falha('Não foi possível excluir a obra', r.erro)
 }
 
-function salvarDados(dados: DadosObra) {
-  const r = project.atualizarDadosObra(dados)
+// Troca de UF ou município: se há feriado estadual ou municipal cadastrado para outro local, a prévia pergunta o que fazer com eles
+const pendenteLocal = ref<{ dados: DadosObra; previa: PreviaTrocaLocal } | undefined>(undefined)
+
+function gravarDados(dados: DadosObra, removerFeriadosDeOutroLocal = false) {
+  const r = project.atualizarDadosObra(dados, { removerFeriadosDeOutroLocal })
   if (r.ok) ui.notify('success', 'Dados da obra atualizados')
   else falha('Dados da obra inválidos', r.erros[0])
+}
+
+function salvarDados(dados: DadosObra) {
+  const m = project.state.meta
+  const mudouLocal = (dados.uf || undefined) !== m.uf || (dados.municipio ?? '').trim() !== (m.municipio ?? '')
+  if (mudouLocal) {
+    const previa = project.previaTrocaLocal(dados.uf || undefined, dados.municipio?.trim())
+    if (previa.foraDoLocal.length) {
+      pendenteLocal.value = { dados, previa }
+      return
+    }
+    if (previa.semFeriadosLocais) ui.notify('info', 'Feriados locais', 'Os feriados estaduais e municipais não são carregados automaticamente nesta fase: cadastre-os, com a fonte, em Premissas › Feriados.')
+  }
+  gravarDados(dados)
+}
+
+function resolverTrocaLocal(remover: boolean) {
+  const p = pendenteLocal.value
+  if (!p) return
+  pendenteLocal.value = undefined
+  gravarDados(p.dados, remover)
 }
 </script>
 
@@ -159,6 +185,23 @@ function salvarDados(dados: DadosObra) {
       <Info class="mt-0.5 h-4 w-4 shrink-0 text-sky-500" aria-hidden="true" />
       <p>Esta obra ainda não tem cronograma. Para trazer o cronograma do MS Project, use <strong>Importar .xml</strong> no topo.</p>
     </div>
+
+    <section v-if="pendenteLocal" class="card space-y-3 border-amber-400/50 p-4" role="alertdialog" aria-label="Feriados de outro local" data-testid="troca-local">
+      <h2 class="text-sm font-semibold">Há feriados cadastrados para outro local</h2>
+      <p class="text-[12px] text-zinc-600 dark:text-zinc-300">
+        Você está trocando a UF ou o município da obra. Estes feriados estaduais ou municipais foram cadastrados para outro local; os feriados locais não são carregados automaticamente nesta fase.
+      </p>
+      <ul class="list-disc space-y-0.5 pl-5 text-[12px]">
+        <li v-for="f in pendenteLocal.previa.foraDoLocal" :key="f.id">{{ f.nome }} ({{ f.data.split('-').reverse().join('/') }}) · {{ [f.municipio, f.uf].filter(Boolean).join(' / ') || 'sem local' }}</li>
+      </ul>
+      <p class="text-[12px] font-medium">Se forem removidos, as datas mudam assim:</p>
+      <PreviaImpacto v-if="pendenteLocal.previa.impactoDeRemover" :previa="pendenteLocal.previa.impactoDeRemover" />
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn-secondary" @click="resolverTrocaLocal(false)">Manter os feriados e trocar o local</button>
+        <button type="button" class="btn-primary" @click="resolverTrocaLocal(true)">Remover os feriados e trocar o local</button>
+        <button type="button" class="btn-ghost" @click="pendenteLocal = undefined">Cancelar</button>
+      </div>
+    </section>
 
     <SectionCard title="Dados da obra ativa" subtitle="UF, município, responsável, datas e tabela SINAPI" :icon="Settings2">
       <ObraDadosForm :key="chaveDados" :inicial="dadosAtivos" rotulo-botao="Salvar dados" id-prefixo="ativa" :contexto-inicio="contextoInicio" @salvar="salvarDados" />

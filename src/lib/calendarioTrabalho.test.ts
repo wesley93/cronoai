@@ -20,6 +20,14 @@ import {
   minutosParaHora,
   momentoDe,
   resumoJornadaSemana,
+  MAX_CALENDARIOS,
+  PREDEFINICOES_JORNADA,
+  copiarCalendario,
+  erroDoNomeCalendario,
+  intervaloDeTextos,
+  intervalosDaPredefinicao,
+  predefinicaoDe,
+  proximoUidCalendario,
   semDiasExtras,
 } from './calendarioTrabalho'
 
@@ -290,5 +298,92 @@ describe('resumo da jornada semanal (tela de premissas)', () => {
     const base = calendarioPadrao([])
     const semana = base.semana.map((d, i) => (i === 6 ? [{ de: 480, ate: 720 }] : i === 5 ? [{ de: 450, ate: 690 }] : d))
     expect(resumoJornadaSemana({ ...base, semana })).toBe('seg–qui 8 h; sex–sáb 4 h; dom —')
+  })
+})
+
+describe('calendários alternativos do editor (ciclo 00005, CS-1 a CS-5)', () => {
+  const cal = (c: CalendarioObra) => compilarCalendarios(BASE, [c], c.uid)
+  const comSemana = (semana: CalendarioObra['semana'], extra: Partial<CalendarioObra> = {}): CalendarioObra => ({ uid: 1, nome: 'Teste', semana, excecoes: [], ...extra })
+
+  it('CS-2: sábado de 4 h por exceção de data: 12 d desde seg 03/08 terminam 18/08 12:00 (no padrão, 18/08 17:00)', () => {
+    const comSabado: CalendarioObra = {
+      ...calendarioPadrao([]),
+      excecoes: [{ data: '2026-08-08', intervalos: [{ de: 480, ate: 720 }], descricao: 'Sábado de 4 h' }],
+    }
+    const c = cal(comSabado).padrao
+    expect(quando(c.somarUteis(c.proximoUtil(m('2026-08-03')), 5760))).toBe('2026-08-18 12:00')
+    const p = cal(calendarioPadrao([])).padrao
+    expect(quando(p.somarUteis(p.proximoUtil(m('2026-08-03')), 5760))).toBe('2026-08-18 17:00')
+    expect(c.minutosNoDia(m('2026-08-08') / 1440)).toBe(240) // meio dia = 0,5 d.u.
+  })
+
+  it('CS-3: jornada por dia ("Fachada — sem chuva": seg–qui 07–12 e 13–17, sex 07–11): 5 d desde seg 07:00 terminam sex 07/08 11:00', () => {
+    const dia9h = [{ de: 420, ate: 720 }, { de: 780, ate: 1020 }]
+    const fachada = comSemana([[], dia9h, dia9h, dia9h, dia9h, [{ de: 420, ate: 660 }], []], { nome: 'Fachada — sem chuva' })
+    expect(erroDoCalendario(fachada)).toBeUndefined()
+    const c = cal(fachada).padrao
+    expect(quando(c.somarUteis(m('2026-08-03', '07:00'), 2400))).toBe('2026-08-07 11:00')
+  })
+
+  it('CS-5: 00:00–00:00 é o dia inteiro (1.440 min) e 22:00–00:00 são 120 min', () => {
+    expect(intervaloDeTextos('00:00', '00:00')).toEqual({ intervalo: { de: 0, ate: 1440 } })
+    expect(intervaloDeTextos('22:00', '00:00')).toEqual({ intervalo: { de: 1320, ate: 1440 } })
+    expect(intervaloDeTextos('08:00', '12:00')).toEqual({ intervalo: { de: 480, ate: 720 } })
+    const diaInteiro = comSemana(Array.from({ length: 7 }, () => [{ de: 0, ate: 1440 }]))
+    expect(erroDoCalendario(diaInteiro)).toBeUndefined()
+    expect(cal(diaInteiro).padrao.minutosNoDia(0)).toBe(1440)
+    const noite = comSemana(Array.from({ length: 7 }, () => [{ de: 1320, ate: 1440 }]))
+    expect(cal(noite).padrao.minutosNoDia(0)).toBe(120)
+  })
+
+  it('CS-5: 6 intervalos num dia e fim antes do início são recusados', () => {
+    const seis = [0, 1, 2, 3, 4, 5].map((i) => ({ de: i * 120, ate: i * 120 + 60 }))
+    expect(erroDoCalendario(comSemana([[], seis, [], [], [], [], []]))).toBe('dia 1 da semana: mais de 5 intervalos de trabalho no dia.')
+    expect(erroDoCalendario(comSemana([[], seis.slice(0, 5), [], [], [], [], []]))).toBeUndefined()
+    expect(intervaloDeTextos('13:00', '12:00')).toEqual({ erro: 'O fim do intervalo deve ser depois do início.' })
+    expect(intervaloDeTextos('25:00', '12:00')).toEqual({ erro: 'Informe horários válidos (hh:mm).' })
+    // intervalos validados DEPOIS da conversão: 00:00–00:00 com outro intervalo no mesmo dia se sobrepõe
+    expect(erroDoCalendario(comSemana([[], [{ de: 0, ate: 1440 }, { de: 480, ate: 720 }], [], [], [], [], []]))).toBe('dia 1 da semana: intervalos fora de ordem ou sobrepostos.')
+  })
+
+  it('calendário sem nenhum minuto útil na semana é recusado, mesmo com exceção útil', () => {
+    const vazio = comSemana([[], [], [], [], [], [], []], { excecoes: [{ data: '2026-08-15', intervalos: [{ de: 480, ate: 720 }] }] })
+    expect(erroDoCalendario(vazio)).toBe('a semana do calendário não tem nenhum tempo útil.')
+  })
+
+  it('descrição da exceção: até 80 caracteres (S-2)', () => {
+    const ex = (descricao: string): CalendarioObra => ({ ...calendarioPadrao([]), excecoes: [{ data: '2026-08-08', intervalos: [], descricao }] })
+    expect(erroDoCalendario(ex('d'.repeat(80)))).toBeUndefined()
+    expect(erroDoCalendario(ex('d'.repeat(81)))).toBe('exceção com descrição inválida.')
+  })
+
+  it('predefinições de jornada: sem expediente, 4 h e 8 h; o resto é personalizado', () => {
+    expect(PREDEFINICOES_JORNADA.map((p) => intervalosDaPredefinicao(p))).toEqual([[], [{ de: 480, ate: 720 }], [{ de: 480, ate: 720 }, { de: 780, ate: 1020 }]])
+    expect(predefinicaoDe([])).toBe('sem-expediente')
+    expect(predefinicaoDe([{ de: 480, ate: 720 }])).toBe('quatro-horas')
+    expect(predefinicaoDe([{ de: 480, ate: 720 }, { de: 780, ate: 1020 }])).toBe('oito-horas')
+    expect(predefinicaoDe([{ de: 420, ate: 720 }])).toBeUndefined()
+  })
+
+  it('nome: 1 a 60 caracteres e único (sem diferenciar maiúsculas); o próprio calendário não conflita consigo', () => {
+    const lista = [calendarioPadrao([]), { ...sabado4h, nome: 'Sábado 4 h' }]
+    expect(erroDoNomeCalendario('  ', lista)).toBe('Informe o nome do calendário.')
+    expect(erroDoNomeCalendario('x'.repeat(61), lista)).toBe('O nome do calendário deve ter no máximo 60 caracteres.')
+    expect(erroDoNomeCalendario('sábado 4 H', lista)).toBe('Já existe um calendário com este nome.')
+    expect(erroDoNomeCalendario('Sábado 4 h', lista, 2)).toBeUndefined()
+    expect(erroDoNomeCalendario('Concretagem — sábado manhã', lista)).toBeUndefined()
+    expect(MAX_CALENDARIOS).toBe(100)
+  })
+
+  it('copiar: cópia independente com novo UID e nome, sem a origem de hora extra; próximo UID = maior + 1', () => {
+    const base: CalendarioObra = { ...calendarioPadrao(['2026-09-07']), aplicaFeriadosObra: true, origem: 'hora-extra', derivadoDe: 1 }
+    const c = copiarCalendario(base, 7, 'Cópia')
+    expect([c.uid, c.nome, c.origem, c.derivadoDe, c.aplicaFeriadosObra]).toEqual([7, 'Cópia', undefined, undefined, true])
+    c.semana[1][0].de = 0
+    c.excecoes[0].data = '2030-01-01'
+    expect(base.semana[1][0].de).toBe(480)
+    expect(base.excecoes[0].data).toBe('2026-09-07')
+    expect(proximoUidCalendario([base, sabado4h, c])).toBe(8)
+    expect(proximoUidCalendario([])).toBe(1)
   })
 })

@@ -29,3 +29,24 @@ export type PreviaPlanilha =
       deltaDays: number
       bac: number
     }
+
+/** Tarefa cujo início ou término muda na hipótese (antes → depois, datas `yyyy-mm-dd`). */
+export interface TarefaAlterada {
+  uid: number
+  inicioAntes: string
+  inicioDepois: string
+  terminoAntes: string
+  terminoDepois: string
+}
+
+/** Comparação entre dois cronogramas: entrega antes e depois, diferença em dias úteis e as tarefas que mudam de data. */
+export interface ImpactoCronograma {
+  entregaAntes: string
+  entregaDepois: string
+  /** Positivo = a entrega atrasa. Em dias úteis do calendário padrão. */
+  deltaDiasUteis: number
+  tarefas: TarefaAlterada[]
+}
+
+/** Prévia de feriados da obra, de troca de local ou de calendário: o impacto ou o erro em português. */
+export type PreviaImpacto = ErroDaPrevia | ({ erro?: undefined } & ImpactoCronograma)

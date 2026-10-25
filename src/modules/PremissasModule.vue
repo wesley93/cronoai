@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { CalendarClock, History, SlidersHorizontal, Users } from '@lucide/vue'
+import { CalendarClock, CalendarDays, History, SlidersHorizontal, Users } from '@lucide/vue'
 import type { PremissasObra } from '@/types/domain'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
+import CalendariosEditor from './premissas/CalendariosEditor.vue'
+import FeriadosObra from './premissas/FeriadosObra.vue'
 import PremissasForm from './premissas/PremissasForm.vue'
 import TaxasFuncao from './premissas/TaxasFuncao.vue'
 import VersoesPremissas from './premissas/VersoesPremissas.vue'
@@ -15,6 +17,14 @@ import { ROTULO_REGIME_SINAPI } from '@/data/ufs'
 
 const project = useProjectStore()
 const ui = useUiStore()
+
+// Abas da tela: premissas (valores e versões), calendários (jornada, exceções) e feriados da obra
+const ABAS = [
+  { id: 'premissas', rotulo: 'Premissas' },
+  { id: 'calendarios', rotulo: 'Calendários' },
+  { id: 'feriados', rotulo: 'Feriados' },
+] as const
+const aba = ref<(typeof ABAS)[number]['id']>('premissas')
 
 const clonar = (p: PremissasObra): PremissasObra => JSON.parse(JSON.stringify(p)) as PremissasObra
 
@@ -88,6 +98,22 @@ const regime = computed(() => (project.state.meta.regimeSinapi ? ROTULO_REGIME_S
       <span v-if="agendadas" class="chip-info">{{ agendadas }} agendada(s)</span>
     </ModuleHeader>
 
+    <div role="tablist" aria-label="Seções das premissas" class="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+      <button
+        v-for="a in ABAS"
+        :key="a.id"
+        type="button"
+        role="tab"
+        :aria-selected="aba === a.id"
+        class="-mb-px rounded-t-lg border border-b-0 px-4 py-2 text-xs font-semibold transition-colors"
+        :class="aba === a.id ? 'border-zinc-200 bg-white text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'"
+        @click="aba = a.id"
+      >
+        {{ a.rotulo }}
+      </button>
+    </div>
+
+    <template v-if="aba === 'premissas'">
     <SectionCard title="Valores e origem" subtitle="Cada valor mostra de onde vem. Valores de exemplo ficam marcados como ilustrativos até você informar a fonte." :icon="SlidersHorizontal">
       <PremissasForm v-model="rascunho" :ano="ano" :dias-uteis-ano="diasUteisAno" />
       <p class="mt-3 text-[11px] text-zinc-500">
@@ -100,7 +126,7 @@ const regime = computed(() => (project.state.meta.regimeSinapi ? ROTULO_REGIME_S
     </SectionCard>
 
     <SectionCard title="Jornada" subtitle="A jornada e os dias úteis vêm do calendário padrão da obra." :icon="CalendarClock">
-      <p class="text-sm" data-testid="jornada-resumo">Calendário padrão: <strong>{{ jornada }}</strong></p>
+      <p class="text-sm" data-testid="jornada-resumo">Calendário padrão: <strong>{{ jornada }}</strong> <button type="button" class="ml-2 text-[11px] font-semibold underline" @click="aba = 'calendarios'">Editar na aba Calendários</button></p>
       <p class="mt-1 text-[11px] text-zinc-500">{{ diasUteisAno }} dias úteis em {{ ano }} no calendário padrão; {{ diasUteisHoje }} dias úteis desde o início da obra até a data de status.</p>
     </SectionCard>
 
@@ -129,6 +155,15 @@ const regime = computed(() => (project.state.meta.regimeSinapi ? ROTULO_REGIME_S
 
     <SectionCard title="Versões" subtitle="A versão vigente é a de maior número com vigência até a data de status." :icon="History">
       <VersoesPremissas :versoes="project.state.premissas" :vigente="project.versaoPremissasVigente.versao" :data-status="project.state.meta.statusDate" />
+    </SectionCard>
+    </template>
+
+    <SectionCard v-else-if="aba === 'calendarios'" title="Calendários" subtitle="Jornada por dia da semana, exceções por data (como o sábado de 4 h) e feriados da obra por calendário." :icon="CalendarDays">
+      <CalendariosEditor />
+    </SectionCard>
+
+    <SectionCard v-else title="Feriados" subtitle="Nacionais calculados, Carnaval e Corpus Christi como opção, e os estaduais e municipais cadastrados à mão, com a fonte." :icon="CalendarDays">
+      <FeriadosObra @ver-calendarios="aba = 'calendarios'" />
     </SectionCard>
   </div>
 </template>
