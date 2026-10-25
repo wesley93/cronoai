@@ -44,7 +44,7 @@ Porta 8080 ocupada? bash: `CRONOAI_PORT=8088 docker compose up --build app`; Pow
 | 5. Valor Agregado | PV, EV, AC, SPI, CPI, EAC (3 premissas), VAC, TCPI; Curva S interativa (por pacote, mensal/acumulado, clique no mês), tendência de SPI/CPI, diagnóstico executivo | [evm.ts](src/lib/evm.ts), [diagnosis.ts](src/lib/diagnosis.ts) |
 | EAP / MS Project | Tabela editável, linha de base, data de status, trilha de decisões | [useProjectStore.ts](src/stores/useProjectStore.ts) |
 
-O estado é único e reativo: toda ação recalcula CPM, EVM, Curva S e suprimentos na hora. Fica salvo no `localStorage` do navegador; "Restaurar obra de exemplo" volta ao seed.
+O estado é único e reativo: toda ação recalcula CPM, EVM, Curva S e suprimentos na hora. O navegador guarda **várias obras** (IndexedDB), cada uma com UF, município, responsável e tabela SINAPI; o seletor "Obra ativa" no topo e a tela **Obras** criam, duplicam, excluem e trocam de obra. O estado salvo pela versão anterior (`cronoai-state-v1`) vira a 1ª obra, sem perda, e a chave antiga não é apagada. "Criar obra de exemplo" acrescenta o Edifício Aurora sem tocar nas suas obras. Falha de gravação e cota quase cheia aparecem numa faixa de aviso: exporte para `.xml` o que não pode se perder.
 
 ## MS Project (MSPDI)
 

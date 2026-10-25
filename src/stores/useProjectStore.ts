@@ -166,6 +166,15 @@ export const useProjectStore = defineStore('project', () => {
     { deep: true },
   )
 
+  /**
+   * Cópias simples (sem proxy) do que vai ao IndexedDB: o valor de um `ref` é um proxy reativo
+   * e o clone estruturado do IndexedDB o recusa (DataCloneError).
+   */
+  function migracaoPlana(): { migracaoV1?: MigracaoV1 } {
+    return migracaoV1.value ? { migracaoV1: { ...migracaoV1.value } } : {}
+  }
+  const obrasPlanas = (): ResumoObra[] => obras.value.map((o) => ({ ...o }))
+
   function agora(): string {
     return new Date().toISOString()
   }
@@ -176,7 +185,7 @@ export const useProjectStore = defineStore('project', () => {
       versaoIndice: 1,
       obraAtivaId: obraAtivaId.value,
       obras: [],
-      ...(migracaoV1.value ? { migracaoV1: migracaoV1.value } : {}),
+      ...migracaoPlana(),
     }
     const resumo = resumirObra(obraAtivaId.value, state, atualizadoEm)
     const existe = base.obras.some((o) => o.id === resumo.id)
@@ -348,7 +357,7 @@ export const useProjectStore = defineStore('project', () => {
       // Índice e obra na mesma transação. Se falhar, o índice não existe e a v1 fica intacta: a próxima carga tenta de novo (M-4).
       const em = agora()
       const base = indice
-      const novo = { ...indiceComAtiva(em), ...(migracaoV1.value ? { migracaoV1: migracaoV1.value } : {}) }
+      const novo: IndiceObras = { ...indiceComAtiva(em), ...migracaoPlana() }
       try {
         await armazenamento.gravarObra(criarRegistro(obraAtivaId.value, state, em), novo)
         aceitarIndice(novo)
@@ -975,7 +984,7 @@ export const useProjectStore = defineStore('project', () => {
       marcarIlegivel(id, true)
       return { ok: false, erro: r.erro }
     }
-    const lista = (indice?.obras ?? obras.value).map((o) => (o.id === id ? { ...o, ilegivel: undefined } : o))
+    const lista = (indice?.obras ?? obrasPlanas()).map((o) => (o.id === id ? { ...o, ilegivel: undefined } : o))
     const novoIndice = indiceComAtivaNova(id, lista)
     try {
       await armazenamento.gravarIndice(novoIndice)
@@ -1007,7 +1016,7 @@ export const useProjectStore = defineStore('project', () => {
     if (!(await garantirObraAtualSalva())) return { ok: false, erro: ERRO_SALVAR_ANTES }
     const id = uid('obra')
     const em = agora()
-    const novoIndice = indiceComAtivaNova(id, [...(indice?.obras ?? obras.value), resumirObra(id, estado, em)])
+    const novoIndice = indiceComAtivaNova(id, [...(indice?.obras ?? obrasPlanas()), resumirObra(id, estado, em)])
     try {
       await armazenamento.gravarObra(criarRegistro(id, estado, em), novoIndice)
     } catch (err) {
@@ -1029,7 +1038,7 @@ export const useProjectStore = defineStore('project', () => {
     copia.meta.name = nomeDaCopia(copia.meta.name, obras.value.map((o) => o.nome))
     const novoId = uid('obra')
     const em = agora()
-    const base = indice ?? indiceComAtivaNova(obraAtivaId.value, obras.value)
+    const base = indice ?? indiceComAtivaNova(obraAtivaId.value, obrasPlanas())
     const novoIndice: IndiceObras = { ...base, obras: [...base.obras, resumirObra(novoId, copia, em)] }
     try {
       await armazenamento.gravarObra(criarRegistro(novoId, copia, em), novoIndice)
@@ -1043,7 +1052,7 @@ export const useProjectStore = defineStore('project', () => {
   /** Exclui uma obra. A única não é excluída; excluir a ativa abre a 1ª outra obra legível. */
   async function excluirObra(id: string): Promise<ResultadoAcao> {
     if (!armazenamento) return { ok: false, erro: 'As obras ainda não foram carregadas.' }
-    const lista = indice?.obras ?? obras.value
+    const lista = indice?.obras ?? obrasPlanas()
     if (!lista.some((o) => o.id === id)) return { ok: false, erro: 'Obra não encontrada.' }
     if (lista.length <= 1) return { ok: false, erro: 'A obra não pode ser excluída: é a única.' }
     const restantes = lista.filter((o) => o.id !== id)
@@ -1063,7 +1072,7 @@ export const useProjectStore = defineStore('project', () => {
       return { ok: false, erro: ERRO_SALVAR_ANTES }
     }
     await fila // uma gravação em andamento não pode ressuscitar a obra excluída
-    const atual = indice ?? indiceComAtivaNova(obraAtivaId.value, lista)
+    const atual = indice ?? indiceComAtivaNova(obraAtivaId.value, lista.map((o) => ({ ...o })))
     const novoIndice: IndiceObras = {
       ...atual,
       obraAtivaId: proxima?.id ?? obraAtivaId.value,

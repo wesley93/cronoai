@@ -42,7 +42,8 @@ export interface ArmazenamentoMemoria extends ArmazenamentoObras {
   estimativa: EstimativaArmazenamento
 }
 
-const copia = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
+// Clone estruturado, como o do IndexedDB real: um proxy reativo do Vue falha aqui (DataCloneError), e o teste pega o erro
+const copia = <T>(v: T): T => structuredClone(v)
 
 export function criarArmazenamentoMemoria(v1: string | null = null): ArmazenamentoMemoria {
   const falhaGravacao = () => new DOMException('Cota simulada excedida', 'QuotaExceededError')
@@ -60,7 +61,7 @@ export function criarArmazenamentoMemoria(v1: string | null = null): Armazenamen
     async lerObra(id) {
       if (m.falhar.ler) throw falhaLeitura()
       const r = m.obras.get(id)
-      return r ? { ...r } : undefined
+      return r ? copia(r) : undefined
     },
     async listarIdsObras() {
       if (m.falhar.ler) throw falhaLeitura()
@@ -68,7 +69,7 @@ export function criarArmazenamentoMemoria(v1: string | null = null): Armazenamen
     },
     async gravarObra(registro, indice) {
       if (m.falhar.gravar) throw falhaGravacao()
-      m.obras.set(registro.id, { ...registro })
+      m.obras.set(registro.id, copia(registro))
       m.indice = copia(indice)
     },
     async excluirObra(id, indice) {

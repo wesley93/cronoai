@@ -15,7 +15,7 @@ CronoAI é o copiloto de planejamento de obras integrado ao MS Project:
 
 **Público:** construtoras, gestores de portfólio e engenheiros com **várias obras e frentes**, em **qualquer UF do Brasil**. Multiempresa e multiobra; cada obra define UF, município, SINAPI e regime de encargos. Nunca assuma um estado, uma empresa ou uma obra fixa no código.
 
-**Estado:** protótipo funcional, front-only, com estado de **uma** obra no `localStorage`. O caminho para o uso real está em [docs/specs](docs/specs/README.md): 16 specs (SPEC-00 a SPEC-15), fases 0 a 4.
+**Estado:** protótipo funcional, front-only, com **várias obras** guardadas no IndexedDB do navegador (obra ativa, UF por obra; ADR [00002](.claude/adrs/00002-armazenamento-local-fase-1.md)). A chave antiga `cronoai-state-v1` é só lida, na migração para a 1ª obra. O caminho para o uso real está em [docs/specs](docs/specs/README.md): 16 specs (SPEC-00 a SPEC-15), fases 0 a 4.
 
 **O que mais importa aqui é a precisão dos números.** Uma data errada no cronograma, um SPI errado ou um XML que perde vínculo no MS Project custa dinheiro na obra. Por isso cálculo e integração com o MS Project têm o rigor mais alto do processo.
 
@@ -62,7 +62,9 @@ docker compose --profile dev up dev  # desenvolvimento em container
 | `src/lib/msProjectXmlParser.ts` | **MSPDI**: gerar, ler e validar o XML do MS Project |
 | `src/lib/fieldAi.ts` | De-Para relato de campo → tarefa (heurística local) |
 | `src/lib/diagnosis.ts` | Diagnóstico executivo determinístico |
-| `src/stores/useProjectStore.ts` | **Store central** (estado persistido + derivados + ações de todos os módulos) |
+| `src/stores/useProjectStore.ts` | **Store central** (estado da obra ativa + derivados + ações de todos os módulos + lista de obras: carregar, trocar, criar, duplicar, excluir) |
+| `src/stores/armazenamentoObras.ts` | Acesso ao IndexedDB (banco `cronoai`: obras + índice) e adaptador de memória para testes |
+| `src/types/obra.ts`, `src/lib/migracaoEstado.ts`, `src/lib/obras.ts`, `src/data/ufs.ts` | Tipos da persistência, cadeia de migrações do esquema da obra, regras da obra (validação, cota) e as 27 UFs |
 | `src/stores/ui.ts` | Tema, navegação por hash, toasts |
 | `src/modules/*.vue` | Telas dos módulos (Apontamento, Caminho Crítico, Suprimentos, SINAPI, EVM, EAP) |
 | `src/components/` | Layout, cards, Gantt, gráficos, ilustrações |
@@ -90,7 +92,8 @@ docker compose --profile dev up dev  # desenvolvimento em container
 ### Testes
 - Todo cálculo novo ou alterado em `src/lib` vem com teste em `*.test.ts` **fixando os números** (valor esperado explícito, não só "maior que").
 - Mudança no MSPDI: teste de ida e volta (`buildMspdiXml` → `parseMspdiXml`) e `validateMspdi(..., { strictOrder: true })` sem erros.
-- Testes de store: `setActivePinia(createPinia())` e `globalThis.localStorage?.clear?.()` (o Node 26 pode expor `localStorage` indefinido).
+- Testes de store: `setActivePinia(createPinia())` e `globalThis.localStorage?.clear?.()` (o Node 26 pode expor `localStorage` indefinido). Teste com várias obras usa o adaptador de memória: `usarArmazenamento(criarArmazenamentoMemoria(v1Opcional))` e `await store.carregar()` (ver `useProjectStore.obras.test.ts`). O adaptador IndexedDB real só é coberto pelo E2E.
+- Formato do estado da obra mudou: novo passo em `MIGRACOES` (`src/lib/migracaoEstado.ts`), `ESQUEMA_ATUAL` sobe e o teste lê o formato anterior.
 
 ## Invioláveis
 
