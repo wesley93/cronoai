@@ -117,12 +117,12 @@ async function copyReport() {
             <option v-for="p in project.packageEvm" :key="p.wbs" :value="p.wbs">{{ p.wbs }} {{ p.name }}</option>
           </select>
           <div class="flex rounded-md border border-zinc-200 text-[11px] dark:border-zinc-700">
-            <button class="px-2 py-1" :class="mode === 'acumulado' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" @click="mode = 'acumulado'">Acumulado</button>
-            <button class="px-2 py-1" :class="mode === 'mensal' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" @click="mode = 'mensal'">Mensal</button>
+            <button class="px-2 py-1" :class="mode === 'acumulado' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" :aria-pressed="mode === 'acumulado'" @click="mode = 'acumulado'">Acumulado</button>
+            <button class="px-2 py-1" :class="mode === 'mensal' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" :aria-pressed="mode === 'mensal'" @click="mode = 'mensal'">Mensal</button>
           </div>
           <div class="flex rounded-md border border-zinc-200 text-[11px] dark:border-zinc-700">
-            <button class="flex items-center gap-1 px-2 py-1" :class="view === 'grafico' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" @click="view = 'grafico'"><LineChart class="h-3 w-3" /> Gráfico</button>
-            <button class="flex items-center gap-1 px-2 py-1" :class="view === 'tabela' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" @click="view = 'tabela'"><Table2 class="h-3 w-3" /> Tabela</button>
+            <button class="flex items-center gap-1 px-2 py-1" :class="view === 'grafico' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" :aria-pressed="view === 'grafico'" @click="view = 'grafico'"><LineChart class="h-3 w-3" /> Gráfico</button>
+            <button class="flex items-center gap-1 px-2 py-1" :class="view === 'tabela' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" :aria-pressed="view === 'tabela'" @click="view = 'tabela'"><Table2 class="h-3 w-3" /> Tabela</button>
           </div>
         </template>
         <SCurveChart v-if="view === 'grafico'" :points="curveShown" :bac="curveEvm.bac" :mode="mode" :selected-index="snapshotIdx" @select="(i) => (selectedIdx = i)" />

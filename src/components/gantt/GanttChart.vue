@@ -126,8 +126,8 @@ function barTitle(r: Row) {
         <span v-if="highlight.length" class="flex items-center gap-1"><span class="h-2 w-4 rounded-sm ring-2 ring-amber-400" /> Afetada pelo atraso</span>
       </div>
       <div class="flex rounded-md border border-zinc-200 dark:border-zinc-700">
-        <button class="px-2 py-0.5" :class="zoom === 'mes' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" @click="zoom = 'mes'">Mês</button>
-        <button class="px-2 py-0.5" :class="zoom === 'semana' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" @click="zoom = 'semana'">Semana</button>
+        <button class="px-2 py-0.5" :class="zoom === 'mes' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" :aria-pressed="zoom === 'mes'" @click="zoom = 'mes'">Mês</button>
+        <button class="px-2 py-0.5" :class="zoom === 'semana' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" :aria-pressed="zoom === 'semana'" @click="zoom = 'semana'">Semana</button>
       </div>
     </div>
 

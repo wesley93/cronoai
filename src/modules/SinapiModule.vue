@@ -165,10 +165,10 @@ function add() {
         <!-- Dimensionamento -->
         <div class="mt-5 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
           <div class="mb-3 flex rounded-lg border border-zinc-200 p-0.5 text-xs dark:border-zinc-700">
-            <button class="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5" :class="mode === 'equipe' ? 'bg-amber-400 font-semibold text-zinc-950' : 'text-zinc-500'" @click="mode = 'equipe'">
+            <button class="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5" :class="mode === 'equipe' ? 'bg-amber-400 font-semibold text-zinc-950' : 'text-zinc-500'" :aria-pressed="mode === 'equipe'" @click="mode = 'equipe'">
               <Users class="h-3.5 w-3.5" /> Definir tamanho da equipe
             </button>
-            <button class="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5" :class="mode === 'prazo' ? 'bg-amber-400 font-semibold text-zinc-950' : 'text-zinc-500'" @click="mode = 'prazo'">
+            <button class="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5" :class="mode === 'prazo' ? 'bg-amber-400 font-semibold text-zinc-950' : 'text-zinc-500'" :aria-pressed="mode === 'prazo'" @click="mode = 'prazo'">
               <Timer class="h-3.5 w-3.5" /> Definir duração desejada
             </button>
           </div>
