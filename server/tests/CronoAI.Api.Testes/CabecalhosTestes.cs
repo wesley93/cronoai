@@ -1,4 +1,7 @@
 using CronoAI.Api.Testes.Infra;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace CronoAI.Api.Testes;
 
@@ -23,14 +26,15 @@ public sealed class CabecalhosTestes
     }
 
     [Fact]
-    public async Task Sem_cabecalho_Server()
+    public void Kestrel_nao_anuncia_cabecalho_Server()
     {
-        await using var fabrica = new ApiFactory(ApiFactory.ConexaoSemBanco);
-        using var cliente = fabrica.CreateClient();
+        // O TestServer não usa o Kestrel e nunca emitiria "Server": ausência na resposta não provaria nada.
+        // Prova-se a configuração real do host (Program.cs: AddServerHeader = false).
+        using var fabrica = new ApiFactory(ApiFactory.ConexaoSemBanco);
 
-        var resposta = await cliente.GetAsync("/health/live", TestContext.Current.CancellationToken);
+        var opcoes = fabrica.Services.GetRequiredService<IOptions<KestrelServerOptions>>().Value;
 
-        Assert.False(resposta.Headers.Contains("Server"));
+        Assert.False(opcoes.AddServerHeader);
     }
 
     #endregion

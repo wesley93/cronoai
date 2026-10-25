@@ -4,7 +4,7 @@
 #                 PowerShell: $env:CRONOAI_PORT=8088; docker compose up --build app
 #   Desenvolvimento (HMR): docker compose --profile dev up dev  -> http://localhost:5180
 #   Banco local do backend (PostgreSQL 17, só 127.0.0.1:5432): exige as 3 senhas no .env (veja .env.example)
-#                 docker compose --profile backend up -d db
+#                 docker compose --profile backend up -d --wait db   (falha se não ficar healthy; a causa está no log)
 #     Porta do host diferente de 5432: CRONOAI_DB_PORTA=55432 (se já houver PostgreSQL local)
 #     Recriar papéis/senhas (o bootstrap só roda em volume vazio — apaga os dados locais):
 #                 docker compose --profile backend down -v
@@ -67,13 +67,15 @@ services:
       - cronoai_pgdados:/var/lib/postgresql/data
       - ./server/db/bootstrap/01-papeis-e-schema.sh:/docker-entrypoint-initdb.d/01-papeis-e-schema.sh:ro
     healthcheck:
-      # -h 127.0.0.1: o servidor temporário do initdb só escuta no socket. O segundo teste (socket local) garante
-      # que "healthy" só vale com o bootstrap aplicado: se ele falhar, o volume fica inicializado sem os papéis
-      # e o contêiner aparece "unhealthy" (corrija com "docker compose --profile backend down -v").
+      # -h 127.0.0.1: o servidor temporário do initdb só escuta no socket. O segundo teste (socket local) exige o
+      # papel cronoai_app: "healthy" só vale com o bootstrap aplicado. Com bootstrap falho (senha ausente, curta,
+      # repetida ou de exemplo) o contêiner NÃO fica healthy e o log diz a causa. Use "up -d --wait db" para o
+      # comando falhar em vez de seguir adiante; corrija o .env e rode "down -v".
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U cronoai_bootstrap -d cronoai && psql -U cronoai_bootstrap -d cronoai -Atc \"SELECT 1 FROM pg_roles WHERE rolname = 'cronoai_app'\" | grep -q 1"]
-      interval: 5s
+      interval: 3s
       timeout: 3s
-      retries: 20
+      retries: 5
+      start_period: 20s
     read_only: true
     tmpfs:
       - /var/run/postgresql
@@ -89,7 +91,9 @@ services:
       - SETUID
     security_opt:
       - no-new-privileges:true
-    restart: unless-stopped
+    # Sem restart automático: se o bootstrap falhar, o contêiner sai com a causa no log. Reiniciar encontraria o
+    # volume já inicializado (sem os papéis) e subiria o PostgreSQL sem eles.
+    restart: "no"
 
 volumes:
   node_modules:

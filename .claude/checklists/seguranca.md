@@ -51,15 +51,23 @@ Referência de numeração: OWASP Top 10 **2021** — https://owasp.org/Top10/ (
 - **[P]** Rate limiting e proteção de upload (tipo, tamanho, antivírus no backend — RNF-06.1).
 - **[P]** Provedor externo (IA, transcrição, WhatsApp, ERP): só o aprovado pela **Segurança da Informação**; dado de trabalhador também passa pelo **Jurídico**.
 
-### Backend — ASVS L2 (esqueleto por capítulo)
-Referência: [OWASP ASVS](https://owasp.org/www-project-application-security-verification-standard/). Preencher por ciclo; o que ainda não se aplica fica `NA` com o ciclo previsto.
-- **V1 Codificação e sanitização / V5 Validação:** SQL só via EF (`FromSql` interpolado); nada de `FromSqlRaw`/`ExecuteSqlRaw` com texto montado; validação de tipo, tamanho e formato na borda dos endpoints (00012+).
-- **V2/V3 Autenticação e sessão:** `NA` até o 00012 (SPEC-02).
-- **V4 Controle de acesso:** autorização por obra e isolamento por empresa (filtro EF + RLS; 00012). Testes de segurança do banco conectam como `cronoai_app`, nunca como superusuário.
-- **V7 Erros e logs:** ProblemDetails sem pilha fora de `Development`; logs JSON sem corpo, cabeçalhos, string de conexão nem dados pessoais; `EnableSensitiveDataLogging` ausente.
-- **V8 Proteção de dados:** sem segredo versionado (`.env`, `user-secrets`); segredos de integração cifrados (00022); LGPD com o Jurídico.
-- **V9/V12 Comunicação e API:** TLS/HSTS de produção são da Infraestrutura; cabeçalhos de segurança da API; OpenAPI só em `Development`.
-- **V13 Configuração:** NuGet Audit bloqueando alta/crítica; lock files; imagens por digest; compose local só em `127.0.0.1`; PostgreSQL sem `trust` no TCP; workflow sem segredo nem deploy.
+### Backend — ASVS 5.0.0, nível 2 (esqueleto por capítulo)
+Referência: [OWASP ASVS 5.0.0](https://github.com/OWASP/ASVS/tree/v5.0.0/5.0/en) (capítulos conforme a estrutura do `v5.0.0`). Preencher por ciclo; o que ainda não se aplica fica `NA` com o ciclo previsto.
+- **V1 Encoding and Sanitization:** SQL só via EF (`FromSql` interpolado); nada de `FromSqlRaw`/`ExecuteSqlRaw` com texto montado.
+- **V2 Validation and Business Logic:** validação de tipo, tamanho e formato na borda dos endpoints (00012+).
+- **V3 Web Frontend Security:** `NA` no backend (cabeçalhos da API em V4/V13).
+- **V4 API and Web Service:** versionamento em `/api/v1`; cabeçalhos de segurança da API; OpenAPI só em `Development`.
+- **V5 File Handling:** `NA` até o upload de MS Project (SPEC-06).
+- **V6 Authentication / V7 Session Management:** `NA` até o 00012 (SPEC-02).
+- **V8 Authorization:** autorização por obra e isolamento por empresa (filtro EF + RLS; 00012). Testes de segurança do banco conectam como `cronoai_app`, nunca como superusuário.
+- **V9 Self-contained Tokens / V10 OAuth and OIDC:** `NA` até o provedor de login (SPEC-02, com a Segurança).
+- **V11 Cryptography:** segredos de integração cifrados com Data Protection (00022).
+- **V12 Secure Communication:** TLS/HSTS de produção e TLS do PostgreSQL são da Infraestrutura.
+- **V13 Configuration:** sem segredo versionado (`.env`, `user-secrets`); NuGet Audit bloqueando alta/crítica; lock files; imagens por digest; compose local só em `127.0.0.1`; PostgreSQL sem `trust` no TCP; workflow sem segredo nem deploy.
+- **V14 Data Protection:** LGPD e retenção com o Jurídico; sem PII em log.
+- **V15 Secure Coding and Architecture:** dependências revisadas (segurança e licença) antes de produção; direção de dependências entre projetos.
+- **V16 Security Logging and Error Handling:** ProblemDetails sem pilha fora de `Development`; logs JSON sem corpo, cabeçalhos, string de conexão nem dados pessoais; `EnableSensitiveDataLogging` ausente.
+- **V17 WebRTC:** `NA`.
 
 ## Classificação
 **Crítico** e **Alto** bloqueiam; **Médio** bloqueia salvo justificativa registrada; **Baixo/Info** registra. Cite arquivo:linha e o **cenário concreto de exploração**, não o risco teórico. Achado pré-existente fora do diff: dívida, não bloqueia. Diff pequeno e limpo pode — e deve — dar zero achados. Decisão com impacto de segurança/compliance: indique validação com a área de Segurança da Informação.

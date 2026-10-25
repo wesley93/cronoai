@@ -1,24 +1,27 @@
+using System.Text.RegularExpressions;
+
 namespace CronoAI.Api.Testes;
 
-public sealed class ConfiguracaoTestes
+public sealed partial class ConfiguracaoTestes
 {
     #region Métodos públicos
 
     [Fact]
-    public void Appsettings_sem_senha()
+    public void Json_do_servidor_sem_senha()
     {
+        // Varre todo *.json de server/src (appsettings*, launchSettings, etc.), exceto bin/obj.
         var pastaSrc = Path.Combine(RaizServidor(), "src");
-        var arquivos = Directory.GetFiles(pastaSrc, "appsettings*.json", SearchOption.AllDirectories)
+        var arquivos = Directory.GetFiles(pastaSrc, "*.json", SearchOption.AllDirectories)
             .Where(a => !a.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                     && !a.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                     && !a.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                     && !a.EndsWith("packages.lock.json", StringComparison.Ordinal))
             .ToList();
 
-        Assert.NotEmpty(arquivos);
+        Assert.Contains(arquivos, a => a.EndsWith("appsettings.json", StringComparison.Ordinal));
         foreach (var arquivo in arquivos)
         {
             var texto = File.ReadAllText(arquivo);
-            Assert.DoesNotContain("Password=", texto, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("Pwd=", texto, StringComparison.OrdinalIgnoreCase);
+            Assert.False(SenhaRegex().IsMatch(texto), $"possível senha em {Path.GetFileName(arquivo)}");
             Assert.DoesNotContain("Senha", texto, StringComparison.OrdinalIgnoreCase);
         }
     }
@@ -26,6 +29,9 @@ public sealed class ConfiguracaoTestes
     #endregion
 
     #region Métodos privados
+
+    [GeneratedRegex(@"(password|pwd)\s*=", RegexOptions.IgnoreCase)]
+    private static partial Regex SenhaRegex();
 
     // Sobe do binário até a pasta que contém CronoAI.slnx (a raiz de server/).
     private static string RaizServidor()

@@ -46,9 +46,9 @@ docker compose up --build app        # produção local (porta CRONOAI_PORT, pad
 docker compose --profile dev up dev  # desenvolvimento em container
 
 # Backend (.NET 10; detalhes em server/README.md)
-docker compose --profile backend up -d db                        # PostgreSQL local (3 senhas no .env; veja .env.example)
+docker compose --profile backend up -d --wait db                 # PostgreSQL local (3 senhas no .env; veja .env.example); falha se não ficar healthy
 dotnet build server/CronoAI.slnx -c Release                      # avisos são erros; regera server/openapi/CronoAI.Api.json
-dotnet test --solution server/CronoAI.slnx                       # inclui integração (exige Docker)
+(cd server && dotnet test --solution CronoAI.slnx)              # inclui integração (exige Docker); rodar de dentro de server/
 dotnet format server/CronoAI.slnx --verify-no-changes
 dotnet list server/CronoAI.slnx package --vulnerable --include-transitive
 ```

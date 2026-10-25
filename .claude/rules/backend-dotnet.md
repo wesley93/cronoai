@@ -14,7 +14,7 @@ Fonte da verdade: `CLAUDE.md` e o [ADR 00004](../adrs/00004-estrutura-convencoes
 - `Api → Dados → Dominio`: nenhum projeto referencia a `Api`; o `Dominio` (00012) sem pacote de EF nem de ASP.NET. `ArquiteturaTestes` guarda a regra.
 - Endpoints: **minimal APIs** com `MapGroup("/api/v1/...")` e `TypedResults`. Fora de `/api/v1`: só `/health/*` e, em `Development`, `/openapi`.
 - Nomes de negócio em português (`Obra`, `Tarefa`, `CronoDbContext`); padrões do framework em inglês (`Program`, `*Middleware`). Comentários em português explicando o porquê.
-- Construtor explícito (sem construtor primário), campos `private readonly` com nome completo derivado do tipo, `#region` (Campos, Construtor, Propriedades, Métodos públicos, Métodos privados), um tipo público por arquivo.
+- Estilo do C# (construtor, `#region`, campos, um tipo por arquivo): seção "Estilo do C#" do [ADR 00004](../adrs/00004-estrutura-convencoes-backend.md).
 - `TreatWarningsAsErrors` ligado. Supressão só no `server/.editorconfig`, com comentário do porquê. `dotnet format --verify-no-changes` limpo.
 
 ## SQL e migrações
@@ -34,7 +34,7 @@ Fonte da verdade: `CLAUDE.md` e o [ADR 00004](../adrs/00004-estrutura-convencoes
 
 ## Testes
 
-- xUnit v3 com `Assert` nativo (sem FluentAssertions: licença comercial). `dotnet test --solution server/CronoAI.slnx` (Microsoft.Testing.Platform, ver `server/global.json`); filtro por classe: `-- --filter-class "*Classe"`.
+- xUnit v3 com `Assert` nativo (sem FluentAssertions: licença comercial). `cd server && dotnet test --solution CronoAI.slnx` (Microsoft.Testing.Platform, ver `server/global.json`; na raiz falha); filtro por classe: `-- --filter-class "*Classe"`.
 - Integração com Testcontainers (exige Docker), mesma imagem, digest e argumentos de `initdb` do compose, credenciais **aleatórias por execução**, bootstrap compartilhado, migração uma vez por coleção. Cada teste cria os próprios dados com ids novos, sem `TRUNCATE`.
 - Efeito colateral em tabela de teste: criar e remover no `finally` (o app não enxerga transação não confirmada de outra sessão).
 

@@ -15,9 +15,16 @@ O ciclo 00011 cria o esqueleto do backend em `server/`. Tudo o que for fixado aq
 - **Acesso a dados:** EF Core + Npgsql; SQL bruto só com `FromSql`/`ExecuteSql` interpolados ([doc](https://learn.microsoft.com/ef/core/querying/sql-queries)); `FromSqlRaw`/`ExecuteSqlRaw` com texto montado proibidos.
 - **Migrações:** EF Core Migrations no `CronoAI.Dados`, `dotnet-ef` como ferramenta local fixada. Aplicadas por `dotnet ef database update` (string do migrador) em dev e por `MigrateAsync` nos testes, **nunca na partida da API** ([doc](https://learn.microsoft.com/ef/core/managing-schemas/migrations/applying)). Fora da máquina local, `migrations script --idempotent` ou *bundle*: escolha da Infraestrutura.
 - **Bootstrap local de papéis e schema** (`server/db/bootstrap/01-papeis-e-schema.sh`): provisionamento, **não** DDL de tabela; toda tabela continua só em migração. Mesma fonte no compose (somente leitura em `/docker-entrypoint-initdb.d`, só em volume vazio) e na fixture dos testes.
-- **Testes:** xUnit v3 com `Assert` nativo (o FluentAssertions 8+ tem licença comercial), Testcontainers com usuário, senha e banco aleatórios por execução (o padrão da biblioteca é fixo) e `Microsoft.Testing.Platform` (`global.json`, exigido pelo SDK 10 com xunit.v3).
+- **Testes:** xUnit v3 com `Assert` nativo (o FluentAssertions 8+ tem licença comercial), Testcontainers com usuário, senha e banco aleatórios por execução (o padrão da biblioteca é fixo) e `Microsoft.Testing.Platform` (`global.json`, exigido pelo SDK 10 com xunit.v3). Comando: `cd server && dotnet test --solution CronoAI.slnx` (o `--solution` só existe com esse runner, lido do `global.json` de `server/`; na raiz o comando falha).
 - **Cadeia de suprimentos:** Central Package Management, *lock files* com `--locked-mode`, NuGet Audit (`all`, NU1903/NU1904 como erro), source mapping só nuget.org, SDK fixado em `global.json`.
 - **Nomes no C#:** domínio em português; padrões de framework em inglês onde o framework impõe.
+
+### Estilo do C# (aceito junto com este ADR; a regra `.claude/rules/backend-dotnet.md` apenas aponta para cá)
+- **Construtor explícito**, sem construtor primário; campos `private readonly` com nome completo derivado do tipo (ex.: `_connectionRouter` para `IConnectionRouter`).
+- **`#region`** fixos em todo tipo novo, nesta ordem quando existirem: Campos, Construtor, Propriedades, Métodos públicos, Métodos privados.
+- **Um tipo público por arquivo.**
+- Comentários em português, explicando o porquê (fórmula ou regra citada quando houver).
+- Fonte: convenção do projeto (opinião da equipe); não é exigência de framework nem regulatória. Migrações geradas pelo EF ficam fora da análise de estilo (`server/.editorconfig`).
 
 ### Convenções de banco (herdadas dos ciclos 00012 a 00023; parecer do `dba`, §1)
 - **Nomes:** `snake_case` (`EFCore.NamingConventions`), tabelas no singular, sem palavras reservadas. Unidade no nome da coluna (`duracao_min`, `lag_min`, `folga_total_min`, `inicio_restricao_local`).
@@ -25,7 +32,7 @@ O ciclo 00011 cria o esqueleto do backend em `server/`. Tudo o que for fixado aq
 - **Identificadores até 63 bytes:** o PostgreSQL trunca em silêncio; compostos longos são nomeados à mão, com teste de catálogo (`Identificadores_cabem_em_63_bytes`).
 - **Papéis (constantes em `PapeisBanco`):** bootstrap (superusuário, só local, a aplicação nunca usa); `cronoai_migrador` (`LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`, dono do schema, roda migrações); `cronoai_app` (mesmos atributos, dono de nada, só DML por privilégios padrão da migração `Inicial`, sem DDL, `search_path = cronoai`). A API e os testes de API conectam como `cronoai_app`. Migração que cita `cronoai_app` falha em ambiente sem o papel: falha ruidosa, desejável.
 - **Chaves:** PK `uuid` v7 gerado na aplicação (`Guid.CreateVersion7`, `ValueGeneratedNever`, atribuído na fábrica do domínio); o v7 **não é controle de segurança**. `auditoria.id` como `bigint generated always as identity`. `uid_msproject` `integer` único por obra, nunca PK.
-- **FKs:** sem cascata (`DeleteBehavior.Restrict` global, já no `CronoDbContext`).
+- **FKs:** sem cascata (`DeleteBehavior.Restrict`). A aplicação global fica para o 00012 (1ª entidade), como **último passo do `OnModelCreating`** (depois de qualquer configuração por entidade, que a sobrescreveria), com teste de arquitetura sobre o modelo.
 - **Tempo:** `timestamptz` (UTC, `DateTime` Kind UTC) para instante real; `date` (`DateOnly`) para data de calendário; `timestamp` sem fuso para o relógio local da obra (sufixo `_local`, Kind Unspecified, com teste de `Kind`; ADR 00003); minutos em `integer`.
 - **Dinheiro e números:** `numeric` com precisão explícita em toda propriedade `decimal` (`HasPrecision` obrigatório, com teste de arquitetura a partir do 00012); nunca `money` nem `double precision`. Precisões a fechar no 00015.
 - **Enum:** `text` + `CHECK`, não `CREATE TYPE ... AS ENUM`.

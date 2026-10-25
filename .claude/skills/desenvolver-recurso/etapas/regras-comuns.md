@@ -38,7 +38,7 @@ Guarde as saídas: elas vão nos campos `LINT:`, `TYPECHECK:` e `TESTES-AFETADOS
 - `gerar-changelog.mjs` lê só commits (`{BASE}..HEAD`): rode depois do commit, para conferir o changelog rascunhado a partir do ciclo.
 - `auditar-dependencias.mjs --base {BASE}` também lista as dependências novas e as licenças delas.
 
-- **Backend (T8, `server/`):** `dotnet build server/CronoAI.slnx -c Release` (avisos são erros), `dotnet test --solution server/CronoAI.slnx` (inclui integração; exige Docker), `dotnet format server/CronoAI.slnx --verify-no-changes` e `dotnet list server/CronoAI.slnx package --vulnerable --include-transitive`. `testar-afetado.mjs` e `auditar-dependencias.mjs` ainda só tratam npm.
+- **Backend (T8, `server/`):** `dotnet build server/CronoAI.slnx -c Release` (avisos são erros), `cd server && dotnet test --solution CronoAI.slnx` (inclui integração; exige Docker; só funciona de dentro de `server/`), `dotnet format server/CronoAI.slnx --verify-no-changes` e `dotnet list server/CronoAI.slnx package --vulnerable --include-transitive`. `testar-afetado.mjs` e `auditar-dependencias.mjs` ainda só tratam npm.
 - **Antes do PR:** `npm run ci` (lint + tipos + testes completos + build), igual ao GitHub Actions.
 - **T7 (Docker/CI):** `docker build -t cronoai:local .` e o smoke test de `docs/devops.md` (healthz, `/`, headers). Workflows novos/alterados: `actionlint` (container `rhysd/actionlint`).
 - **T3 (MSPDI):** teste de ida e volta e `validateMspdi(xml, { strictOrder: true })` sem erros fazem parte da checagem.

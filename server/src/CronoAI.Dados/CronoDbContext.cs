@@ -23,12 +23,6 @@ public class CronoDbContext : DbContext
     {
         // Schema próprio: alvo exato para GRANT/REVOKE e pg_dump -n; trocar depois reescreve todas as migrações.
         modelBuilder.HasDefaultSchema(PapeisBanco.Schema);
-
-        // Exclusão em cascata nunca é efeito colateral: apagar obra/empresa com auditoria é decisão explícita.
-        foreach (var chaveEstrangeira in modelBuilder.Model.GetEntityTypes().SelectMany(t => t.GetForeignKeys()))
-        {
-            chaveEstrangeira.DeleteBehavior = DeleteBehavior.Restrict;
-        }
     }
 
     #endregion

@@ -17,5 +17,8 @@
     <NuGetAuditMode>all</NuGetAuditMode>
     <NuGetAuditLevel>low</NuGetAuditLevel>
     <WarningsAsErrors>$(WarningsAsErrors);NU1903;NU1904</WarningsAsErrors>
+    <!-- Política do plano 00011: bloquear só alta/crítica (NU1903/NU1904). Baixa/moderada (NU1901/NU1902) avisam,
+         mas não quebram o build (TreatWarningsAsErrors as promoveria). -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902</WarningsNotAsErrors>
   </PropertyGroup>
 </Project>

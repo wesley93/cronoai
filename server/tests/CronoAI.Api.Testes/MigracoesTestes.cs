@@ -48,12 +48,11 @@ public sealed class MigracoesTestes
     }
 
     [Fact]
-    public async Task Modelo_sem_mudanca_pendente()
+    public void Modelo_sem_mudanca_pendente()
     {
-        await using var contexto = _banco.CriarContextoMigrador();
+        using var contexto = _banco.CriarContextoMigrador();
 
         Assert.False(contexto.Database.HasPendingModelChanges());
-        await Task.CompletedTask;
     }
 
     [Fact]

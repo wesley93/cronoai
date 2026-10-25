@@ -21,8 +21,8 @@
 
 ### Backend local (PostgreSQL e papéis)
 
-- `docker compose --profile backend up -d db` sobe o PostgreSQL 17 (imagem Debian por digest) só em `127.0.0.1:5432` (`CRONOAI_DB_PORTA` troca a porta do host). O `docker compose up --build app` do front **não** sobe o banco (perfil).
-- Exige **três senhas** no `.env` (não versionado; nomes em `.env.example`): `CRONOAI_DB_SENHA` (bootstrap), `CRONOAI_DB_SENHA_MIGRADOR` e `CRONOAI_DB_SENHA_APP`. Senha vazia: o contêiner recusa iniciar ou fica `unhealthy`, com mensagem no log.
+- `docker compose --profile backend up -d --wait db` sobe o PostgreSQL 17 (imagem Debian por digest) só em `127.0.0.1:5432` (`CRONOAI_DB_PORTA` troca a porta do host). O `docker compose up --build app` do front **não** sobe o banco (perfil).
+- Exige **três senhas** no `.env` (não versionado; nomes em `.env.example`): `CRONOAI_DB_SENHA` (bootstrap), `CRONOAI_DB_SENHA_MIGRADOR` e `CRONOAI_DB_SENHA_APP`. O bootstrap recusa senha ausente, com menos de 16 caracteres, igual ao marcador do `.env.example` ou repetida entre os papéis: o contêiner **não fica healthy** e o log diz a causa; o `--wait` faz o comando falhar. Corrija o `.env` e rode `docker compose --profile backend down -v`.
 - Na 1ª subida (volume vazio) o bootstrap `server/db/bootstrap/01-papeis-e-schema.sh` cria o schema `cronoai` e os papéis `cronoai_migrador` (dono do schema; migrações) e `cronoai_app` (só DML; é o papel da API). Recriar papéis/senhas: `docker compose --profile backend down -v` (apaga os dados locais).
 - Migrações, strings de conexão (`user-secrets`) e comandos: [server/README.md](../server/README.md). Hospedagem, TLS, collation e versão do banco de produção são da **Infraestrutura**.
 
@@ -54,7 +54,7 @@ No Git Bash, prefixe o `docker run` com `MSYS_NO_PATHCONV=1` para o `/tmp` não 
 | Workflow | Quando roda | O que faz | Bloqueia merge? |
 |---|---|---|---|
 | [CI](../.github/workflows/ci.yml) | Todo PR, push na `master`, manual | `npm ci` → lint → type-check → testes com cobertura (limiar de 80% em `src/lib`) → build → `npm audit` (produção, alta/crítica) → artefato `dist` | Sim |
-| CI › Backend: build e testes (.NET) | Junto do CI, em paralelo, **sem filtro de caminhos** | `dotnet restore --locked-mode` → `dotnet format --verify-no-changes` → build Release (avisos são erros) → testes (inclui integração com Docker/Testcontainers, sem segredo) → `git diff` do OpenAPI → `has-pending-model-changes` (string fictícia sem senha); resultados como artefato só na falha | Sim (incluir o check na proteção da `master` depois da 1ª execução verde) |
+| CI › Backend: build e testes (.NET) | Junto do CI, em paralelo, **sem filtro de caminhos** | `dotnet restore --locked-mode` → `dotnet format --verify-no-changes` → build Release (avisos são erros) → testes (inclui integração com Docker/Testcontainers, sem segredo) → `git diff` do OpenAPI → `has-pending-model-changes` (string fictícia sem senha); resultados como artefato só na falha; Ryuk do Testcontainers fixado por digest | Sim (incluir o check na proteção da `master` depois da 1ª execução verde) |
 | CI › Testes E2E (Playwright) | Junto do CI, em paralelo | `npm ci` → Chromium (cache opcional) → `npm run e2e`; na falha publica `playwright-report` e `test-results` (7 dias) | Não (incluir na proteção da `master` depois da 1ª execução verde) |
 | CI › auditoria dev | Junto do CI | Relatório do `npm audit` de todas as dependências no resumo da execução | Não (informativo) |
 | [Docker](../.github/workflows/docker.yml) | **Todo** PR, push na `master`, manual | Build da imagem (sem push), checa usuário não root, sobe container somente leitura e sem capabilities, testa `/healthz`, `/`, fallback da SPA e headers | Sim |

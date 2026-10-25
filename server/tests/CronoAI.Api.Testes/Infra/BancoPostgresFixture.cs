@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using CronoAI.Dados;
+using Docker.DotNet.Models;
 using DotNet.Testcontainers.Configurations;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -18,10 +19,10 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
     #region Campos
 
     // Mesma referência (tag + digest) do docker-compose.yml.
-    private const string Imagem = "postgres:17@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe";
+    public const string Imagem = "postgres:17@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe";
 
     // Mesmos argumentos de initdb do compose (UTF-8, ICU pt-BR, scram também no loopback).
-    private const string ArgumentosInitdb = "--encoding=UTF8 --locale-provider=icu --icu-locale=pt-BR --locale=C.UTF-8 --auth-host=scram-sha-256";
+    public const string ArgumentosInitdb = "--encoding=UTF8 --locale-provider=icu --icu-locale=pt-BR --locale=C.UTF-8 --auth-host=scram-sha-256";
 
     private const string CaminhoScriptNoContainer = "/tmp/01-papeis-e-schema.sh";
 
@@ -57,6 +58,12 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
             .WithEnvironment("CRONOAI_SENHA_MIGRADOR", _senhaMigrador)
             .WithEnvironment("CRONOAI_SENHA_APP", _senhaApp)
             .WithCommand("-c", "timezone=UTC", "-c", "log_statement=none")
+            // Porta publicada só em 127.0.0.1 (o padrão do Testcontainers publica em todas as interfaces).
+            .WithCreateParameterModifier(parametros =>
+                parametros.HostConfig!.PortBindings = new Dictionary<string, IList<PortBinding>>
+                {
+                    ["5432/tcp"] = [new PortBinding { HostIP = "127.0.0.1", HostPort = "" }],
+                })
             .Build();
 
         await _container.StartAsync();
@@ -125,8 +132,8 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
     {
         return new NpgsqlConnectionStringBuilder
         {
-            Host = _container!.Hostname,
-            Port = _container.GetMappedPublicPort(5432),
+            Host = "127.0.0.1",
+            Port = _container!.GetMappedPublicPort(5432),
             Database = _bancoNome,
             Username = usuario,
             Password = senha,

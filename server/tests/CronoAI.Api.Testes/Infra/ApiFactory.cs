@@ -14,7 +14,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     #region Campos
 
     /// <summary>Porta fechada: simula banco indisponível sem depender de Docker.</summary>
-    public const string ConexaoSemBanco = "Host=127.0.0.1;Port=1;Database=inexistente;Username=cronoai_app;Password=nao-usada;Timeout=2";
+    public const string ConexaoSemBanco = "Host=127.0.0.1;Port=1;Database=inexistente;Username=cronoai_app;Timeout=2";
 
     private readonly string _stringConexao;
     private readonly string _ambiente;
