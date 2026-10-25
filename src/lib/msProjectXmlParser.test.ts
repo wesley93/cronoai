@@ -5,6 +5,7 @@ import fixtureCalendarios from './__fixtures__/mspdi-calendarios-restricoes.xml?
 import { addCalendarDays } from './calendar'
 import { compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule, optsDaObra } from './cpm'
+import { calcularDivergencias } from './divergencias'
 import {
   MAX_CALENDAR_DAYS,
   MAX_CALENDARIOS_IMPORTADOS,
@@ -932,8 +933,19 @@ describe('parseMspdiXml: rodada 02 (faixas de Duration e MinutesPerDay, calendá
     const exportado = buildMspdiXml({ meta, tasks: r.tasks, calendarios: r.calendarios, calendarioPadraoUid: r.calendarioPadraoUid, schedule: sch })
     expect(validateMspdi(exportado, { strictOrder: true }).errors).toEqual([])
     const d = new DOMParser().parseFromString(exportado, 'application/xml')
-    const t2 = Array.from(d.getElementsByTagName('Task')).find((x) => x.getElementsByTagName('UID')[0]?.textContent === '2')!
-    const campo = (nome: string) => Array.from(t2.children).find((c) => c.localName === nome)?.textContent
-    expect([campo('Start'), campo('Finish')]).toEqual(['2026-08-04T00:00:00', '2026-08-04T00:00:00'])
+    const tarefaXml = (uid: number) => Array.from(d.getElementsByTagName('Task')).find((x) => x.getElementsByTagName('UID')[0]?.textContent === String(uid))!
+    const campo = (uid: number, nome: string) => Array.from(tarefaXml(uid).children).find((c) => c.localName === nome)?.textContent
+    // Marco 24:00 do dia 03/08: todos os campos de data-hora são 00:00 de 04/08 (o MSPDI não tem 24:00)
+    for (const nome of ['Start', 'Finish', 'EarlyStart', 'EarlyFinish', 'LateStart', 'LateFinish']) expect([nome, campo(2, nome)]).toEqual([nome, '2026-08-04T00:00:00'])
+    // Tarefa comum de 24 h (03/08 00:00 a 04/08 00:00): o término é 04/08 00:00, antes saía 03/08 00:00 (um dia antes)
+    expect([sch.byUid.get(1)!.finish, sch.byUid.get(1)!.terminoHora]).toEqual(['2026-08-03', '24:00'])
+    expect([campo(1, 'Start'), campo(1, 'EarlyStart'), campo(1, 'LateStart')]).toEqual(['2026-08-03T00:00:00', '2026-08-03T00:00:00', '2026-08-03T00:00:00'])
+    for (const nome of ['Finish', 'EarlyFinish', 'LateFinish']) expect([nome, campo(1, nome)]).toEqual([nome, '2026-08-04T00:00:00'])
+    // Reimportar o próprio XML: nenhuma divergência nessas duas tarefas
+    const volta = parseMspdiXml(exportado)
+    const metaVolta = { ...meta, ...volta.meta }
+    const calsVolta = compilarCalendarios(metaVolta.startDate, volta.calendarios, volta.calendarioPadraoUid)
+    const schVolta = computeSchedule(volta.tasks, calsVolta, optsDaObra(metaVolta, 'forecast', metaVolta.statusDate))
+    expect(calcularDivergencias(volta.tasks, schVolta, calsVolta, metaVolta)).toEqual([])
   })
 })

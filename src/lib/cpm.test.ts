@@ -546,6 +546,8 @@ describe('rodada 02: progresso com vínculos, restrições de término em tarefa
     expect([r.byUid.get(1)!.finish, r.byUid.get(2)!.start, r.byUid.get(2)!.finish]).toEqual(['2026-08-03', '2026-08-03', '2026-08-03'])
     // A hora do marco acompanha a data: 24:00 do dia 03/08 (e não "03/08 00:00", que seria o início do dia)
     expect([r.byUid.get(2)!.inicioHora, r.byUid.get(2)!.terminoHora]).toEqual(['24:00', '24:00'])
+    // A tarefa comum de 24 h (03/08 00:00 a 04/08 00:00) também termina às 24:00 do dia 03/08, e não às 00:00 desse dia
+    expect([r.byUid.get(1)!.inicioHora, r.byUid.get(1)!.finish, r.byUid.get(1)!.terminoHora]).toEqual(['00:00', '2026-08-03', '24:00'])
   })
 })
 

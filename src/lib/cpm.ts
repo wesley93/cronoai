@@ -380,6 +380,7 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
     const fAgendado = alap ? lf.get(uid)! : f
     const marco = fAgendado === sAgendado
     const dataTermino = (m: number) => dataDoMomento(base, cd.fimUtilAte(m) - 1)
+    const horaDeTermino = (m: number) => (m % MINUTOS_NO_DIA_CORRIDO === 0 ? '24:00' : horaDoMomento(m))
     const inicioNorm = c.proximoUtil(sAgendado)
     /**
      * Data e momento de um marco: os do próprio momento (SNET/MSO em 12/08 aparece em 12/08; SS +0 de tarefa que começa
@@ -423,7 +424,8 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
       start,
       finish,
       inicioHora: marcoAgendado ? marcoAgendado.hora : horaDoMomento(inicioNorm),
-      terminoHora: marcoAgendado ? marcoAgendado.hora : horaDoMomento(cd.fimUtilAte(fAgendado)),
+      // Término à meia-noite (fim de um dia de 24 h) é 24:00 do dia da data de término, não 00:00 desse dia
+      terminoHora: marcoAgendado ? marcoAgendado.hora : horaDeTermino(cd.fimUtilAte(fAgendado)),
       folgaTotalMin: folgaTotal,
       folgaLivreMin,
       totalFloat: minutosParaDias(folgaTotal, unidadeDia),

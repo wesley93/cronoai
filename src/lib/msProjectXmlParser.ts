@@ -15,6 +15,7 @@ import {
   compilarCalendarios,
   diasParaMinutos,
   erroDoCalendario,
+  dataDoMomento,
   horaDoMomento,
   horaParaMinutos,
   lerDataHora,
@@ -200,6 +201,8 @@ interface TaskContext {
   cals: CalendariosCompilados
   /** Minutos por dia da obra (jornada), para converter os dias úteis do resumo em minutos. */
   minutosPorDia: number
+  /** Data-base (início do projeto): referência dos momentos do cálculo. */
+  base: string
 }
 
 function createContext(input: MspdiExportInput): TaskContext {
@@ -210,6 +213,7 @@ function createContext(input: MspdiExportInput): TaskContext {
     cal: calendarioDeDias(cals.padrao),
     cals,
     minutosPorDia: input.meta.minutosPorDia ?? DEFAULT_MINUTES_PER_DAY,
+    base: input.meta.startDate,
   }
 }
 
@@ -245,6 +249,12 @@ function calendarNode(cal: CalendarioObra): XNode | null {
 
 /** Hora (hh:mm:ss) de um momento do cálculo, no calendário dado. */
 const horaDe = (momento: number): string => `${horaDoMomento(momento)}:00`
+/**
+ * Hora para a data informada: se o momento cai à meia-noite em ponto e a data é a do dia anterior (término de um dia de 24 h),
+ * vale `24:00:00` do dia da data. O MSPDI não tem 24:00: `dt` a converte em 00:00:00 do dia seguinte.
+ */
+const horaDaData = (data: string | undefined, momento: number, base: string): string =>
+  data && momento % MINUTOS_NO_DIA_CORRIDO === 0 && dataDoMomento(base, momento) > data.slice(0, 10) ? '24:00:00' : horaDe(momento)
 
 function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
   const s = ctx.schedule.byUid.get(t.uid)
@@ -293,10 +303,10 @@ function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
     x('Milestone', milestone),
     x('Summary', t.isSummary),
     x('Critical', critical),
-    leaf && s && x('EarlyStart', dt(s.earlyStart, horaDe(cInicio.proximoUtil(s.inicioCedoMin)))),
-    leaf && s && x('EarlyFinish', dt(s.earlyFinish, horaDe(cDuracao.fimUtilAte(s.terminoCedoMin)))),
-    leaf && s && x('LateStart', dt(s.lateStart, horaDe(cInicio.proximoUtil(s.inicioTardeMin)))),
-    leaf && s && x('LateFinish', dt(s.lateFinish, horaDe(cDuracao.fimUtilAte(s.terminoTardeMin)))),
+    leaf && s && x('EarlyStart', dt(s.earlyStart, horaDaData(s.earlyStart, cInicio.proximoUtil(s.inicioCedoMin), ctx.base))),
+    leaf && s && x('EarlyFinish', dt(s.earlyFinish, horaDaData(s.earlyFinish, cDuracao.fimUtilAte(s.terminoCedoMin), ctx.base))),
+    leaf && s && x('LateStart', dt(s.lateStart, horaDaData(s.lateStart, cInicio.proximoUtil(s.inicioTardeMin), ctx.base))),
+    leaf && s && x('LateFinish', dt(s.lateFinish, horaDaData(s.lateFinish, cDuracao.fimUtilAte(s.terminoTardeMin), ctx.base))),
     leaf && s && x('FreeSlack', s.folgaLivreMin * 10), // décimos de minuto
     leaf && s && x('TotalSlack', s.folgaTotalMin * 10),
     x('FixedCost', money(leaf ? t.bac : 0)),
@@ -1041,14 +1051,24 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     const manual = text(node, 'Manual')
     if (!isSummary && manual === '1') manuais++
 
+    // O MSPDI não tem 24:00: o fim de um dia de 24 h vem como 00:00 do dia seguinte. O CronoAI conta esse término (e o marco depois de
+    // uma predecessora) como 24:00 do dia anterior; sem isso, reimportar o próprio export acusaria um dia de divergência
+    const diaAnterior = (d: string) => addCalendarDays(d, -1)
+    const terminoMeiaNoite = !!start && !!finish && duracaoMin > 0 && finish > start && horaDoArquivo(text(node, 'Finish')) === '00:00'
+    const marcoMeiaNoite = duracaoMin === 0 && preds.length > 0 && !!start && horaDoArquivo(text(node, 'Start')) === '00:00'
+    const inicioArquivo = marcoMeiaNoite && start ? diaAnterior(start) : start
+    const terminoArquivo = finish && (terminoMeiaNoite || (marcoMeiaNoite && horaDoArquivo(text(node, 'Finish')) === '00:00')) ? diaAnterior(finish) : finish
+    const horaIni = marcoMeiaNoite ? '24:00' : horaDoArquivo(text(node, 'Start'))
+    const horaFim = terminoMeiaNoite || (marcoMeiaNoite && horaDoArquivo(text(node, 'Finish')) === '00:00') ? '24:00' : horaDoArquivo(text(node, 'Finish'))
+
     const arquivo = isSummary
       ? undefined
       : {
-          ...(start ? { inicio: start } : {}),
-          ...(finish ? { termino: finish } : {}),
+          ...(inicioArquivo ? { inicio: inicioArquivo } : {}),
+          ...(terminoArquivo ? { termino: terminoArquivo } : {}),
           // Hora exata do arquivo da tarefa manual (a exportação a devolve como veio)
-          ...(manual === '1' && start && horaDoArquivo(text(node, 'Start')) ? { inicioHora: horaDoArquivo(text(node, 'Start')) } : {}),
-          ...(manual === '1' && finish && horaDoArquivo(text(node, 'Finish')) ? { terminoHora: horaDoArquivo(text(node, 'Finish')) } : {}),
+          ...(manual === '1' && start && horaIni ? { inicioHora: horaIni } : {}),
+          ...(manual === '1' && finish && horaFim ? { terminoHora: horaFim } : {}),
           duracaoMin,
           percentComplete: pct,
           ...(restricao ? { restricao } : {}),

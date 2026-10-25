@@ -163,7 +163,7 @@ describe('desempenho de uma edição de célula na store (obra de 3.000 tarefas)
     tempos.sort((a, b) => a - b)
     console.info(`[CRONOAI_PERF] edição de célula (ms): ${tempos.map((t) => t.toFixed(0)).join(', ')}; mediana ${tempos[2].toFixed(0)} ms`)
     // Meta de 500 ms (RNF-05.1) NÃO atingida: a edição roda a previsão e a linha de base para verificar a hipótese e depois a previsão
-    // de novo para a tela (3 cronogramas de ~130 a 200 ms cada). Dívida registrada em .claude/rules/divida-conhecida.md; teto local de 2.500 ms (máquina carregada chegou a 1.519 ms).
+    // de novo para a tela (3 cronogramas de ~130 a 200 ms cada). Dívida registrada em .claude/rules/divida-conhecida.md; faixa medida: ~0,8 s em máquina livre a ~1,5 s com a máquina carregada (medido 802 ms, 1.364–1.435 ms e 1.443 ms em 25/10/2026); teto local de 2.500 ms.
     expect(tempos[2]).toBeLessThan(2500)
   })
 })
