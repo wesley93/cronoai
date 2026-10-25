@@ -479,3 +479,12 @@ Decididas pelo orquestrador com a autorização do usuário para seguir sem para
 - **P2 → Testcontainers**, com usuário, senha e banco aleatórios por execução (emenda 01).
 - **P3 → PostgreSQL 17 em imagem Debian, por digest** (o dba concorda), até a Infraestrutura indicar a versão do banco gerenciado.
 - Tarefa 0 do `dba` feita (VEREDITO: AJUSTAR) e os 8 ajustes aplicados na emenda 01.
+
+## Emenda 02 (25/10/2026) — AC-2 com o compose do front preservado
+Origem: validação (arquiteto, testes e dba). O `${VAR:?}` no compose faria o `docker compose up app` do front falhar sem `.env`, porque o Compose interpola o arquivo inteiro antes de filtrar perfis. Isso violaria o 4º item do AC-2 e o AC-13. Decisão do orquestrador, com autorização do usuário, **sujeita à revisão dele no PR**:
+- **Novo texto do 3º item do AC-2:** sem qualquer uma das três senhas, o serviço `db` **não fica `healthy`** (o healthcheck exige o efeito do bootstrap) e **o log do contêiner diz a causa e como corrigir**. Sem `CRONOAI_DB_SENHA`, a própria imagem recusa inicializar.
+- **Evidências na tarefa 9:**
+  - (a) `docker compose up app` sem `.env` funciona;
+  - (b) log do `db` sem `CRONOAI_DB_SENHA`;
+  - (c) `db` não `healthy` e com a causa no log, sem a senha do migrador.
+- O `server/README.md` e o `docs/devops.md` documentam `docker compose --profile backend up -d --wait db`, que falha com código ≠ 0 se o banco não ficar `healthy`.
