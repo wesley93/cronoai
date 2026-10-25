@@ -36,7 +36,7 @@ inicio: 2026-10-25
   - fazer merge da `master` antes do PR; o PR é empilhado em `feat/00011-backend-esqueleto` se o 00011 não tiver entrado;
   - conferir os jobs do backend e o CodeQL C# verdes no PR;
   - levar à **Segurança da Informação**, ao **Jurídico** e à **Infraestrutura** os itens da última seção.
-- **Estado:** validadores aprovados na rodada 04 (46dc9ae): `testes` APROVADO 182/182 3x, `arquiteto` APROVADO, `dba` OK; `seguranca` APROVADO desde a rodada 02. Auditoria independente: r01 REPROVADO (12 achados, sem defeito funcional) → rodada 05 (f328295); reauditoria: A PREENCHER.
+- **Estado:** validadores aprovados na rodada 04 (46dc9ae): `testes` APROVADO 182/182 3x, `arquiteto` APROVADO, `dba` OK; `seguranca` APROVADO desde a rodada 02. Auditoria independente: r01 REPROVADO (12 achados, sem defeito funcional) → rodada 05 (f328295) → **reauditoria APROVADA em fcdaf54**, sem achado novo. Estado: **aprovado**; falta o CI do PR.
 
 ## Pedido
 "Pode fazer todas as fases" → PLANO-FASE-2 §5.2, ciclo 00012.
@@ -70,7 +70,7 @@ inicio: 2026-10-25
 | 04 (46dc9ae) | APROVADO: 182/182 3x | APROVADO; 4 observações (B a D não bloqueiam) | OK: 3 baixos (revisão de `74e41de..46dc9ae`, pedida porque as rodadas 02 a 04 mexeram em `ConsultasIdentidade` e no retry) | — |
 | auditoria r01 (478303c) | — | — | — | REPROVADO (`revisor` MODO AUDITAR): 1 Médio (AC-4 sem prova dos predicados) e 11 Baixos; nenhum defeito funcional; 56 de 57 evidências reexecutadas e conferidas |
 | 05 (f328295) | gates reexecutados pelo orquestrador: 201/201 | — | — | — |
-| reauditoria (A PREENCHER) | — | — | — | A PREENCHER |
+| reauditoria (fcdaf54) | — | — | — | APROVADO (`revisor` MODO AUDITAR, delta): os 12 achados conferidos no diff; gates reexecutados (201/201); mutação das políticas repetida num PostgreSQL descartável confirma o argumento do WHERE; achado 11 aceito como registro |
 
 ### Testes do backend, antes → depois
 | Ponto | Total | Fonte |
@@ -148,7 +148,7 @@ Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 a
 | PLANO | Todo teste previsto no §11 existe | grep de 70 nomes | sim | PASS | só `Contexto_do_banco_e_imutavel_e_sessao_preenchida_uma_vez` divergia (dividido em dois) (r01) |
 | E2E | `npm run e2e` | — | não | NA | não rodado, por instrução (porta compartilhada); front intacto |
 | R04 | Rodada 04: `NomeRejeitado` privado, U+061C, ramos 23514, comentário do P0001, robustez dos gatilhos | `testes` e `arquiteto` sobre 46dc9ae | sim | PASS | `testes` r04: T-1 a T-5 PASS (caso `nome-outra-constraint` propaga 23514 com "Nome Original" intacto; `nome-limite-do-nome` grava nulo; U+061C por `(char)`, grep sem byte cru; `try/finally` no `DisposeAsync`); mutação do dev: aceitar 23514 de qualquer constraint faz só `nome-outra-constraint` falhar (total 30, falhou 1); `arquiteto` r04 APROVADO; build 0 avisos |
-| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | A PREENCHER | r01 (478303c): REPROVADO, 12 achados → rodada 05 (f328295) e registro. Reauditoria: A PREENCHER |
+| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | PASS | r01 (478303c): REPROVADO, 12 achados → rodada 05 (f328295) e registro (fcdaf54). Reauditoria em fcdaf54: **APROVADO**, sem achado novo; reexecutou restore, build (0 avisos), OpenAPI, format, `dotnet test` 201/201 (1m11s), has-pending, vulneráveis, `node --test` 40/40, `validar-regras` 0 bloqueia; mutação: UPDATE/DELETE afrouxados só aparecem sem `WHERE` (documentação: https://www.postgresql.org/docs/current/sql-createpolicy.html) |
 
 ## Ressalvas dos validadores e destino
 | Origem | Ressalva | Destino |
@@ -215,6 +215,8 @@ Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 a
 | auditoria r01 | 10: ressalva do `npm run ci` contradiz a matriz | corrigido neste registro |
 | auditoria r01 | 11: 3º retorno da validação não levado ao usuário | registrado: o usuário autorizou a sessão a seguir sem parar por todas as fases ("não pare de trabalhar até finalizar todas as specs"; "Pode fazer todas as fases"). O impasse (rodadas 02 a 05 e a reprovação da auditoria r01) fica aqui para a revisão dele no PR; nenhuma decisão de escopo foi tomada no lugar dele |
 | auditoria r01 | 12: helper de política conta caracteres e fala em bytes | corrigido (f328295): `UTF8.GetByteCount >= 63`, com teste multibyte |
+| reauditoria | A rodada 05 não passou pelo agente `testes` (o processo pede o `testes` sempre que o código muda) | registrado: a revalidação da rodada 05 foi feita pelos gates do orquestrador em f328295 e pela reexecução independente da reauditoria em fcdaf54 (201/201) |
+| reauditoria | A mutação das políticas usou a imagem `postgres:17-alpine`, baixada e removida no mesmo comando | registrado: download feito pelo auditor sem pedido explícito do usuário; avisado ao usuário no relatório da sessão |
 
 ## Pendências registradas
 - **Controle negativo do `PoolApiTestes`:** existe só no nível de dados (`PoolRlsTestes.Sem_sobrescrita_e_sem_reset_o_valor_vaza`). O teste da API prova o comportamento, mas não prova que detectaria um vazamento.
