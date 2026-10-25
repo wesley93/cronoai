@@ -65,6 +65,10 @@ interface Estatico {
   nulas: number // tarefas nulas (IsNull = 1) com UID
   valoresPersonalizados: number // ExtendedAttribute de tarefa fora de Text1/Number1 (ou dos apelidos)
   camposPersonalizados: number // FieldID distintos dos anteriores
+  folgas: string[] // feriados do calendário usado: lista legada + exceções não recorrentes (ordenado)
+  extras: string[] // dias úteis extras idem
+  semanaDiff: number // dias da semana do calendário diferentes de seg–sex
+  lagOutroFormato: number // vínculos com lag != 0 e LagFormat fora de 7/39 (e não percentual)
   datasFolhas: { uid: number; inicio: string; termino: string }[] // folhas com Start e Finish no arquivo (parte da data)
 }
 
@@ -102,6 +106,26 @@ function lerEstatico(xml: string): Estatico {
     const m = minutosBrutos(txt(t, 'Duration'), minutosPorDia)
     return { m, exato: Math.round((m / minutosPorDia) * 100) / 100 }
   }
+  const diasFolga = new Set<string>()
+  const diasExtras = new Set<string>()
+  const marcar = (no: Element) => {
+    const per = kid(no, 'TimePeriod')
+    const de = txt(per, 'FromDate')?.slice(0, 10)
+    const ate = txt(per, 'ToDate')?.slice(0, 10)
+    if (!de || !ate || !/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) return
+    let n = 0
+    for (let d = de; d <= ate && n < 400; d = addCalendarDays(d, 1), n++) (txt(no, 'DayWorking') === '1' ? diasExtras : diasFolga).add(d)
+  }
+  for (const wd of kids(kid(calUsado, 'WeekDays'), 'WeekDay')) if (txt(wd, 'DayType') === '0') marcar(wd)
+  for (const ex of kids(kid(calUsado, 'Exceptions'), 'Exception')) if (Number(txt(ex, 'Occurrences') ?? 1) <= 1) marcar(ex)
+  const semanaDiff = kids(kid(calUsado, 'WeekDays'), 'WeekDay').filter((wd) => {
+    const dia = Number(txt(wd, 'DayType'))
+    const trabalha = txt(wd, 'DayWorking')
+    return dia >= 1 && dia <= 7 && trabalha !== undefined && (trabalha === '1') !== (dia >= 2 && dia <= 6)
+  }).length
+  const lagOutroFormato = tarefas
+    .flatMap((t) => kids(t, 'PredecessorLink'))
+    .filter((l) => Number(txt(l, 'LinkLag') ?? 0) !== 0 && !['7', '39', '19', '20', '51', '52'].includes(txt(l, 'LagFormat') ?? '7')).length
   return {
     uids: tarefas.map((t) => Number(txt(t, 'UID'))),
     vinculos: tarefas.flatMap((t) => kids(t, 'PredecessorLink').map((l) => `${txt(l, 'PredecessorUID')}>${txt(t, 'UID')}:${txt(l, 'Type') ?? '1'}`)),
@@ -131,6 +155,10 @@ function lerEstatico(xml: string): Estatico {
     nulas: kids(kid(project, 'Tasks'), 'Task').filter((t) => Number(txt(t, 'UID')) !== 0 && txt(t, 'IsNull') === '1').length,
     valoresPersonalizados: extras.length,
     camposPersonalizados: new Set(extras.map((e) => txt(e, 'FieldID') ?? '')).size,
+    folgas: [...diasFolga].sort(),
+    extras: [...diasExtras].sort(),
+    semanaDiff,
+    lagOutroFormato,
     datasFolhas: folhas.flatMap((t) => {
       const inicio = txt(t, 'Start')?.slice(0, 10)
       const termino = txt(t, 'Finish')?.slice(0, 10)
@@ -323,6 +351,12 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       confere(est.number1SemApelido, `Number1 lido como lead time em ${est.number1SemApelido} tarefa(s) sem apelido 'lead' no arquivo: confira.`, /^Number1 lido/)
       confere(est.calendarioProprio, `${est.calendarioProprio} tarefa(s) com calendário próprio importada(s) no calendário do projeto.`, /calendário próprio/)
       confere(est.nulas, `${est.nulas} linha(s) em branco (tarefa nula) ignorada(s).`, /em branco/)
+      confere(est.semanaDiff, `Calendário do projeto com ${est.semanaDiff} dia(s) da semana diferente(s) de segunda a sexta: o CronoAI usa só segunda a sexta; confira os dias úteis.`, /^Calendário do projeto com/)
+      confere(est.lagOutroFormato, `${est.lagOutroFormato} vínculo(s) com lag em formato diferente de dias úteis: serão exportados em dias úteis.`, /formato diferente de dias úteis/)
+      // Calendário lido = o do arquivo (lista legada + exceções simples); arquivo sem feriado nenhum recebe os nacionais, com aviso
+      if (est.folgas.length) expect(r.calendar.holidays).toEqual(est.folgas)
+      else expect(w.some((a) => a.startsWith('Calendário sem feriados'))).toBe(true)
+      expect(r.calendar.extraWorkingDays).toEqual(est.extras)
       const informativo = [
         est.timephased && `${est.timephased} registro(s) distribuído(s) no tempo (TimephasedData)`,
         est.valoresPersonalizados && `${est.valoresPersonalizados} valor(es) de ${est.camposPersonalizados} campo(s) personalizado(s)`,
@@ -344,7 +378,11 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       const xml = buildMspdiXml({ meta, tasks: r.tasks, calendar: r.calendar, schedule })
       expect(validateMspdi(xml, { strictOrder: true }).errors).toEqual([])
 
-      const volta = new Map(parseMspdiXml(xml).tasks.map((t) => [t.uid, t]))
+      const back = parseMspdiXml(xml)
+      // Calendário na ida e volta: feriados e dias úteis extras iguais antes e depois
+      expect(back.calendar.holidays).toEqual(r.calendar.holidays)
+      expect(back.calendar.extraWorkingDays).toEqual(r.calendar.extraWorkingDays)
+      const volta = new Map(back.tasks.map((t) => [t.uid, t]))
       expect(volta.size).toBe(r.tasks.length)
       const diferencas: string[] = []
       for (const t of r.tasks.filter((x) => !x.isSummary)) {
@@ -473,6 +511,9 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       expect(soma(/^(\d+) tarefa\(s\) com calendário próprio/)).toEqual({ total: 1, arquivos: 1 })
       expect(soma(/^(\d+) linha\(s\) em branco/)).toEqual({ total: 3, arquivos: 1 })
       expect(soma(/^(\d+) exceção\(ões\) recorrente/)).toEqual({ total: 0, arquivos: 0 }) // todas têm a lista legada
+      expect(soma(/^(\d+) exceção\(ões\) do calendário com data inválida/)).toEqual({ total: 0, arquivos: 0 })
+      expect(soma(/^Calendário do projeto com (\d+) dia/)).toEqual({ total: 0, arquivos: 0 }) // todos seg–sex
+      expect(soma(/^(\d+) vínculo\(s\) com lag em formato diferente/)).toEqual({ total: 12, arquivos: 6 }) // LagFormat 9 (semanas úteis)
       expect(imp.filter((l) => l.avisos.some((a) => a.startsWith('Não importado do MS Project')))).toHaveLength(95)
     })
 

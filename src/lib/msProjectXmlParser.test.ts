@@ -388,3 +388,63 @@ describe('parseMspdiXml: avisos do que o import não preserva', () => {
     expect(r.warnings.join(' ')).not.toMatch(/Não importado|linha de base|calendário próprio|em branco|fracionária|Text1|Number1/)
   })
 })
+
+describe('parseMspdiXml: rodada 03 (chaves do protótipo, datas inválidas, ocorrências, semana e lag)', () => {
+  it('tipo de vínculo "constructor"/"toString" é inválido: aviso sem o texto do arquivo e tipo FS', () => {
+    const elo = (tipo: string) => `<PredecessorLink><PredecessorUID>1</PredecessorUID><Type>${tipo}</Type></PredecessorLink>`
+    const xml = projeto({ tasks: tarefa(1) + tarefa(2, { extra: elo('constructor') + elo('toString') + elo('2') }) })
+    const v = validateMspdi(xml)
+    expect(v.valid).toBe(false)
+    expect(v.errors).toEqual(Array(2).fill('Tarefa UID 2: tipo de vínculo (não numérico) inválido (0–3).'))
+    const r = parseMspdiXml(xml)
+    expect(r.tasks.find((t) => t.uid === 2)!.predecessors.map((p) => p.type)).toEqual(['FS', 'FS', 'SF'])
+    expect(r.warnings).toContain('Ignorado: Tarefa UID 2: tipo de vínculo (não numérico) inválido (0–3).')
+    expect(r.warnings.join(' ')).not.toMatch(/constructor|toString/)
+  })
+
+  it('exceção com data inválida ou inexistente é ignorada com aviso (sem "Invalid time value")', () => {
+    const xml = projeto({
+      head: calendario(
+        `<Exceptions>${excecao('2026-11-20', '2026-11-20')}${excecao('abcdefghij', '2026-12-01')}${excecao('2026-02-30', '2026-03-02')}</Exceptions>`,
+      ),
+    })
+    const r = parseMspdiXml(xml)
+    expect(r.calendar.holidays).toEqual(['2026-11-20'])
+    expect(r.warnings).toContain('2 exceção(ões) do calendário com data inválida ignorada(s).')
+    expect(r.warnings.join(' ')).not.toMatch(/abcdefghij|Invalid/)
+  })
+
+  it('recorrente com menos datas legadas no período que Occurrences não é aplicada e avisa (A1)', () => {
+    const exc = `<Exceptions>${excecao('2026-12-25', '2028-12-25', { ocorrencias: 3 })}</Exceptions>`
+    const duas = parseMspdiXml(projeto({ head: calendario(`${legado(['2026-12-25', '2027-12-25'])}${exc}`) }))
+    expect(duas.warnings).toContain('1 exceção(ões) recorrente(s) do calendário não aplicada(s): confira feriados e dias úteis extras.')
+    expect(duas.calendar.holidays).toEqual(['2026-12-25', '2027-12-25']) // o que a lista legada trouxe segue lido
+    const tres = parseMspdiXml(projeto({ head: calendario(`${legado(['2026-12-25', '2027-12-25', '2028-12-25'])}${exc}`) }))
+    expect(tres.warnings.join(' ')).not.toMatch(/recorrente/)
+  })
+
+  it('LB0 parcial de tarefa-resumo não gera aviso (só folhas)', () => {
+    const lb = '<Baseline><Number>0</Number><Start>2026-03-02T08:00:00</Start></Baseline>'
+    const r = parseMspdiXml(projeto({ tasks: tarefa(1, { extra: '<Summary>1</Summary>' + lb }) + tarefa(2, { extra: lb }) }))
+    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.')
+  })
+
+  it('semana do calendário diferente de segunda a sexta avisa com o número de dias', () => {
+    const dia = (n: number, trabalha: number) => `<WeekDay><DayType>${n}</DayType><DayWorking>${trabalha}</DayWorking></WeekDay>`
+    const padrao = [1, 2, 3, 4, 5, 6, 7].map((n) => dia(n, n >= 2 && n <= 6 ? 1 : 0)).join('')
+    const sabado = [1, 2, 3, 4, 5, 6, 7].map((n) => dia(n, n >= 2 && n <= 7 ? 1 : 0)).join('')
+    const ok = parseMspdiXml(projeto({ head: calendario(`<WeekDays>${padrao}</WeekDays>`) }))
+    expect(ok.warnings.join(' ')).not.toMatch(/semana|segunda a sexta/)
+    const r = parseMspdiXml(projeto({ head: calendario(`<WeekDays>${sabado}</WeekDays>`) }))
+    expect(r.warnings).toContain('Calendário do projeto com 1 dia(s) da semana diferente(s) de segunda a sexta: o CronoAI usa só segunda a sexta; confira os dias úteis.')
+  })
+
+  it('lag em formato diferente de dias úteis avisa; formato 7 e o seed não', () => {
+    const elo = (lag: number, formato: number) =>
+      `<PredecessorLink><PredecessorUID>1</PredecessorUID><Type>1</Type><LinkLag>${lag}</LinkLag><LagFormat>${formato}</LagFormat></PredecessorLink>`
+    const r = parseMspdiXml(projeto({ tasks: tarefa(1) + tarefa(2, { extra: elo(4800, 9) + elo(4800, 7) + elo(0, 9) }) }))
+    expect(r.warnings).toContain('1 vínculo(s) com lag em formato diferente de dias úteis: serão exportados em dias úteis.')
+    const seedImport = parseMspdiXml(buildMspdiXml(input))
+    expect(seedImport.warnings.join(' ')).not.toMatch(/formato diferente|segunda a sexta|data inválida/)
+  })
+})
