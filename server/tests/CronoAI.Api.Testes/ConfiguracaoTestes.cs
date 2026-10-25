@@ -51,10 +51,25 @@ public sealed partial class ConfiguracaoTestes
 
                 if (nome.Equals("Habilitado", StringComparison.OrdinalIgnoreCase))
                 {
-                    Assert.True(valor.ValueKind != JsonValueKind.True, $"flag Habilitado=true em {Path.GetFileName(arquivo)}");
+                    Assert.False(FlagLigada(valor), $"flag Habilitado ligada em {Path.GetFileName(arquivo)}");
                 }
             }
         }
+    }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("\"true\"", true)]
+    [InlineData("\"TRUE\"", true)]
+    [InlineData("\" True \"", true)]
+    [InlineData("false", false)]
+    [InlineData("\"false\"", false)]
+    [InlineData("\"\"", false)]
+    public void Detector_da_flag_pega_booleano_e_texto_sem_diferenciar_maiusculas(string json, bool ligada)
+    {
+        using var documento = JsonDocument.Parse(json);
+
+        Assert.Equal(ligada, FlagLigada(documento.RootElement));
     }
 
     [Fact]
@@ -72,6 +87,11 @@ public sealed partial class ConfiguracaoTestes
     #endregion
 
     #region Métodos privados
+
+    // A flag pode vir como booleano ou como texto ("true", sem diferenciar maiúsculas): os dois ligam o usuário de desenvolvimento.
+    private static bool FlagLigada(JsonElement valor) =>
+        valor.ValueKind == JsonValueKind.True
+        || (valor.ValueKind == JsonValueKind.String && "true".Equals(valor.GetString()?.Trim(), StringComparison.OrdinalIgnoreCase));
 
     private static IEnumerable<(string Nome, JsonElement Valor)> Propriedades(JsonElement elemento)
     {

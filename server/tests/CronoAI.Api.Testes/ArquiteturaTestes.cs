@@ -10,9 +10,14 @@ public sealed partial class ArquiteturaTestes
 {
     #region Campos
 
-    // Único acesso permitido a DbSet<Usuario> em server/src (ADR 00006): consultas de identidade, a semente e a
-    // própria declaração do DbSet no contexto.
-    private static readonly string[] _arquivosComAcessoAUsuario = ["ConsultasIdentidade.cs", "SementeDesenvolvimento.cs", "CronoDbContext.cs"];
+    // Únicos arquivos (caminho relativo a server/, com "/") que podem tocar a tabela usuario (ADR 00006): consultas de
+    // identidade, a semente e a própria declaração do DbSet no contexto. Compara o caminho COMPLETO, não só o nome.
+    private static readonly string[] _arquivosComAcessoAUsuario =
+    [
+        "src/CronoAI.Dados/Identidade/ConsultasIdentidade.cs",
+        "src/CronoAI.Api/Desenvolvimento/SementeDesenvolvimento.cs",
+        "src/CronoAI.Dados/CronoDbContext.cs",
+    ];
 
     #endregion
 
@@ -93,23 +98,62 @@ public sealed partial class ArquiteturaTestes
             .Where(a => !a.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                      && !a.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                      && !a.Contains($"{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Select(a => (Caminho: Path.GetRelativePath(raiz, a).Replace('\\', '/'), Conteudo: File.ReadAllText(a)))
             .ToList();
         Assert.NotEmpty(arquivos);
 
-        var infratores = arquivos
-            .Where(a => AcessoAUsuarioRegex().IsMatch(File.ReadAllText(a)))
-            .Select(Path.GetFileName)
-            .Where(nome => !_arquivosComAcessoAUsuario.Contains(nome!))
-            .ToList();
+        Assert.Empty(AcessosIndevidosAUsuario(arquivos));
+    }
 
-        Assert.Empty(infratores);
+    [Fact]
+    public void Detector_de_acesso_a_usuario_acusa_dbset_e_sql_cru_fora_dos_arquivos_permitidos()
+    {
+        // Meta-teste do detector: trechos que DEVEM ser acusados fora da lista, e nunca nos caminhos completos permitidos.
+        var acessos = new[]
+        {
+            "var u = contexto.Usuarios.ToList();",
+            "var u = contexto.Set<Usuario>();",
+            "contexto.Database.SqlQuery<int>($\"SELECT count(*)::int AS \\\"Value\\\" FROM cronoai.usuario\");",
+            "await db.Database.ExecuteSqlAsync($\"UPDATE usuario SET nome_exibicao = null\");",
+            "db.Empresas.FromSql($\"SELECT * FROM x JOIN cronoai.usuario u ON u.id = x.id\");",
+            "var sql = \"insert into cronoai.usuario (id) values (1)\";",
+        };
+
+        foreach (var trecho in acessos)
+        {
+            // Fora da lista: acusado.
+            Assert.Equal(
+                ["src/CronoAI.Api/Empresas/Qualquer.cs"],
+                AcessosIndevidosAUsuario([("src/CronoAI.Api/Empresas/Qualquer.cs", trecho)]));
+
+            // Mesmo NOME de arquivo permitido, em outra pasta: acusado (compara o caminho completo).
+            Assert.Equal(
+                ["src/CronoAI.Api/Outra/ConsultasIdentidade.cs"],
+                AcessosIndevidosAUsuario([("src/CronoAI.Api/Outra/ConsultasIdentidade.cs", trecho)]));
+
+            // Caminho completo permitido: não acusado.
+            Assert.Empty(AcessosIndevidosAUsuario([("src/CronoAI.Dados/Identidade/ConsultasIdentidade.cs", trecho)]));
+        }
+
+        // Código sem acesso a usuario não é acusado (inclui a palavra em comentário ou em outro contexto).
+        Assert.Empty(AcessosIndevidosAUsuario([("src/CronoAI.Api/Empresas/Qualquer.cs", "// o usuario do contexto vem da sessão\nvar usuarioId = contexto.UsuarioId;")]));
     }
 
     #endregion
 
     #region Métodos privados
 
-    [GeneratedRegex(@"\.Usuarios\b|Set<Usuario>\s*\(")]
+    /// <summary>
+    /// Arquivos (caminho relativo, com "/") que acessam a tabela usuario fora da lista permitida: DbSet (<c>.Usuarios</c>,
+    /// <c>Set&lt;Usuario&gt;</c>) ou SQL cru (<c>cronoai.usuario</c>, <c>FROM/JOIN/INTO/UPDATE usuario</c>).
+    /// </summary>
+    public static IReadOnlyList<string> AcessosIndevidosAUsuario(IEnumerable<(string Caminho, string Conteudo)> arquivos) =>
+        arquivos
+            .Where(a => AcessoAUsuarioRegex().IsMatch(a.Conteudo) && !_arquivosComAcessoAUsuario.Contains(a.Caminho, StringComparer.Ordinal))
+            .Select(a => a.Caminho)
+            .ToList();
+
+    [GeneratedRegex(@"\.Usuarios\b|Set<Usuario>\s*\(|\bcronoai\.""?usuario""?\b|\b(FROM|JOIN|INTO|UPDATE)\s+""?usuario""?\b", RegexOptions.IgnoreCase)]
     private static partial Regex AcessoAUsuarioRegex();
 
     // Contexto só para ler o modelo: não abre conexão.

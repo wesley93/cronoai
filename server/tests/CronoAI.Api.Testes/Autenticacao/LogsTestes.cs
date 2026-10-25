@@ -54,6 +54,11 @@ public sealed class LogsTestes
         Assert.DoesNotContain(cookie, tudo, StringComparison.Ordinal);
         Assert.DoesNotContain(idp.SegredoCliente, tudo, StringComparison.Ordinal);
         Assert.DoesNotContain("id_token", tudo, StringComparison.OrdinalIgnoreCase);
+        // ...nem o VALOR do id_token (o literal sozinho não prova nada) nem o código emitido pelo IdP.
+        Assert.NotNull(idp.UltimoIdToken);
+        Assert.NotNull(idp.UltimoCodigo);
+        Assert.DoesNotContain(idp.UltimoIdToken, tudo, StringComparison.Ordinal);
+        Assert.DoesNotContain(idp.UltimoCodigo, tudo, StringComparison.Ordinal);
         // ...e só o usuario_id identifica quem entrou.
         Assert.Contains($"usuario_id={usuarioId}", tudo, StringComparison.Ordinal);
     }

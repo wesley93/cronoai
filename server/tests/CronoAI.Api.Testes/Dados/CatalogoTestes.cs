@@ -113,6 +113,36 @@ public sealed class CatalogoTestes
         Assert.Equal(esperadas.OrderBy(x => x, StringComparer.Ordinal), politicas.OrderBy(x => x, StringComparer.Ordinal));
     }
 
+    [Fact]
+    public async Task Predicados_das_politicas_sao_os_do_plano()
+    {
+        // Texto EXATO (normalizado em espaços) de USING e WITH CHECK em pg_policies. Sem isto, um WITH CHECK (true) nos
+        // INSERT de sessao ou membro_empresa deixaria a suíte verde. U e E são as subconsultas escalares das variáveis de sessão.
+        const string u = "( SELECT (NULLIF(current_setting('app.usuario_id'::text, true), ''::text))::uuid AS \"nullif\")";
+        const string e = "( SELECT (NULLIF(current_setting('app.empresa_id'::text, true), ''::text))::uuid AS \"nullif\")";
+        const string nulo = "<nulo>";
+
+        var atuais = await ListarAsync(
+            @"SELECT tablename || '|' || cmd || '|' ||
+                     regexp_replace(coalesce(qual, '<nulo>'), '[[:space:]]+', ' ', 'g') || '|' ||
+                     regexp_replace(coalesce(with_check, '<nulo>'), '[[:space:]]+', ' ', 'g')
+                FROM pg_policies WHERE schemaname = 'cronoai'");
+
+        var esperados = new[]
+        {
+            $"empresa|INSERT|{nulo}|(id = {e})",
+            $"empresa|SELECT|((id = {e}) OR (EXISTS ( SELECT 1 FROM membro_empresa m WHERE ((m.empresa_id = empresa.id) AND (m.usuario_id = {u})))))|{nulo}",
+            $"membro_empresa|INSERT|{nulo}|(empresa_id = {e})",
+            $"membro_empresa|SELECT|((usuario_id = {u}) OR (empresa_id = {e}))|{nulo}",
+            $"sessao|DELETE|(usuario_id = {u})|{nulo}",
+            $"sessao|INSERT|{nulo}|(usuario_id = {u})",
+            $"sessao|SELECT|(usuario_id = {u})|{nulo}",
+            $"sessao|UPDATE|(usuario_id = {u})|(usuario_id = {u})",
+        };
+
+        Assert.Equal(esperados.OrderBy(x => x, StringComparer.Ordinal), atuais.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
     #endregion
 
     #region Métodos privados

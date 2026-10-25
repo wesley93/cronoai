@@ -154,7 +154,7 @@ public sealed class ConsultasIdentidade
                 || contexto.Membros.IgnoreQueryFilters(_ignorarFiltroEmpresa)
                     .Any(m => m.UsuarioId == s.UsuarioId && m.EmpresaId == s.EmpresaAtivaId)
             where vinculoVigente
-            select new SessaoValidada(s.EmpresaAtivaId, s.ExpiraEm, u.Emissor))
+            select new SessaoValidada(s.EmpresaAtivaId, u.Emissor))
             .SingleOrDefaultAsync(cancelamento);
     }
 

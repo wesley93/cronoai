@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace CronoAI.Dados.Rls;
@@ -58,9 +59,10 @@ public static class MigrationBuilderRlsExtensoes
     private static void Criar(MigrationBuilder migrationBuilder, string tabela, string nome, string comando, string clausula)
     {
         ArgumentNullException.ThrowIfNull(migrationBuilder);
-        if (nome.Length > 63)
+        // Bytes, não caracteres (o limite do PostgreSQL é em bytes). 63 já conta como suspeito: coerente com o teste de catálogo.
+        if (Encoding.UTF8.GetByteCount(nome) >= 63)
         {
-            throw new ArgumentException("Nome de política acima de 63 bytes (o PostgreSQL trunca em silêncio).", nameof(nome));
+            throw new ArgumentException("Nome de política com 63 bytes ou mais (o PostgreSQL trunca em silêncio; o catálogo trata 63 bytes como suspeita de truncamento).", nameof(nome));
         }
 
         migrationBuilder.Sql(

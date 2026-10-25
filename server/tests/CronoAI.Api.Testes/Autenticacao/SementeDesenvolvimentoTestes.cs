@@ -2,6 +2,7 @@ using CronoAI.Api.Desenvolvimento;
 using CronoAI.Api.Testes.Infra;
 using CronoAI.Dados;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CronoAI.Api.Testes.Autenticacao;
 
@@ -68,12 +69,28 @@ public sealed class SementeDesenvolvimentoTestes
     }
 
     [Fact]
-    public async Task Semente_usa_o_papel_da_aplicacao_e_emissor_reservado()
+    public async Task Semente_cria_usuarios_com_emissor_reservado()
     {
         await CriarSemente("Development").ExecutarAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, await ConsultaBanco.ContarUsuariosAsync(_banco, "urn:cronoai:desenvolvimento", IdsDesenvolvimento.SujeitoDevA));
         Assert.Equal(1, await ConsultaBanco.ContarUsuariosAsync(_banco, "urn:cronoai:desenvolvimento", IdsDesenvolvimento.SujeitoDevB));
+    }
+
+    [Fact]
+    public async Task Semente_da_composicao_real_do_host_roda_como_cronoai_app()
+    {
+        // Composição REAL (Program.cs): a semente e a fábrica vêm do contêiner de DI do host, ligado à string do app.
+        await using var fabrica = new ApiFactory(_banco.StringConexaoApp, "Development");
+        var semente = fabrica.Services.GetRequiredService<SementeDesenvolvimento>();
+        var fabricaDoHost = fabrica.Services.GetRequiredService<IFabricaCronoDbContext>();
+
+        await semente.ExecutarAsync(TestContext.Current.CancellationToken);
+
+        await using var contexto = fabricaDoHost.Criar(ContextoSessaoBanco.Vazio);
+        var papel = await contexto.Database.SqlQuery<string>($"SELECT current_user::text AS \"Value\"").ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("cronoai_app", papel.Single());
+        Assert.Equal(1, await ConsultaBanco.ContarUsuariosAsync(_banco, "urn:cronoai:desenvolvimento", IdsDesenvolvimento.SujeitoDevA));
     }
 
     #endregion

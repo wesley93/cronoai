@@ -24,7 +24,7 @@ public sealed class NomeExibicaoTestes
     private const string Emoji = "\U0001F600";
 
     private const string FuncaoDoGatilho = """
-        CREATE FUNCTION cronoai.t_nome_falha() RETURNS trigger LANGUAGE plpgsql AS $$
+        CREATE OR REPLACE FUNCTION cronoai.t_nome_falha() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
           IF NEW.nome_exibicao = 'nome-que-explode' THEN
             RAISE EXCEPTION 'falha simulada' USING ERRCODE = '40001';
@@ -264,9 +264,10 @@ public sealed class NomeExibicaoTestes
         try
         {
             await conexao.OpenAsync(TestContext.Current.CancellationToken);
-            await Executar(conexao, FuncaoDoGatilho);
+            await ExecutarAsync(conexao, FuncaoDoGatilho, TestContext.Current.CancellationToken);
             gatilho.FuncaoCriada = true;
-            await Executar(conexao, "CREATE TRIGGER t_nome_falha BEFORE INSERT OR UPDATE ON cronoai.usuario FOR EACH ROW EXECUTE FUNCTION cronoai.t_nome_falha()");
+            await ExecutarAsync(conexao, "DROP TRIGGER IF EXISTS t_nome_falha ON cronoai.usuario", TestContext.Current.CancellationToken);
+            await ExecutarAsync(conexao, "CREATE TRIGGER t_nome_falha BEFORE INSERT OR UPDATE ON cronoai.usuario FOR EACH ROW EXECUTE FUNCTION cronoai.t_nome_falha()", TestContext.Current.CancellationToken);
             return gatilho;
         }
         catch
@@ -277,10 +278,10 @@ public sealed class NomeExibicaoTestes
         }
     }
 
-    private static async Task Executar(NpgsqlConnection conexao, string sql)
+    private static async Task ExecutarAsync(NpgsqlConnection conexao, string sql, CancellationToken cancelamento)
     {
         await using var comando = new NpgsqlCommand(sql, conexao);
-        await comando.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        await comando.ExecuteNonQueryAsync(cancelamento);
     }
 
     private static async Task<string?> LerNomeAsync(HttpClient navegador)
@@ -315,11 +316,12 @@ public sealed class NomeExibicaoTestes
                 {
                     try
                     {
-                        await Executar(_conexao, "DROP TRIGGER IF EXISTS t_nome_falha ON cronoai.usuario");
+                        // CancellationToken.None: a limpeza roda mesmo se o teste foi cancelado.
+                        await ExecutarAsync(_conexao, "DROP TRIGGER IF EXISTS t_nome_falha ON cronoai.usuario", CancellationToken.None);
                     }
                     finally
                     {
-                        await Executar(_conexao, "DROP FUNCTION IF EXISTS cronoai.t_nome_falha()");
+                        await ExecutarAsync(_conexao, "DROP FUNCTION IF EXISTS cronoai.t_nome_falha()", CancellationToken.None);
                     }
                 }
             }
