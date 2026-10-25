@@ -43,13 +43,23 @@ Referência de numeração: OWASP Top 10 **2021** — https://owasp.org/Top10/ (
 - `localStorage` guarda só o estado da obra; nada de credencial.
 - **[P]** Custo sigiloso de contrato em fixture, ciclo ou PR?
 
-## Backend (T8 — a partir da SPEC-01)
+## Backend (T8 — `server/`, desde o ciclo 00011)
 - Autenticação em toda rota; autorização **por obra** (usuário só acessa obras dele); id de obra do corpo/URL conferido contra o usuário.
 - Consultas 100% parametrizadas; migração versionada.
 - Concorrência otimista (RF-01.4) e trilha de autoria (SPEC-02) nas escritas de avanço, custo, vínculo e linha de base.
 - Erro sem detalhe interno; logs estruturados sem dados pessoais (RF-12.9).
 - **[P]** Rate limiting e proteção de upload (tipo, tamanho, antivírus no backend — RNF-06.1).
 - **[P]** Provedor externo (IA, transcrição, WhatsApp, ERP): só o aprovado pela **Segurança da Informação**; dado de trabalhador também passa pelo **Jurídico**.
+
+### Backend — ASVS L2 (esqueleto por capítulo)
+Referência: [OWASP ASVS](https://owasp.org/www-project-application-security-verification-standard/). Preencher por ciclo; o que ainda não se aplica fica `NA` com o ciclo previsto.
+- **V1 Codificação e sanitização / V5 Validação:** SQL só via EF (`FromSql` interpolado); nada de `FromSqlRaw`/`ExecuteSqlRaw` com texto montado; validação de tipo, tamanho e formato na borda dos endpoints (00012+).
+- **V2/V3 Autenticação e sessão:** `NA` até o 00012 (SPEC-02).
+- **V4 Controle de acesso:** autorização por obra e isolamento por empresa (filtro EF + RLS; 00012). Testes de segurança do banco conectam como `cronoai_app`, nunca como superusuário.
+- **V7 Erros e logs:** ProblemDetails sem pilha fora de `Development`; logs JSON sem corpo, cabeçalhos, string de conexão nem dados pessoais; `EnableSensitiveDataLogging` ausente.
+- **V8 Proteção de dados:** sem segredo versionado (`.env`, `user-secrets`); segredos de integração cifrados (00022); LGPD com o Jurídico.
+- **V9/V12 Comunicação e API:** TLS/HSTS de produção são da Infraestrutura; cabeçalhos de segurança da API; OpenAPI só em `Development`.
+- **V13 Configuração:** NuGet Audit bloqueando alta/crítica; lock files; imagens por digest; compose local só em `127.0.0.1`; PostgreSQL sem `trust` no TCP; workflow sem segredo nem deploy.
 
 ## Classificação
 **Crítico** e **Alto** bloqueiam; **Médio** bloqueia salvo justificativa registrada; **Baixo/Info** registra. Cite arquivo:linha e o **cenário concreto de exploração**, não o risco teórico. Achado pré-existente fora do diff: dívida, não bloqueia. Diff pequeno e limpo pode — e deve — dar zero achados. Decisão com impacto de segurança/compliance: indique validação com a área de Segurança da Informação.

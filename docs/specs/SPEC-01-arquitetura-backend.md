@@ -27,8 +27,10 @@ Um backend único, dono dos dados, com várias obras por empresa. O front passa 
                              ├─ MPXJ.Net (.mpp/.xml) ── SPEC-06
                              ├─ Jobs (Hangfire/Quartz): fechamento semanal, importações, notificações
                              └─ Integrações: WhatsApp, IA, ERP (SPEC-08/09) via filas
-        PostgreSQL 16 (+ pgvector p/ busca semântica da EAP)   Redis (filas e cache)   Armazenamento de arquivos (fotos/áudios/XML)
+        PostgreSQL 17 (Fase 2; +pgvector p/ busca semântica da EAP, Redis e jobs na Fase 3)   Armazenamento de arquivos (fotos/áudios/XML)
 ```
+
+Fase 2 (ciclo 00011): solução em `server/` com `Api → Dados → Dominio`, schema `cronoai`, papéis `cronoai_migrador` (migrações) e `cronoai_app` (só DML) e PostgreSQL 17 local. Convenções no [ADR 00004](../../.claude/adrs/00004-estrutura-convencoes-backend.md). Redis, jobs e pgvector entram na Fase 3.
 
 - **D1 decidida:** .NET 10 (LTS) + PostgreSQL, conforme o [ADR 00001](../../.claude/adrs/00001-stack-backend-dotnet-10.md). Hospedagem e banco gerenciado continuam pendentes com a Infraestrutura.
 - O motor CPM/EVM atual (TypeScript) vira a **especificação executável**: os mesmos casos de teste ([src/lib/*.test.ts](../../src/lib)) são portados e precisam passar no backend com resultados idênticos.

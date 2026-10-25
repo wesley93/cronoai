@@ -1,4 +1,4 @@
-# CI: lint, tipos, testes com cobertura, build, auditoria e E2E (Playwright) em todo PR e na branch principal.
+# CI: lint, tipos, testes com cobertura, build, auditoria, E2E (Playwright) e backend (.NET) em todo PR e na branch principal.
 name: CI
 
 on:
@@ -108,6 +108,59 @@ jobs:
           path: |
             playwright-report
             test-results
+          retention-days: 7
+
+  backend:
+    # Nome usado na proteção da master: não renomear sem avisar. Sem filtro paths (check obrigatório pulado trava o merge).
+    name: "Backend: build e testes (.NET)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: .NET (versão do global.json)
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: server/global.json
+          cache: true
+          cache-dependency-path: server/**/packages.lock.json
+
+      - name: Restaurar pacotes (travado pelos lock files)
+        run: dotnet restore CronoAI.slnx --locked-mode
+
+      - name: Formatação
+        run: dotnet format CronoAI.slnx --verify-no-changes --no-restore
+
+      - name: Build (avisos são erros)
+        run: dotnet build CronoAI.slnx --no-restore -c Release
+
+      # Inclui os testes de integração: o runner traz Docker (Testcontainers, credenciais aleatórias, sem segredo).
+      - name: Testes
+        run: dotnet test --solution CronoAI.slnx --no-build -c Release --results-directory TestResults
+
+      - name: Contrato OpenAPI versionado (o build regera; não pode haver diferença)
+        run: git diff --exit-code -- openapi/
+
+      - name: Modelo sem mudança pendente de migração
+        # String fictícia e sem senha: o comando só constrói o modelo, não abre conexão.
+        env:
+          ConnectionStrings__CronoaiMigracao: "Host=localhost;Database=cronoai;Username=ef_design"
+        run: |
+          dotnet tool restore
+          dotnet ef migrations has-pending-model-changes --project src/CronoAI.Dados --no-build --configuration Release
+
+      - name: Publicar resultados dos testes (só na falha)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-testresults-${{ github.sha }}
+          path: server/**/TestResults
           retention-days: 7
 
   audit-dev:

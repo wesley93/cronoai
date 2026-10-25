@@ -19,6 +19,13 @@
 - **E2E (Playwright, Chromium):** `npm run e2e:instalar` (uma vez; baixa o navegador) e `npm run e2e` (gera o build, sobe o preview na porta 4173 e roda os fluxos de `e2e/`). Relatório: `npx playwright show-report`. Cobertura: `npm run test:coverage` (HTML em `coverage/index.html`).
 - **Node exigido:** 22 LTS ou superior (`.nvmrc`).
 
+### Backend local (PostgreSQL e papéis)
+
+- `docker compose --profile backend up -d db` sobe o PostgreSQL 17 (imagem Debian por digest) só em `127.0.0.1:5432` (`CRONOAI_DB_PORTA` troca a porta do host). O `docker compose up --build app` do front **não** sobe o banco (perfil).
+- Exige **três senhas** no `.env` (não versionado; nomes em `.env.example`): `CRONOAI_DB_SENHA` (bootstrap), `CRONOAI_DB_SENHA_MIGRADOR` e `CRONOAI_DB_SENHA_APP`. Senha vazia: o contêiner recusa iniciar ou fica `unhealthy`, com mensagem no log.
+- Na 1ª subida (volume vazio) o bootstrap `server/db/bootstrap/01-papeis-e-schema.sh` cria o schema `cronoai` e os papéis `cronoai_migrador` (dono do schema; migrações) e `cronoai_app` (só DML; é o papel da API). Recriar papéis/senhas: `docker compose --profile backend down -v` (apaga os dados locais).
+- Migrações, strings de conexão (`user-secrets`) e comandos: [server/README.md](../server/README.md). Hospedagem, TLS, collation e versão do banco de produção são da **Infraestrutura**.
+
 ### Imagem Docker
 - Build multi-stage: `node:22-alpine` (linha LTS do `.nvmrc`) compila e `nginxinc/nginx-unprivileged:stable-alpine` (linha **stable** do Nginx, nunca a *mainline* de número ímpar) serve só o `dist/`.
 - Ambas fixadas por **digest**: o Dependabot atualiza o digest dentro da mesma linha. Troca de major do Node fica de fora e é PR manual, junto com `.nvmrc` e CI.
@@ -47,12 +54,13 @@ No Git Bash, prefixe o `docker run` com `MSYS_NO_PATHCONV=1` para o `/tmp` não 
 | Workflow | Quando roda | O que faz | Bloqueia merge? |
 |---|---|---|---|
 | [CI](../.github/workflows/ci.yml) | Todo PR, push na `master`, manual | `npm ci` → lint → type-check → testes com cobertura (limiar de 80% em `src/lib`) → build → `npm audit` (produção, alta/crítica) → artefato `dist` | Sim |
+| CI › Backend: build e testes (.NET) | Junto do CI, em paralelo, **sem filtro de caminhos** | `dotnet restore --locked-mode` → `dotnet format --verify-no-changes` → build Release (avisos são erros) → testes (inclui integração com Docker/Testcontainers, sem segredo) → `git diff` do OpenAPI → `has-pending-model-changes` (string fictícia sem senha); resultados como artefato só na falha | Sim (incluir o check na proteção da `master` depois da 1ª execução verde) |
 | CI › Testes E2E (Playwright) | Junto do CI, em paralelo | `npm ci` → Chromium (cache opcional) → `npm run e2e`; na falha publica `playwright-report` e `test-results` (7 dias) | Não (incluir na proteção da `master` depois da 1ª execução verde) |
 | CI › auditoria dev | Junto do CI | Relatório do `npm audit` de todas as dependências no resumo da execução | Não (informativo) |
 | [Docker](../.github/workflows/docker.yml) | **Todo** PR, push na `master`, manual | Build da imagem (sem push), checa usuário não root, sobe container somente leitura e sem capabilities, testa `/healthz`, `/`, fallback da SPA e headers | Sim |
-| [CodeQL](../.github/workflows/codeql.yml) | PR, push na `master`, segundas 06:23 UTC | Análise estática de segurança (`security-extended`) | Recomendado |
+| [CodeQL](../.github/workflows/codeql.yml) | PR, push na `master`, segundas 06:23 UTC | Análise estática de segurança (`security-extended`) de JavaScript/TypeScript e C# (`build-mode: none`), uma categoria por linguagem | Recomendado |
 | [Release](../.github/workflows/release.yml) | Tag `vX.Y.Z` | Job `build` (token só leitura): confere a tag × `package.json`, roda o CI completo e empacota o `dist/`. Job `publish` (escrita, sem `npm`): cria o GitHub Release com `cronoai-vX.Y.Z-dist.zip` | — |
-| [Dependabot](../.github/dependabot.yml) | Segundas | PRs de atualização de npm, Actions e imagens Docker (minor/patch agrupados) | — |
+| [Dependabot](../.github/dependabot.yml) | Segundas | PRs de atualização de npm, NuGet (`/server`), Actions e imagens Docker/Compose (minor/patch agrupados; majors ignoradas) | — |
 
 Princípios adotados:
 - `permissions` mínimas (`contents: read`), elevadas só no job que precisa (`security-events: write` no CodeQL, `contents: write` só no `publish` do Release).
@@ -71,7 +79,7 @@ Princípios adotados:
 
 Em **Settings › Rules › Rulesets** (ou *Branches › branch protection rule*) para `master`:
 1. Exigir pull request antes do merge.
-2. Exigir os status checks **"Lint, tipos, testes e build"** e **"Build e smoke test da imagem"** (aparecem depois da 1ª execução).
+2. Exigir os status checks **"Lint, tipos, testes e build"**, **"Build e smoke test da imagem"** e, depois da 1ª execução verde, **"Backend: build e testes (.NET)"** (renomear o job depois quebra a regra).
 3. Exigir branch atualizada antes do merge.
 4. Bloquear *force push* e exclusão da branch.
 5. **Aprovações:** o GitHub não deixa o autor aprovar o próprio PR. Com um único mantenedor, use **0 aprovações** e mantenha os checks obrigatórios; exija 1 aprovação quando houver um segundo revisor.
@@ -115,4 +123,5 @@ Versões seguem o [SemVer](https://semver.org/lang/pt-BR/): `minor` para funcion
 - Cache do navegador do Playwright no job `e2e`: a [documentação oficial não recomenda](https://playwright.dev/docs/ci#caching-browsers); medir no 1º PR (com e sem cache) e remover se não houver ganho.
 - `@playwright/test` e `@vitest/coverage-v8` (só dev) e o download do Chromium/pacotes de sistema no CI: revisão de licença (Jurídico) e de segurança (Segurança da Informação) antes de produção. `@vitest/coverage-v8` precisa subir junto com o `vitest` (mesma versão).
 - Deploy em ambientes: definir com a Infraestrutura (SPEC-00, incremento 0.3).
+- **Backend (ciclo 00011), antes de produção:** pacotes NuGet, imagens `postgres` e `testcontainers/ryuk` e a action `actions/setup-dotnet`: revisão de segurança (Segurança da Informação) e de licença (Jurídico; PostgreSQL License, Apache-2.0 e MIT). Versão e collation do PostgreSQL, TLS/HSTS e a forma de aplicar migrações fora da máquina local: Infraestrutura. Minutos do Actions e CodeQL em C# (repositório privado exige Code Security): Infraestrutura + Segurança.
 - Bibliotecas novas de lint (`eslint`, `@eslint/js`, `eslint-plugin-vue`, `vue-eslint-parser`, `typescript-eslint`, `globals`): revisão de segurança e de licença antes de produção (todas MIT; só dev).

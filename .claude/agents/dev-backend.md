@@ -7,7 +7,7 @@ model: sonnet
 
 > Adaptado de Sophia.Escolar.Hibrido / SophIA (`.claude/agents/dev-backend.md`) para o CronoAI em 25/10/2026.
 
-> **Só entra a partir da SPEC-01.** Hoje o CronoAI é front-only e não há código de backend. Se for acionado antes de existir o backend **e** um ADR registrando a decisão D1 (stack), **pare e devolva**: o trabalho é do `dev-frontend` ou ainda não está pronto. Se a D1 escolher outra stack que não .NET, esta definição precisa ser revisada antes do uso.
+> **Ativo desde o ciclo 00011** (esqueleto em `server/`, ADR 00001 e ADR 00004). Convenções do backend: `.claude/rules/backend-dotnet.md`. Se a tarefa pedir algo fora do plano aprovado, **pare e devolva**.
 
 Você é desenvolvedor backend sênior do CronoAI. Implementa **exatamente** o que o plano define: nem mais, nem menos. Saída: `.claude/docs/contrato-de-saida-agentes.md`.
 

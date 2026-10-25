@@ -28,8 +28,8 @@ CronoAI é o copiloto de planejamento de obras integrado ao MS Project:
 | Lint | ESLint 9 flat config (`eslint.config.js`): js + typescript-eslint + vue essential |
 | Node | 22 LTS ou superior (`.nvmrc`) |
 | Container | `Dockerfile` multi-stage → `nginxinc/nginx-unprivileged` |
-| CI | GitHub Actions: CI, Docker, CodeQL, Release; Dependabot ([docs/devops.md](docs/devops.md)) |
-| Backend | **Ainda não existe.** Stack decidida: **.NET 10 + PostgreSQL** ([ADR 00001](.claude/adrs/00001-stack-backend-dotnet-10.md)); hospedagem e banco pendentes com a Infraestrutura (SPEC-01) |
+| CI | GitHub Actions: CI (inclui o job do backend), Docker, CodeQL (JS/TS e C#), Release; Dependabot ([docs/devops.md](docs/devops.md)) |
+| Backend | **Esqueleto em `server/`** (ciclo 00011): .NET 10 (ASP.NET Core, minimal APIs) + EF Core/Npgsql + PostgreSQL 17 local (Docker Compose, perfil `backend`), xUnit v3 + Testcontainers. Convenções no [ADR 00004](.claude/adrs/00004-estrutura-convencoes-backend.md) e em `.claude/rules/backend-dotnet.md`; stack no [ADR 00001](.claude/adrs/00001-stack-backend-dotnet-10.md). Sem regra de negócio ainda; hospedagem e banco gerenciado pendentes com a Infraestrutura (SPEC-01) |
 
 ```bash
 npm ci                    # instalar
@@ -44,6 +44,13 @@ npm run e2e               # testes E2E (build de produção em :4173)
 npm run ci                # lint + tipos + testes com cobertura + build — o mesmo do GitHub Actions
 docker compose up --build app        # produção local (porta CRONOAI_PORT, padrão 8080)
 docker compose --profile dev up dev  # desenvolvimento em container
+
+# Backend (.NET 10; detalhes em server/README.md)
+docker compose --profile backend up -d db                        # PostgreSQL local (3 senhas no .env; veja .env.example)
+dotnet build server/CronoAI.slnx -c Release                      # avisos são erros; regera server/openapi/CronoAI.Api.json
+dotnet test --solution server/CronoAI.slnx                       # inclui integração (exige Docker)
+dotnet format server/CronoAI.slnx --verify-no-changes
+dotnet list server/CronoAI.slnx package --vulnerable --include-transitive
 ```
 
 ## Mapa do código
@@ -66,7 +73,8 @@ docker compose --profile dev up dev  # desenvolvimento em container
 | `src/stores/ui.ts` | Tema, navegação por hash, toasts |
 | `src/modules/*.vue` | Telas dos módulos (Apontamento, Caminho Crítico, Suprimentos, SINAPI, EVM, EAP) |
 | `src/components/` | Layout, cards, Gantt, gráficos, ilustrações |
-| `docker/`, `Dockerfile`, `docker-compose.yml` | Execução em container |
+| `server/` | **Backend .NET 10**: `src/CronoAI.Api` (host), `src/CronoAI.Dados` (EF Core e migrações), `tests/CronoAI.Api.Testes`, `db/bootstrap` (papéis e schema locais), `openapi/` (contrato) |
+| `docker/`, `Dockerfile`, `docker-compose.yml` | Execução em container (front) e PostgreSQL local (perfil `backend`) |
 | `.github/` | Workflows, Dependabot, templates |
 | `docs/specs/` | Specs e roadmap; `docs/devops.md` |
 
@@ -107,7 +115,7 @@ docker compose --profile dev up dev  # desenvolvimento em container
 
 O processo completo está na skill [`.claude/skills/desenvolver-recurso`](.claude/skills/desenvolver-recurso/SKILL.md): avaliar → triagem (T1–T8, faixas 1/2/3) → ficha/plano → gate → implementação → validação com evidência → entrega.
 
-- Agentes (`.claude/agents/`): `arquiteto`, `dev-frontend`, `dev-backend` (a partir da SPEC-01), `dba` (a partir da SPEC-01), `especialista-obra`, `testes`, `revisor`, `seguranca`.
+- Agentes (`.claude/agents/`): `arquiteto`, `dev-frontend`, `dev-backend` (ativo desde o ciclo 00011), `dba` (ativo desde o ciclo 00011), `especialista-obra`, `testes`, `revisor`, `seguranca`.
 - Comandos (`.claude/commands/`): `/desenvolver`, `/corrigir`, `/ajuste`, `/hotfix`, `/triagem`, `/avaliar-spec`, `/investigar`, `/revisar`, `/retomar`, `/entregar`, `/adr`.
 - Evidência de cada ciclo: `.claude/ciclos/{NNNNN}-{slug}.md`.
 - Checklists: `.claude/checklists/qualidade.md` e `.claude/checklists/seguranca.md`.

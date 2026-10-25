@@ -40,3 +40,35 @@ updates:
         update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "chore(docker)"
+
+  # Backend .NET (ciclo 00011): lock files e Central Package Management em server/
+  - package-ecosystem: nuget
+    directory: /server
+    ignore:
+      # Majors (EF Core 11, .NET 11…) entram por PR planejado, junto com o SDK do global.json
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      backend-minor-patch:
+        update-types: [minor, patch]
+
+  # Digest das imagens do docker-compose.yml (postgres:17 e node:22)
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    ignore:
+      # Troca de major do PostgreSQL e do Node é decisão manual (Infraestrutura / .nvmrc)
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: "chore(docker)"

@@ -9,3 +9,4 @@ Candidatas conhecidas: as **Decisões em aberto** D1–D4 de `docs/specs/README.
 | ADR | Título | Data | Status |
 |---|---|---|---|
 | [00001](00001-stack-backend-dotnet-10.md) | Stack do backend: .NET 10 + PostgreSQL | 2026-10-25 | Aceito (stack); Infra/Segurança pendentes |
+| [00004](00004-estrutura-convencoes-backend.md) | Estrutura, convenções e ferramentas do backend .NET | 2026-10-25 | Proposto |
