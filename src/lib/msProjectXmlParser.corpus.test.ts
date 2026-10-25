@@ -62,6 +62,7 @@ interface Estatico {
   nulas: number // tarefas nulas (IsNull = 1) com UID
   valoresPersonalizados: number // ExtendedAttribute de tarefa fora de Text1/Number1 (ou dos apelidos)
   camposPersonalizados: number // FieldID distintos dos anteriores
+  datasFolhas: { uid: number; inicio: string; termino: string }[] // folhas com Start e Finish no arquivo (parte da data)
 }
 
 const FIELD_TEXT1 = '188743731'
@@ -126,6 +127,11 @@ function lerEstatico(xml: string): Estatico {
     nulas: kids(kid(project, 'Tasks'), 'Task').filter((t) => Number(txt(t, 'UID')) !== 0 && txt(t, 'IsNull') === '1').length,
     valoresPersonalizados: extras.length,
     camposPersonalizados: new Set(extras.map((e) => txt(e, 'FieldID') ?? '')).size,
+    datasFolhas: folhas.flatMap((t) => {
+      const inicio = txt(t, 'Start')?.slice(0, 10)
+      const termino = txt(t, 'Finish')?.slice(0, 10)
+      return inicio && termino ? [{ uid: Number(txt(t, 'UID')), inicio, termino }] : []
+    }),
   }
 }
 
@@ -150,6 +156,7 @@ interface Linha {
   timephased: number
   est: Estatico
   idaVoltaOk: boolean
+  datas?: { total: number; iguais: number; iguaisSemFeriadosNacionais: number; diferencas: string[] }
   resultado: 'importado' | 'recusado'
   uidsUnicos: boolean
   avisos: string[]
@@ -211,6 +218,12 @@ function relatorioMd(): string {
     '| Arquivo | Exceções recorrentes | Feriados na lista legada | Dias úteis extras na lista legada | Feriados lidos | Dias úteis extras lidos |',
     '|' + ' --- |'.repeat(6),
     ...calendarios.map((c) => `| ${c.arquivo} | ${c.recorrentes} | ${c.legadoFeriados} | ${c.legadoExtras} | ${c.lidosFeriados} | ${c.lidosExtras} |`),
+    '',
+    '## Datas das folhas: arquivo x CronoAI (modo baseline), arquivos com vínculos',
+    '',
+    '| Arquivo | Folhas com datas | Iguais (calendário importado) | Iguais (sem feriados nacionais) | Diferenças (calendário importado) |',
+    '|' + ' --- |'.repeat(5),
+    ...linhas.filter((l) => l.datas).map((l) => `| ${l.arquivo} | ${l.datas!.total} | ${l.datas!.iguais} | ${l.datas!.iguaisSemFeriadosNacionais} | ${l.datas!.diferencas.map((d) => d.split(':')[0]).join(', ') || '—'} |`),
     '',
     '## Avisos por arquivo',
     '',
@@ -349,6 +362,31 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       expect(diferencas).toEqual([])
       linha.idaVoltaOk = true
     })
+
+    // E4: datas do arquivo x datas calculadas pelo CronoAI (CPM, modo baseline, calendário importado) nas folhas dos arquivos com vínculos.
+    // É CARACTERIZAÇÃO, não paridade: os números mudam de propósito quando a SPEC-05 (00004) e a SPEC-03 (00005) entrarem.
+    it('compara as datas das folhas com as do arquivo (caracterização)', { timeout: TIMEOUT }, () => {
+      if (!importado || !importado.linha.vinculosArquivo) return
+      const { linha, r } = importado
+      const inicio = r.meta.startDate ?? '2026-01-05'
+      const semFeriadosNoArquivo = r.warnings.some((a) => a.startsWith('Calendário sem feriados'))
+      const calcular = (holidays: string[]) =>
+        computeSchedule(r.tasks, new WorkCalendar(inicio, { holidays, extraWorkingDays: r.calendar.extraWorkingDays }), { mode: 'baseline', statusDate: r.meta.statusDate ?? inicio })
+      const comImportado = calcular(r.calendar.holidays)
+      // Sem os feriados nacionais que o import aplica quando o arquivo não traz nenhum
+      const semNacionais = semFeriadosNoArquivo ? calcular([]) : comImportado
+      const diferencas: string[] = []
+      let iguais = 0
+      let iguaisSemNacionais = 0
+      for (const d of linha.est.datasFolhas) {
+        const a = comImportado.byUid.get(d.uid)
+        const b = semNacionais.byUid.get(d.uid)
+        if (a?.start === d.inicio && a.finish === d.termino) iguais++
+        else diferencas.push(`uid ${d.uid}: arquivo ${d.inicio}..${d.termino}, calculado ${a?.start}..${a?.finish}`)
+        if (b?.start === d.inicio && b.finish === d.termino) iguaisSemNacionais++
+      }
+      linha.datas = { total: linha.est.datasFolhas.length, iguais, iguaisSemFeriadosNacionais: iguaisSemNacionais, diferencas }
+    })
   })
 
   // Os 39 arquivos sem tarefa continuam recusados (não apagar a EAP da obra). O calendário dos 11 arquivos de calendário é conferido
@@ -439,6 +477,17 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
         expect(c.lidosFeriados).toBe(137)
         expect(c.lidosExtras).toBe(3)
       }
+    })
+
+    // Caracterização de 25/10/2026 (CPM atual, modo baseline). Diferenças conhecidas: Carnaval 2016 e Finados 2018 aplicados pelo import,
+    // tarefa de 1 dia que cruza o fim de semana (efeito de hora) e durações guiadas por recurso. Mudam de propósito na 00004/00005.
+    it('datas das folhas dos 8 arquivos com vínculos: 83 de 104 iguais; 100 de 104 sem os feriados nacionais (AC-8)', () => {
+      const comDatas = linhas.filter((l) => l.datas)
+      expect(comDatas).toHaveLength(8)
+      const soma = (campo: 'total' | 'iguais' | 'iguaisSemFeriadosNacionais') => comDatas.reduce((acc, l) => acc + l.datas![campo], 0)
+      expect(soma('total')).toBe(104)
+      expect(soma('iguais')).toBe(83)
+      expect(soma('iguaisSemFeriadosNacionais')).toBe(100)
     })
 
     it('tem o número de arquivos por versão da medição', () => {

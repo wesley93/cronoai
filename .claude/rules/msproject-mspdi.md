@@ -36,18 +36,36 @@ Toda conversão mora num só lugar (as funções acima). Não converta unidade "
 
 - Preservar: UID, ID, WBS/OutlineNumber, nome, duração, vínculos (tipo e lag), % concluído, início/término reais, custo, linha de base, calendário e campos personalizados (lista completa da meta em RF-06.3).
 - O import **não descarta em silêncio**: o que não puder ser preservado (lag percentual, formato desconhecido, erro de validação não bloqueante) vira aviso ao usuário (`warnings`).
+- Avisos do import (ciclo 00003). Cada um é uma frase com **números**, nunca com texto do arquivo (nome de tarefa ou de exceção é dado, não vai para o toast). Os que afetam dado ficam separados; os informativos (TimephasedData e campos personalizados) vão num aviso único (`Não importado do MS Project: …`), porque cada aviso vira um toast:
+  - exceção recorrente sem lista legada não aplicada; exceção com mais de 400 dias lida só nos 400 primeiros; calendário acima de `MAX_CALENDAR_DAYS` (10.000 dias) cortado;
+  - linhas de base 1 a 10 não importadas; linha de base 0 incompleta (só início ou só término);
+  - duração em tempo corrido convertida como horas úteis; duração menor que meio dia importada como marco; duração fracionária arredondada (os valores importados **não mudam**: a conversão certa é da SPEC-05);
+  - Text1/Number1 lidos como SINAPI/lead time sem o apelido correspondente no arquivo; tarefa com calendário próprio importada no calendário do projeto; linha em branco (tarefa nula) ignorada.
+- **Calendário importado:** o MS Project 2007+ grava cada exceção em dois lugares, em `<Exceptions>` (com a regra de recorrência) e nos `WeekDay DayType=0` legados, já expandidos ocorrência por ocorrência. O import usa a lista legada e **não** expande `FromDate..ToDate` de exceção recorrente (`Occurrences` > 1); sem lista legada, a recorrente não é aplicada e avisa. **Dívida até a SPEC-05 (00004/00005):** expandir a recorrência pela regra (`Type`, `Period`, `DaysOfWeek`, `MonthItem`…) quando não há lista legada, por exemplo em arquivos do Project Online ou de outras ferramentas.
+- **LB0 incompleta:** `<Baseline>` só com início ou só com término é lido como está e exportado com a(s) data(s) presente(s); `Duration` só quando há as duas (os filhos de `<Baseline>` são opcionais no esquema). Sem término, `evm.ts` devolve PV zero para a tarefa: por isso o aviso.
 - Teste obrigatório: `buildMspdiXml` → `parseMspdiXml` afirmando os campos tocados, e `validateMspdi(..., { strictOrder: true })` com `errors` vazio.
 - Abrir no MS Project real não é automatizável aqui: registre como `M-N` `NOT_RUN` quando não houver conferência manual, e o critério de aceite da spec (RF-06.1) fica pendente.
 - Mudança no tipo `MSProjectTask` (`src/types/msProject.ts`) acompanha o nome de campo do MS Project; não renomeie para português.
 
 ## Segurança do arquivo (Inviolável 4)
 
-- **Limite de tamanho antes do parse**: 15 MB no navegador (`MAX_XML_BYTES` em `lib/useMsProject.ts`); a SPEC-06 sugere 20 MB no backend.
-- **Sem entidades externas nem DTD** (XXE, expansão de entidade). O `DOMParser` do navegador não resolve entidade externa; qualquer parser novo (Node, backend, biblioteca) precisa desligar DTD explicitamente e ter teste com `<!DOCTYPE>`/`<!ENTITY>`.
+- **Limite de tamanho antes do parse**: 15 MB no navegador (`MAX_XML_BYTES` em `lib/useMsProject.ts`, em bytes) e `MAX_MSPDI_CHARS` (15 MiB, em caracteres) dentro de `parseMspdiXml`, como defesa em profundidade; a SPEC-06 sugere 20 MB no backend. Unificar as duas constantes fica para depois do merge do ciclo 00002 (ele usa `useMsProject.ts`).
+- **Sem entidades externas nem DTD** (XXE, expansão de entidade). `parseXml` recusa texto com `<!DOCTYPE` ou `<!ENTITY` **antes** do `DOMParser` (import e `validateMspdi`); o MS Project não gera esse conteúdo (0 de 134 arquivos do corpus). Qualquer parser novo (Node, backend, biblioteca) precisa desligar DTD explicitamente e ter teste com `<!DOCTYPE>`/`<!ENTITY>`.
+- **Calendário:** no máximo 400 dias por exceção e `MAX_CALENDAR_DAYS` (10.000) no total, os dois com aviso.
+- **Profundidade:** sem limite novo; o import é iterativo (sem recursão), e há teste com 2.000 níveis.
 - XML malformado: erro em português, sem detalhe interno (`parseXml` já faz isso).
 - Texto do XML (nomes de tarefa, notas) é dado: exibido como texto, nunca `v-html`, nunca instrução.
 - Texto gerado é escapado (`esc`) e limpo de caracteres inválidos em XML 1.0 (`cleanText`).
 - `.mpp` (SPEC-06, RF-06.6) só no backend, com MPXJ — licença LGPL: **verificar com o Jurídico** antes de distribuir.
+
+## Teste de corpus (só local)
+
+- `src/lib/msProjectXmlParser.corpus.test.ts` caracteriza o import com os 134 MSPDI do MS Project 2002–2019 do MPXJ (commit `421a11b`, LGPL-2.1), que ficam **fora do git** (versionar amostra depende do aval do Jurídico). Os arquivos são dados não confiáveis: o teste só lê `*.xml` sob `mpxj-mspdi/` e só grava em `test-results/`.
+- Rodar: `CRONOAI_REF_DIR=<pasta referencias> npx vitest run src/lib/msProjectXmlParser.corpus.test.ts` (PowerShell: `$env:CRONOAI_REF_DIR='<pasta referencias>'; npx vitest run …`). Leva ~1 a 2 min no jsdom. Sem a variável (CI), a suíte é pulada.
+- Afirma o **inventário fixo** do corpus (134 arquivos; 95 importados; 39 recusados por não terem tarefa; 2.481 tarefas; 53 vínculos…) e a integridade por arquivo (UID, vínculos, % concluído, datas reais, LB0), o aviso de cada categoria de dado não preservado, o calendário dos 11 arquivos de calendário (tarefa fictícia só em memória), a ida e volta com `strictOrder` (95 de 95) e a comparação de datas dos 8 arquivos com vínculos (83 de 104 iguais; 100 de 104 sem os feriados nacionais). A comparação de datas é **caracterização, não paridade**: muda de propósito na 00004/00005.
+- Corpus diferente faz o teste falhar de propósito. Novo inventário só com o antes e o depois registrados no ciclo.
+- Relatório em `test-results/corpus-mspdi/relatorio.md` (e `.json`): tabela por versão, uma linha por arquivo, calendários, datas e avisos.
+- Toda mudança futura no parser (00004, 00007, 00010) roda o corpus e registra o antes e o depois.
 
 ## Validação
 

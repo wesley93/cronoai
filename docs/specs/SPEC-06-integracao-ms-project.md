@@ -35,6 +35,7 @@ Ida e volta sem perda entre CronoAI e MS Project, nas versões usadas pela empre
 ## 4a. Corpus de referência disponível (out/2026)
 134 arquivos MSPDI gerados pelo MS Project 2002, 2003, 2007, 2010, 2013, 2016 e 2019, dos dados de teste do MPXJ (LGPL-2.1, cópia local em `referencias/mpxj-mspdi/`, fora do git).
 - **Uso imediato:** robustez da importação. Todos devem abrir sem erro e sem perder UID, vínculos, calendários e linhas de base.
+  - **"Abrir sem erro" (ciclo 00003, decisão P2 = A):** 39 dos 134 arquivos não têm tarefa (só calendário ou recursos) e continuam recusados com a mensagem "Nenhuma tarefa encontrada no XML.", para o import não apagar a EAP da obra. Aqui "abrir sem erro" significa sem exceção não tratada e com mensagem clara. O calendário dos 11 arquivos de calendário é conferido pelo teste de corpus com uma tarefa fictícia injetada só em memória.
 - **Limite:** só 8 têm vínculos entre tarefas, então a paridade de datas do CPM (SPEC-05) continua exigindo cronogramas reais de obra anonimizados.
 - **Testes:** leem o caminho por variável de ambiente (`CRONOAI_REF_DIR`) e são pulados sem ela, para o CI não depender dos arquivos.
 - **XSD oficial:** só é distribuído dentro do instalador do Project SDK (`.exe`), que não é executado. A validação segue a referência publicada do esquema.
