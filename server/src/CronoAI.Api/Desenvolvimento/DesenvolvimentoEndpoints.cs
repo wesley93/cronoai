@@ -1,5 +1,6 @@
 using CronoAI.Api.Autenticacao;
 using CronoAI.Api.Borda;
+using CronoAI.Api.Sessao;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Options;
@@ -40,7 +41,7 @@ public static class DesenvolvimentoEndpoints
                     return TypedResults.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Usuário de desenvolvimento desconhecido.");
                 }
 
-                var anterior = await AutenticacaoExtensoes.SessaoAnteriorAsync(http);
+                var anterior = await SessaoDoCookie.ObterAnteriorAsync(http);
                 var resultado = await login.EntrarAsync(EsquemasAutenticacao.EmissorDesenvolvimento, escolhido.Sujeito, escolhido.Nome, desenvolvimento: true, anterior, http.RequestAborted);
                 if (resultado is null)
                 {

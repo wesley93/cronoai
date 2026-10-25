@@ -19,15 +19,18 @@ public static class EmpresasEndpoints
         ArgumentNullException.ThrowIfNull(api);
         var grupo = api.MapGroup("/empresas");
 
-        // Política EmpresaAtiva: sem empresa ativa → 403 (empresa-ativa-necessaria).
-        grupo.MapGet("/atual", async Task<Results<Ok<EmpresaResumo>, ProblemHttpResult>> (ContextoSessao contexto, CronoDbContext db, CancellationToken cancelamento) =>
+        // Política EmpresaAtiva: sem empresa ativa → 403 (empresa-ativa-necessaria). Não há 404 aqui: a empresa é a da
+        // PRÓPRIA sessão, e o validador só a entrega com vínculo vigente (FK Restrict; o papel da aplicação não tem DELETE
+        // em empresa; a política de RLS libera `id = empresa do contexto`). Linha ausente seria quebra de invariante:
+        // `SingleAsync` lança e a resposta é 500 genérico, não um 404 que esconderia o defeito.
+        grupo.MapGet("/atual", async Task<Ok<EmpresaResumo>> (ContextoSessao contexto, CronoDbContext db, CancellationToken cancelamento) =>
             {
                 var empresaId = contexto.EmpresaId;
                 var empresa = await db.Empresas
                     .Where(e => e.Id == empresaId)
                     .Select(e => new EmpresaResumo(e.Id, e.Nome))
-                    .SingleOrDefaultAsync(cancelamento);
-                return empresa is null ? NaoEncontrada() : TypedResults.Ok(empresa);
+                    .SingleAsync(cancelamento);
+                return TypedResults.Ok(empresa);
             })
             .RequireAuthorization(RequisitoEmpresaAtiva.PoliticaEmpresaAtiva)
             .ProducesProblem(StatusCodes.Status401Unauthorized)

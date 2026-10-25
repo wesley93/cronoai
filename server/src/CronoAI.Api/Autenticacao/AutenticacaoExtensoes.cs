@@ -196,7 +196,7 @@ public static class AutenticacaoExtensoes
         }
 
         var login = contexto.HttpContext.RequestServices.GetRequiredService<ServicoLogin>();
-        var anterior = await SessaoAnteriorAsync(contexto.HttpContext);
+        var anterior = await SessaoDoCookie.ObterAnteriorAsync(contexto.HttpContext);
         var resultado = await login.EntrarAsync(emissor, sujeito, nome, desenvolvimento: false, anterior, contexto.HttpContext.RequestAborted);
         if (resultado is null)
         {
@@ -207,19 +207,6 @@ public static class AutenticacaoExtensoes
         contexto.Principal = PrincipalDeSessao.Criar(resultado.SessaoId, resultado.UsuarioId);
         contexto.Properties ??= new AuthenticationProperties();
         contexto.Properties.IsPersistent = false;
-    }
-
-    /// <summary>
-    /// Sessão válida que o navegador já traz no cookie (se houver). O handler OIDC trata o retorno ANTES da autenticação
-    /// padrão, então ela é feita aqui (o validador preenche o <see cref="ContextoSessao"/>). Um novo login encerra essa sessão.
-    /// </summary>
-    public static async Task<SessaoAnterior?> SessaoAnteriorAsync(HttpContext http)
-    {
-        var resultado = await http.AuthenticateAsync(EsquemasAutenticacao.Cookie);
-        var contexto = http.RequestServices.GetRequiredService<ContextoSessao>();
-        return resultado.Succeeded && contexto.SessaoId is { } sessaoId && contexto.UsuarioId is { } usuarioId
-            ? new SessaoAnterior(sessaoId, usuarioId)
-            : null;
     }
 
     // Fail() em OnTicketReceived é IGNORADO pelo handler (o login seguiria com o principal do provedor): a recusa

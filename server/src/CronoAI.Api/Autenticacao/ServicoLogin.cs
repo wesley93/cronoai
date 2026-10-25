@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using CronoAI.Api.Sessao;
 using CronoAI.Dados.Identidade;
 using CronoAI.Dominio;
 using Microsoft.Extensions.Options;
@@ -98,8 +99,10 @@ public sealed class ServicoLogin
     }
 
     /// <summary>
-    /// Nome de exibição do provedor, sem caracteres de controle (inclui U+0000, que o PostgreSQL não grava) e cortado
-    /// por elemento de texto (nunca parte um par substituto nem um grafema) em até o limite do domínio. Vazio vira nulo.
+    /// Nome de exibição do provedor, sem caracteres de controle (inclui U+0000, que o PostgreSQL não grava), sem
+    /// controles bidirecionais (U+200E, U+200F, U+202A a U+202E e U+2066 a U+2069: invertem a ordem de exibição e
+    /// permitem forjar nomes) e sem surrogates órfãos (UTF-16 inválido, que não vira UTF-8). Cortado por elemento de
+    /// texto (nunca parte um par substituto nem um grafema) em até o limite do domínio. Vazio vira nulo.
     /// </summary>
     public static string? NomeSeguro(string? nome)
     {
@@ -109,8 +112,26 @@ public sealed class ServicoLogin
         }
 
         var limpo = new StringBuilder(nome.Length);
-        foreach (var caractere in nome.Where(c => !char.IsControl(c)))
+        for (var i = 0; i < nome.Length; i++)
         {
+            var caractere = nome[i];
+            if (char.IsControl(caractere) || EhControleBidirecional(caractere))
+            {
+                continue;
+            }
+
+            if (char.IsHighSurrogate(caractere) && i + 1 < nome.Length && char.IsLowSurrogate(nome[i + 1]))
+            {
+                limpo.Append(caractere).Append(nome[i + 1]); // par válido (ex.: emoji)
+                i++;
+                continue;
+            }
+
+            if (char.IsSurrogate(caractere))
+            {
+                continue; // surrogate órfão
+            }
+
             limpo.Append(caractere);
         }
 
@@ -135,19 +156,51 @@ public sealed class ServicoLogin
 
     #region Métodos privados
 
-    // Se mesmo o nome saneado falhar (valor que o banco recusa), grava nome nulo em vez de recusar o login.
+    // Se mesmo o nome saneado for REJEITADO como valor (codificação ou limite do banco), grava nome nulo em vez de
+    // recusar o login. Qualquer outro erro (deadlock, timeout, conexão, outra constraint) é propagado: tentar de novo com
+    // nome nulo apagaria o nome já gravado por um motivo que não tem a ver com ele.
     private async Task<Guid> UpsertAsync(string emissor, string sujeito, string? nome, DateTime agora, CancellationToken cancelamento)
     {
         try
         {
             return await _consultas.UpsertUsuarioAsync(emissor, sujeito, nome, agora, cancelamento);
         }
-        catch (Exception erro) when (nome is not null && (erro is ArgumentException || erro is PostgresException))
+        catch (Exception erro) when (nome is not null && NomeRejeitado(erro))
         {
             _logger.NomeDeExibicaoDescartado();
             return await _consultas.UpsertUsuarioAsync(emissor, sujeito, null, agora, cancelamento);
         }
     }
+
+    /// <summary>
+    /// Erro que é rejeição do NOME: falha de codificação, <c>22021</c> (character_not_in_repertoire) ou <c>23514</c>
+    /// só da constraint <c>ck_usuario_nome_tamanho</c>. Procura na cadeia de exceções internas.
+    /// </summary>
+    public static bool NomeRejeitado(Exception erro)
+    {
+        for (var atual = erro; atual is not null; atual = atual.InnerException)
+        {
+            if (atual is EncoderFallbackException)
+            {
+                return true;
+            }
+
+            if (atual is PostgresException { SqlState: PostgresErrorCodes.CharacterNotInRepertoire })
+            {
+                return true;
+            }
+
+            if (atual is PostgresException { SqlState: PostgresErrorCodes.CheckViolation, ConstraintName: "ck_usuario_nome_tamanho" })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool EhControleBidirecional(char c) =>
+        c is '\u200E' or '\u200F' || (c >= '\u202A' && c <= '\u202E') || (c >= '\u2066' && c <= '\u2069');
 
     #endregion
 }

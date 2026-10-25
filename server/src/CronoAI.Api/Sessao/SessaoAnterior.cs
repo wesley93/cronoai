@@ -1,4 +1,4 @@
-namespace CronoAI.Api.Autenticacao;
+namespace CronoAI.Api.Sessao;
 
 /// <summary>Sessão válida que o navegador já tinha ao fazer um novo login: é encerrada no servidor.</summary>
 /// <param name="SessaoId">Sessão anterior.</param>
