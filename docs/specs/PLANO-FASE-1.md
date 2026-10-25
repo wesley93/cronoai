@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| Status | **Rascunho, aguardando sua aprovação** (há 2 decisões na seção 7) |
+| Status | **Aprovado pelo usuário em 25/10/2026** (ordem dos 9 ciclos; P1 = B; P2 = a) |
 | Data | 2026-10-25 |
 | Autor | agente `arquiteto` (processo em [.claude/skills/desenvolver-recurso](../../.claude/skills/desenvolver-recurso/SKILL.md)) |
 | Base | `master` |
@@ -27,7 +27,8 @@
 - **Por quê:** todas passam pela store única (`useProjectStore.ts`, 812 linhas) e por `src/types/domain.ts`, e quatro delas pelo `msProjectXmlParser.ts`. O multiobra muda o formato de todo o estado salvo e vem antes do que é gravado por obra. O corpus MSPDI vem antes de qualquer mudança no parser, para servir de comparação "antes e depois" em arquivos reais do MS Project.
 - **Faixas previstas:** 3, 2, 3, 3, 2, 3, 3, 2, 2.
 - **Estimativa relativa (opinião):** P, M, M, G, M, M, M/G, M, M.
-- **O que você precisa fazer:** aprovar a ordem, responder às perguntas da seção 7 e, em cada ciclo, aprovar o plano ou a ficha antes da implementação.
+- **Decisões do gate (25/10/2026):** ordem aprovada; P1 = (B), limiar de 80% nas 4 métricas no 00001; P2 = (a), calendário por tarefa (RF-05.2, parte "tarefa") no 00004 e usado pelo 00005.
+- **O que você precisa fazer:** em cada ciclo, aprovar o plano ou a ficha antes da implementação (o gate da etapa 4 continua valendo por ciclo).
 
 ## 1. Escopo da Fase 1
 
@@ -36,8 +37,8 @@
 | SPEC-00 (0.2) | E2E com Playwright e cobertura mínima de 80% em `src/lib` | §9 item 2; critério "Incremento 0.2" |
 | SPEC-14 (Fase 1) | Multiobra (lista, obra ativa, criar/duplicar/excluir, migração), dados da obra (UF, município, responsável, SINAPI UF/regime/data-base) e painel de portfólio das obras locais | RF-14.1 a RF-14.6; RNF-14.1 a RNF-14.3 |
 | SPEC-06 (parcial) | Robustez da importação com o corpus de 134 MSPDI (MS Project 2002–2019); ida e volta desses arquivos | RF-06.3 (lado da importação); RF-06.1 (só o lado da importação, versões 2002–2019); RF-06.2 pela referência publicada do esquema (o XSD só vem no instalador do Project SDK, que não é executado) |
-| SPEC-05 (parte 1) | Minutos úteis com calendários; restrições e prazo final; lag em dias úteis, corridos e %; opções de progresso; painel de divergências | RF-05.1, RF-05.3, RF-05.4, RF-05.5, RF-05.8 |
-| SPEC-03 | Premissas por obra, versionadas; calendários alternativos e meio período; modelo de feriados por UF/município | RF-03.1 a RF-03.4, RF-03.6; RF-03.5 só o modelo e a entrada manual |
+| SPEC-05 (parte 1) | Minutos úteis com calendários; calendário por tarefa; restrições e prazo final; lag em dias úteis, corridos e %; opções de progresso; painel de divergências | RF-05.1, RF-05.2 (só por tarefa; P2), RF-05.3, RF-05.4, RF-05.5, RF-05.8 |
+| SPEC-03 | Premissas por obra, versionadas; calendários alternativos atribuídos a tarefas e meio período; hora extra só nas frentes escolhidas; modelo de feriados por UF/município | RF-03.1 a RF-03.4, RF-03.6; RF-03.5 só o modelo e a entrada manual |
 | SPEC-07 (parcial) | Leitor do layout oficial 2025 (offline), RUP por função a partir do Analítico e recorte por UF/regime/data-base levado à obra | RF-07.1 (parcial, offline), RF-07.2, RF-07.3 (no front) |
 | SPEC-04 | Snapshots imutáveis, retificação, Curva S de snapshots, LB0–LB10 no MSPDI, diff | RF-04.1 a RF-04.6 |
 | SPEC-10 (parte 1) | Métodos de EV, critérios de medição, PV por pacote, limiares; AC marcado como estimativa | RF-10.1, RF-10.2, RF-10.3 (marcação), RF-10.4, RF-10.6 |
@@ -53,8 +54,8 @@
 | 1 | 00001 | SPEC-00 (0.2) | — | Rede de proteção antes de mexer na store e no motor. Hoje não há E2E e a cobertura de `src/lib` não é medida: ramos em **77,76%**, linhas em **89,98%** (medição de 25/10/2026, sem `download.ts`/`useMsProject.ts`). |
 | 2 | 00002 | SPEC-14 (RF-14.1–14.3) | 00001 | O estado é de **uma** obra (`STORAGE_KEY = 'cronoai-state-v1'`, `useProjectStore.ts:50`; `loadState`, `:110-121`). Premissas, recortes SINAPI, snapshots e métodos de EV são **por obra**: criá-los antes obrigaria a migrar cada um de novo. Não existe migração; o `loadState` faz merge raso (`:115`). O 00002 cria a versão do esquema e a cadeia de migrações que os ciclos seguintes reaproveitam, e a UF/regime da obra que a 00005 e a 00006 consomem. |
 | 3 | 00003 | SPEC-06 (parcial: corpus) | 00001 | A 00004 (calendários, restrições, lag), a 00007 (LB0–10) e o 00002 ("criar obra a partir de `.xml`") mexem na importação. Com o corpus de 134 arquivos reais do MS Project caracterizado **antes** (tarefas, vínculos, calendários, linhas de base e avisos por arquivo), cada mudança no parser passa a ter "antes e depois" medidos. Hoje o import aproxima lag em dias corridos por 5/7, zera lag em % (`lagToWorkingDays`, `msProjectXmlParser.ts:119`), lê só a linha de base 0 (`:560`) e não expande exceções recorrentes (`:529`). **Pode correr em paralelo ao 00002:** arquivos disjuntos (parser e testes × store, tipos e telas). |
-| 4 | 00004 | SPEC-05 (parte 1) | 00002, 00003 | O motor arredonda para dias inteiros (`cpm.ts:113`), o calendário é fixo de segunda a sexta (`calendar.ts:91-96`), a única restrição é o SNET (`cpm.ts:106`) e o lag só existe em dias úteis (`domain.ts:5-10`; `LagFormat` 7 em `msProjectXmlParser.ts:216`). O meio período da SPEC-03 não cabe no índice inteiro de dia útil (`calendar.ts:67`). |
-| 5 | 00005 | SPEC-03 | 00004 | As premissas saem das constantes (`scenarios.ts:8-11`; `HOURLY_RATES` em `seed.ts:6`; `dailyIndirectCost` em `seed.ts:25`; `SAFETY_MARGIN_DAYS` em `supplies.ts:6`) e passam a valer por obra. Os calendários alternativos usam o motor em minutos. O regime de encargos da obra é entrada do SINAPI (SPEC-07 depende da SPEC-03). |
+| 4 | 00004 | SPEC-05 (parte 1) | 00002, 00003 | Inclui o calendário por tarefa (P2). Hoje o motor usa um único `WorkCalendar` para todas as tarefas (`computeSchedule(tasks, cal, …)`, `cpm.ts:68`). O motor arredonda para dias inteiros (`cpm.ts:113`), o calendário é fixo de segunda a sexta (`calendar.ts:91-96`), a única restrição é o SNET (`cpm.ts:106`) e o lag só existe em dias úteis (`domain.ts:5-10`; `LagFormat` 7 em `msProjectXmlParser.ts:216`). O meio período da SPEC-03 não cabe no índice inteiro de dia útil (`calendar.ts:67`). |
+| 5 | 00005 | SPEC-03 | 00004 | Atribui a tarefas os calendários que a 00004 passou a suportar (calendários alternativos e "frentes escolhidas"). As premissas saem das constantes (`scenarios.ts:8-11`; `HOURLY_RATES` em `seed.ts:6`; `dailyIndirectCost` em `seed.ts:25`; `SAFETY_MARGIN_DAYS` em `supplies.ts:6`) e passam a valer por obra. Os calendários alternativos usam o motor em minutos. O regime de encargos da obra é entrada do SINAPI (SPEC-07 depende da SPEC-03). |
 | 6 | 00006 | SPEC-07 (parcial) | 00002, 00005 | Cumpre a dependência declarada (UF, regime e data-base nas premissas). Toca `sinapi.ts`, `sinapiBudget.ts`, `sinapiCatalog.ts` e o módulo SINAPI, longe de `evm.ts`. Vem antes dos snapshots porque o recorte por obra entra na mesma decisão de armazenamento local. |
 | 7 | 00007 | SPEC-04 | 00005 | **O snapshot é imutável:** gravá-lo antes da migração de unidade (00004) ou do multiobra (00002) obrigaria a migrar um histórico que não se edita. Reescreve `computeSCurve` (`evm.ts:123-168`) e substitui a linha de base única (`useProjectStore.ts:700-706`; export só `<Number>0` em `msProjectXmlParser.ts:223-231`). |
 | 8 | 00008 | SPEC-10 (parte 1) | 00007 | Dependência declarada na SPEC-10; mexe em `computeEvm`/`plannedFraction` (`evm.ts:48-51`, `83-93`), que a 00007 acabou de alterar. |
@@ -116,10 +117,10 @@
 |---|---|
 | Branch | `feat/00004-motor-minutos-calendarios` |
 | Faixa | **3**. T1 SIM (`cpm.ts`, `calendar.ts`). T2 SIM (`elapsedFraction` em dias úteis, `evm.ts:39-46`; sábados inteiros em `scenarios.ts:340-348`). T3 SIM (`ConstraintType` só 0/4 em `msProjectXmlParser.ts:207`; `LagFormat` 7 em `:216`; `lagToWorkingDays` em `:119`; um calendário em `:290-301`). T4 SIM (`Task.snet`, `PredecessorLink.lagDays`, `WorkCalendarConfig` em `domain.ts:63-68`) |
-| Entregáveis | **E1:** calendário em minutos e `computeSchedule` interno em minutos, **sem mudar nenhuma data do seed** (teste de caracterização das 20 folhas antes de mexer). **E2:** restrições completas e prazo final; lag em `edays` e %; lógica retida / substituir progresso / mover o restante. **E3:** MSPDI de ida e volta para calendários (e `CalendarUID` da tarefa, se a P2 for aprovada), restrições, `Deadline` e lag em todos os formatos, com `strictOrder` **e o teste de corpus da 00003 sem regressão**. **E4:** painel "Divergências com o MS Project" |
-| Requisitos cobertos | RF-05.1, RF-05.3, RF-05.4, RF-05.5, RF-05.8; RF-05.2 só por tarefa, se a P2 for aprovada |
-| Fica para depois | RF-05.2 por recurso e RF-05.7 (Fase 3); RF-05.6; critério de paridade (cronogramas reais de obra = insumo ainda pendente); Web Worker (a performance é medida com 3.000 tarefas sintéticas) |
-| Risco de números | **Alto.** O E1 é refatoração sem mudança de número. Mudança de semântica só no E2, com antes e depois no PR. **Brasil todo:** horário de trabalho em hora local da obra (relógio de parede), sem conversão de fuso; o Brasil tem 4 fusos e o MSPDI grava data/hora sem fuso |
+| Entregáveis | **E1:** calendário em minutos, vários calendários por obra e calendário por tarefa (`calendarId` opcional na tarefa; sem ele, a tarefa usa o calendário padrão da obra) e `computeSchedule` interno em minutos, **sem mudar nenhuma data do seed** (teste de caracterização das 20 folhas antes de mexer). **E2:** restrições completas e prazo final; lag em `edays` e %; lógica retida / substituir progresso / mover o restante. **E3:** MSPDI de ida e volta para calendários (vários, com `CalendarUID` da tarefa), restrições, `Deadline` e lag em todos os formatos, com `strictOrder` **e o teste de corpus da 00003 sem regressão**. **E4:** painel "Divergências com o MS Project" |
+| Requisitos cobertos | RF-05.1, RF-05.2 (só por tarefa: decisão P2 de 25/10/2026), RF-05.3, RF-05.4, RF-05.5, RF-05.8 |
+| Fica para depois | RF-05.2 por recurso (interseção com o calendário do recurso) e RF-05.7 (Fase 3); RF-05.6; critério de paridade (cronogramas reais de obra = insumo ainda pendente); Web Worker (a performance é medida com 3.000 tarefas sintéticas) |
+| Risco de números | **Alto.** O E1 é refatoração sem mudança de número: com todas as tarefas no calendário padrão, as datas são as de hoje. Caso novo a fixar: uma tarefa num calendário com sábado de 4 h termina antes da mesma tarefa no calendário padrão, com as datas exatas no teste. Lag e folga entre tarefas de calendários diferentes seguem a regra do MS Project (lag contado no calendário da sucessora, a confirmar pelo `especialista-obra` contra a documentação antes do E1). A regra precisa constar no plano do ciclo. Mudança de semântica só no E2, com antes e depois no PR. **Brasil todo:** horário de trabalho em hora local da obra (relógio de parede), sem conversão de fuso; o Brasil tem 4 fusos e o MSPDI grava data/hora sem fuso |
 | Estado salvo (T4) | ADR: opinião por minutos inteiros persistidos (100 min = 0,2083… dia acumula erro), com migração pela cadeia do 00002 aplicada a cada obra e ao `undo` |
 | Validação obrigatória | `testes`, `arquiteto`, `especialista-obra`, `seguranca` (T3), auditoria independente |
 | Outras áreas | Engenharia de planejamento, antes do piloto. MS Project real: `NOT_RUN` até haver acesso |
@@ -131,11 +132,11 @@
 | Item | Valor |
 |---|---|
 | Branch | `feat/00005-premissas-calendarios` |
-| Faixa | **2** (T1, T2, T4). Condição: a 00004 já precisa ler e gravar calendários múltiplos e o `CalendarUID` no MSPDI. Se não fizer, vira faixa 3 (T3) |
-| Entregáveis | **E1:** premissas como dado da obra, versionado; cenários e DLP recebem as premissas por parâmetro, com números idênticos no padrão. **E2:** tela "Premissas da obra" (RF-03.1/03.2) e a versão exibida nos cenários e no EVM. **E3:** calendários alternativos, exceções, jornada por dia em horas, sábado de 4 h = 0,5 dia. Feriados por obra: os nacionais calculados e os estaduais/municipais manuais com origem. Trocar a UF/município mostra uma prévia do impacto. **E4:** hora extra com meio período e frentes escolhidas (RF-03.6) |
+| Faixa | **2** (T1, T2, T4). Condição cumprida pela P2: a 00004 lê e grava no MSPDI vários calendários e o `CalendarUID` da tarefa. A 00005 não toca o parser; se precisar tocar, vira faixa 3 (T3) |
+| Entregáveis | **E1:** premissas como dado da obra, versionado; cenários e DLP recebem as premissas por parâmetro, com números idênticos no padrão. **E2:** tela "Premissas da obra" (RF-03.1/03.2) e a versão exibida nos cenários e no EVM. **E3:** cadastro de calendários alternativos (ex.: "Fachada — sem chuva", "Concretagem — sábado manhã"), exceções, jornada por dia em horas, sábado de 4 h = 0,5 dia, e **atribuição do calendário a tarefas** (na EAP e em lote por pacote), usando o calendário por tarefa da 00004. Feriados por obra: os nacionais calculados e os estaduais/municipais manuais com origem. Trocar a UF/município mostra uma prévia do impacto. **E4:** hora extra (RF-03.6) com meio período e **frentes escolhidas**. O cenário cria um calendário derivado (padrão + sábados de HE, inteiros ou de 4 h) e o atribui só às tarefas escolhidas, em vez de somar os sábados ao calendário da obra inteira como hoje (`scenarios.ts:340-348`; `applyScenario` grava em `calendar.extraWorkingDays`, `useProjectStore.ts:402-405`). Desfazer o cenário remove o calendário derivado e devolve as tarefas ao calendário anterior |
 | Requisitos cobertos | RF-03.1 a RF-03.4, RF-03.6; RF-03.5 (modelo e entrada manual); RNF-03.1 |
 | Fica para depois | Listas oficiais de feriados das 27 UFs e dos municípios (RF-03.5): Fase 2/backend, com fonte oficial a definir |
-| Risco de números | Médio. Com as premissas padrão, os cenários dão **exatamente** os números de hoje. Caso fixado: indireto de R$ 12.000. **Brasil todo:** `brazilianHolidays` trata Carnaval e Corpus Christi como não úteis no país inteiro (`calendar.ts:42-55`), mas são pontos facultativos que variam por UF e município. Viram premissa da obra, com o padrão atual mantido. O RNF-03.2 (arredondamento bancário) precisa de decisão com **Orçamento/Custos** |
+| Risco de números | Médio. Com as premissas padrão, os cenários dão **exatamente** os números de hoje. Isso inclui a hora extra com "todas as frentes ativas", que precisa reproduzir o resultado atual de `simulateOvertime` antes de ganhar a opção de frentes escolhidas. Caso fixado: indireto de R$ 12.000. **Brasil todo:** `brazilianHolidays` trata Carnaval e Corpus Christi como não úteis no país inteiro (`calendar.ts:42-55`), mas são pontos facultativos que variam por UF e município. Viram premissa da obra, com o padrão atual mantido. O RNF-03.2 (arredondamento bancário) precisa de decisão com **Orçamento/Custos** |
 | Estado salvo (T4) | Premissas por obra, com padrão igual às constantes; `meta.dailyIndirectCost` e `meta.safetyMarginDays` viram a v1, pela cadeia de migrações |
 | Validação obrigatória | `revisor`, `testes`, `especialista-obra` |
 | Outras áreas | **RH + Jurídico** (jornada, hora extra e adicional, que variam por convenção coletiva e região) e **Orçamento/Custos** |
@@ -247,13 +248,13 @@
 | 00008 | SPEC-10 (parte 1) | M | Variações de EV/PV e alertas |
 | 00009 | SPEC-14 (portfólio) | M | Consolidação e painel |
 
-## 7. Decisões que você precisa tomar
+## 7. Decisões do gate (tomadas em 25/10/2026)
 
-- **P1 (bloqueia só o 00001): qual métrica entra no limiar de 80% de cobertura de `src/lib`?** Hoje (sem `download.ts`/`useMsProject.ts`): linhas e instruções 89,98%, funções 87,40%, **ramos 77,76%**.
+- **P1 → (B), "80% nas 4 métricas".** Qual métrica entra no limiar de 80% de cobertura de `src/lib`? Hoje (sem `download.ts`/`useMsProject.ts`): linhas e instruções 89,98%, funções 87,40%, **ramos 77,76%**.
   - **(A)** 80% global em linhas, instruções e funções; ramos sem bloquear. Passa sem teste novo.
   - **(B)** 80% global nas 4 métricas. Cerca de 22 ramos a mais com testes de borda, sem mudar número. Continua P. Recomendação (opinião).
   - **(C)** 80% por arquivo nas 4 métricas. Vira M (`diagnosis.ts` e `textDiff.ts` em 0%).
-- **P2 (afeta as 00004 e 00005): o calendário por tarefa (RF-05.2, parte "tarefa") entra na Fase 1?** Sem ele, os calendários alternativos (RF-03.4) e as "frentes escolhidas" da hora extra (RF-03.6) não têm a quem ser atribuídos.
+- **P2 → (a), "Entra na Fase 1".** O calendário por tarefa (RF-05.2, parte "tarefa") entra na 00004 e é usado pela 00005 (calendários alternativos e frentes escolhidas)? Sem ele, os calendários alternativos (RF-03.4) e as "frentes escolhidas" da hora extra (RF-03.6) não têm a quem ser atribuídos.
   - **(a)** Entra na 00004, só por tarefa. Recomendação (opinião).
   - **(b)** Fica fora: calendários alternativos só como cadastro, e o RF-03.6 "frentes escolhidas" sai da fase.
 
