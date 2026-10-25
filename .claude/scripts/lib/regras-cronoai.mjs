@@ -402,6 +402,47 @@ export function temSenhaLiteral(texto) {
 }
 const VITE_SEGREDO = /\bVITE_\w*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|SENHA|PRIVATE|CREDENTIAL)\w*/i
 
+// ---------------------------------------------------------------------------------------------------------------
+// Regras de backend .NET (R14 a R17): só o código C# de server/src (testes ficam de fora). ADR 00004 e 00006.
+// ---------------------------------------------------------------------------------------------------------------
+const ARQ_SERVER_CS = /^server\/src\/.*\.cs$/
+const SQL_BRUTO = /\b(FromSqlRaw|ExecuteSqlRaw|ExecuteSqlRawAsync|SqlQueryRaw)\b/
+const DDL = /\b(CREATE|ALTER|DROP)\s+(TABLE|INDEX|POLICY|ROLE|SCHEMA)\b|\b(ENABLE|NO\s+FORCE|FORCE)\s+ROW\s+LEVEL\s+SECURITY\b/i
+const DML = /\b(INSERT\s+INTO|UPDATE\s+[\w."]+\s+SET|DELETE\s+FROM)\b/i
+const CONEXAO_CRUA = /\bNpgsql(Connection|DataSource)\b/
+
+/**
+ * Regras R14 a R17 sobre UMA linha de código C# de server/src. Devolve [{ id, regra, mensagem }].
+ * Comentário não conta. Exportada para o teste (regras-cronoai.test.mjs).
+ */
+export function regrasBackend(arquivo, texto) {
+  if (!ARQ_SERVER_CS.test(arquivo) || !semComentario(texto)) return []
+  const achados = []
+  const emMigracao = /\/Migrations\//.test(arquivo)
+  const emRls = arquivo.includes('/CronoAI.Dados/Rls/')
+
+  // R14: SQL bruto com texto montado é proibido (FromSql/ExecuteSql interpolados viram parâmetros)
+  if (SQL_BRUTO.test(texto)) {
+    achados.push({ id: 'R14', regra: 'SQL bruto', mensagem: 'FromSqlRaw/ExecuteSqlRaw/SqlQueryRaw com texto montado: use FromSql/ExecuteSql/SqlQuery interpolados (viram parâmetros) ou LINQ (ADR 00004).' })
+  }
+  // R15: DDL só em Migrations/ e no helper Rls/; DML em migração só pelo helper ExecutarDmlComRls (na mesma linha)
+  if (DDL.test(texto) && !emMigracao && !emRls) {
+    achados.push({ id: 'R15', regra: 'DDL fora de migração', mensagem: 'DDL (CREATE/ALTER/DROP, RLS) só em Migrations/ ou em CronoAI.Dados/Rls/: toda DDL de tabela nasce em migração (ADR 00004).' })
+  }
+  if (emMigracao && DML.test(texto) && !texto.includes('ExecutarDmlComRls')) {
+    achados.push({ id: 'R15', regra: 'DML em migração fora do helper', mensagem: 'DML em migração sobre tabela com RLS afeta zero linhas sem erro: use ExecutarDmlComRls (NO FORCE → DML → FORCE na transação), com a chamada e o SQL na mesma linha (ADR 00006).' })
+  }
+  // R16: IgnoreQueryFilters só em ConsultasIdentidade.cs
+  if (/\bIgnoreQueryFilters\s*\(/.test(texto) && !arquivo.endsWith('/CronoAI.Dados/Identidade/ConsultasIdentidade.cs')) {
+    achados.push({ id: 'R16', regra: 'IgnoreQueryFilters', mensagem: 'IgnoreQueryFilters só em CronoAI.Dados/Identidade/ConsultasIdentidade.cs, sempre com filtro explícito por usuário (ADR 00006).' })
+  }
+  // R17: conexão crua não passa pelo interceptor que fixa as variáveis de sessão do RLS
+  if (CONEXAO_CRUA.test(texto) && !arquivo.endsWith('/CronoDbContextDesignTimeFactory.cs')) {
+    achados.push({ id: 'R17', regra: 'conexão fora do EF', mensagem: 'NpgsqlConnection/NpgsqlDataSource fora do design-time: conexão crua não seta app.usuario_id/app.empresa_id; use o CronoDbContext da fábrica (NpgsqlConnectionStringBuilder é permitido) (ADR 00006).' })
+  }
+  return achados
+}
+
 function achado(id, severidade, regra, arquivo, linha, mensagem, trecho) {
   return { id, severidade, regra, arquivo, linha: linha ?? null, mensagem, trecho: trecho ?? null }
 }
@@ -465,6 +506,10 @@ export function aplicarRegras({ arquivos, removidos = new Set(), novas }) {
         achados.push(achado('R08', 'bloqueia', 'segredo no código', a, n, `${seg.nome} literal: remova, revogue a credencial e use variável de ambiente fora do bundle (CLAUDE.md › Invioláveis 5).`))
       } else if (temSenhaLiteral(texto)) {
         achados.push(achado('R08', ehTeste ? 'alerta' : 'bloqueia', 'segredo no código', a, n, 'senha literal em código: nada de senha em código, fixture ou log (CLAUDE.md › Invioláveis 5).'))
+      }
+      // R14 a R17: backend .NET (server/src)
+      for (const x of regrasBackend(a, texto)) {
+        achados.push(achado(x.id, 'bloqueia', x.regra, a, n, x.mensagem, recorte(texto)))
       }
       // R09 VITE_ com nome de segredo: tudo que é VITE_* vai para o bundle público
       if (VITE_SEGREDO.test(texto)) {

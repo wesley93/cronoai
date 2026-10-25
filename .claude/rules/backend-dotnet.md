@@ -17,12 +17,24 @@ Fonte da verdade: `CLAUDE.md` e o [ADR 00004](../adrs/00004-estrutura-convencoes
 - Estilo do C# (construtor, `#region`, campos, um tipo por arquivo): seção "Estilo do C#" do [ADR 00004](../adrs/00004-estrutura-convencoes-backend.md).
 - `TreatWarningsAsErrors` ligado. Supressão só no `server/.editorconfig`, com comentário do porquê. `dotnet format --verify-no-changes` limpo.
 
+## Isolamento entre empresas e identidade (ADR 00005 e 00006)
+
+- **Três camadas + teste de rotas**: `empresa_id` + `IDadoDeEmpresa`, filtro global nomeado `"Empresa"` do EF e **RLS forçado** (`ENABLE` + `FORCE`, políticas por comando, `TO cronoai_app`, `WITH CHECK`). Política para o migrador é proibida.
+- **Empresa ativa só da sessão**, nunca do corpo, da URL ou de cabeçalho. O `CronoDbContext` recebe o `ContextoSessaoBanco` imutável no construtor (`IFabricaCronoDbContext`); fluxos de identidade usam a fábrica, nunca o contexto scoped da requisição.
+- O interceptor sobrescreve **sempre** `app.usuario_id` e `app.empresa_id` (vazios incluídos) em toda abertura de conexão; **nenhuma conexão crua** (`NpgsqlConnection`/`NpgsqlDataSource`) em `server/src` fora do design-time (R17). `No Reset On Close=true` impede a partida.
+- `IgnoreQueryFilters` e `DbSet<Usuario>` só em `Identidade/ConsultasIdentidade.cs` (R16 e teste de arquitetura), sempre com filtro explícito por usuário.
+- **Migração de dados** em tabela com RLS só por `ExecutarDmlComRls` (NO FORCE → DML → FORCE na transação), com a chamada e o SQL na mesma linha (R15); DML solto afeta zero linhas sem erro.
+- **Carregar antes de atualizar**: recurso de outra empresa → 404 (nunca 403 nem 409). Um `UPDATE` cross-empresa sob RLS vira `DbUpdateConcurrencyException`.
+- **Rota nova**: entrada em `tests/.../Isolamento/CatalogoRotas.cs` com o cenário (rota com `{id}` ganha `ComIdDeOutraEmpresa`). Fallback de autorização = autenticado; rota anônima só com `AllowAnonymous()` e na lista `AnonimasPermitidas`; escrita exige antiforgery.
+- Sessão: cookie `__Host-` revogável no servidor (tabela `sessao`, uuid v4 por CSPRNG); nenhum token do provedor guardado; o login acontece em `OnTicketReceived` e exige `id_token` assinado. O usuário de desenvolvimento só existe com `Development` + flag fora de `appsettings` versionado, e a API não sobe com a flag em outro ambiente.
+- Regras automáticas **R14 a R17** em `.claude/scripts/lib/regras-cronoai.mjs` (SQL bruto, DDL fora de migração/`Rls/`, DML de migração fora do helper, `IgnoreQueryFilters`, conexão crua), com casos em `regras-cronoai.test.mjs` (`node --test`).
+
 ## SQL e migrações
 
 - EF Core + Npgsql é o único acesso a dados. `FromSql`/`ExecuteSql` **interpolados** (viram parâmetros); `FromSqlRaw`/`ExecuteSqlRaw` com texto montado são proibidos. SQL bruto qualifica o schema (`cronoai.`).
 - **Toda DDL de tabela só em migração** (`dotnet ef migrations add`). Nunca editar migração aplicada. A única exceção é o provisionamento local de papéis e schema em `server/db/bootstrap/` (`CREATE ROLE`/`CREATE SCHEMA`/`GRANT`/`REVOKE`/`ALTER ROLE`).
 - **Nunca** aplicar migração na partida da API (`Migrate(` só em teste). Aplicação em dev: `dotnet ef database update` com a string do migrador.
-- Seed só por comando explícito em `Development`, nunca em migração.
+- Seed só por comando explícito em `Development` (`dotnet run --project server/src/CronoAI.Api -- semear-desenvolvimento`), nunca em migração.
 - Modelo muda → migração nova no mesmo diff; `has-pending-model-changes` precisa dar "sem mudança".
 
 ## Papéis e segredos

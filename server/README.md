@@ -1,19 +1,22 @@
 # CronoAI — backend (.NET 10 + PostgreSQL 17)
 
-Esqueleto do ciclo 00011: sem regra de negócio. Só ambiente **local**; hospedagem e deploy são da equipe de
-Infraestrutura. Decisões e convenções: `.claude/adrs/00004-estrutura-convencoes-backend.md`.
+Esqueleto (ciclo 00011) e identidade, empresas e isolamento (ciclo 00012); ainda sem regra de negócio de obra. Só ambiente
+**local**; hospedagem e deploy são da equipe de Infraestrutura. Decisões e convenções:
+`.claude/adrs/00004-estrutura-convencoes-backend.md` (estrutura), `00005-autenticacao-oidc-bff-sessao.md` (login e sessão) e
+`00006-isolamento-entre-empresas-rls.md` (empresas, RLS e teste de rotas).
 
 ```
 server/
   CronoAI.slnx                  solução
-  src/CronoAI.Api               host (minimal APIs, health, OpenAPI, erros, headers)
-  src/CronoAI.Dados             DbContext e migrações (EF Core + Npgsql)
+  src/CronoAI.Api               host (minimal APIs, autenticação, health, OpenAPI, erros, headers)
+  src/CronoAI.Dominio           entidades (Empresa, Usuario, MembroEmpresa, Sessao), sem nenhum pacote
+  src/CronoAI.Dados             DbContext, RLS e migrações (EF Core + Npgsql)
   tests/CronoAI.Api.Testes      xUnit v3 + Testcontainers
   db/bootstrap/                 provisionamento local de papéis e schema (usado pelo compose e pelos testes)
   openapi/CronoAI.Api.json      contrato gerado no build e versionado
 ```
 
-Direção das dependências: `Api → Dados → Dominio` (o `Dominio` nasce no 00012). Nenhum projeto referencia a `Api`.
+Direção das dependências: `Api → Dados → Dominio`. Nenhum projeto referencia a `Api`; o `Dominio` não referencia EF nem ASP.NET.
 
 ## Banco local (Docker Compose)
 
@@ -67,6 +70,38 @@ export ConnectionStrings__CronoaiMigracao="Host=127.0.0.1;Port=5432;Database=cro
 locais acima, nunca no `appsettings.json`. **Em produção o TLS (e o `SSL Mode` das strings) é da Infraestrutura** (RF-12.7;
 ADR 00004).
 
+## Identidade, empresas e usuário de desenvolvimento (ciclo 00012)
+
+A API só entende quem chama pelo **cookie de sessão** (`__Host-cronoai-sessao`, `Secure`, `HttpOnly`, `SameSite=Lax`): para testar
+à mão no navegador, use HTTPS (certificado de desenvolvimento do .NET) ou um cliente que aceite cookie `Secure` em
+`localhost`. Rotas: `GET /api/v1/eu`, `GET`/`PUT /api/v1/empresas/atual`, `GET /api/v1/autenticacao/entrar`, `POST
+/api/v1/autenticacao/sair` e `GET /api/v1/autenticacao/antiforgery` (as escritas exigem o cabeçalho `X-XSRF-TOKEN`).
+
+**Usuário de desenvolvimento** (só local, nunca em produção). Exige DOIS interruptores: ambiente `Development` (o
+`launchSettings.json` já define) **e** a flag abaixo, que **não** fica em nenhum `appsettings*.json`:
+
+```bash
+cd server/src/CronoAI.Api
+dotnet user-secrets set "Autenticacao:UsuarioDesenvolvimento:Habilitado" "true"
+dotnet run -- semear-desenvolvimento      # cria dev-a, dev-b e 3 empresas fictícias (ids fixos; idempotente; como cronoai_app)
+dotnet run                                # POST /api/v1/autenticacao/desenvolvimento/entrar com {"usuario":"dev-a"} ou "dev-b"
+```
+
+Com a flag ligada fora de `Development`, a API **não sobe** (`OptionsValidationException`). A semente recusa fora de `Development`.
+
+**Login OIDC genérico** (sem provedor fixo no código). Sem `Autoridade`, o esquema não é registrado e `/entrar` responde 503.
+O segredo do cliente só por user-secrets ou variável de ambiente (nunca em `appsettings`):
+
+```bash
+dotnet user-secrets set "Autenticacao:Oidc:Autoridade" "<url do emissor>"
+dotnet user-secrets set "Autenticacao:Oidc:IdCliente" "<id do cliente>"
+dotnet user-secrets set "Autenticacao:Oidc:SegredoCliente" "<segredo>"      # opcional: Escopos (padrão "openid profile") e CaminhoRetorno
+```
+
+**Data Protection**: em `Development` o anel de chaves fica em `%LOCALAPPDATA%/CronoAI/chaves` (fora do repositório; mude com
+`DataProtection:CaminhoAnel`). Fora de `Development` o caminho é obrigatório, senão a API não sobe. Perder o anel derruba as sessões
+(não os dados). `AllowedHosts` é `localhost;127.0.0.1;[::1]`; produção por variável de ambiente (Infraestrutura).
+
 ## Comandos
 
 ```bash
@@ -74,6 +109,7 @@ cd server
 dotnet tool restore                                           # dotnet-ef fixado em .config/dotnet-tools.json
 dotnet ef database update --project src/CronoAI.Dados         # aplica migrações (string do migrador)
 dotnet run --project src/CronoAI.Api                          # http://127.0.0.1:5280 (/health/live, /health/ready)
+dotnet run --project src/CronoAI.Api -- semear-desenvolvimento # semente fictícia (só Development, com a flag do usuário dev)
 dotnet build CronoAI.slnx -c Release                          # avisos são erros; regera openapi/CronoAI.Api.json
 dotnet test --solution CronoAI.slnx                           # inclui testes de integração (exige Docker); só de dentro de server/
 dotnet format CronoAI.slnx --verify-no-changes

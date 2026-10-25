@@ -58,9 +58,11 @@ Referência: [OWASP ASVS 5.0.0](https://github.com/OWASP/ASVS/tree/v5.0.0/5.0/en
 - **V3 Web Frontend Security:** `NA` no backend (cabeçalhos da API em V4/V13).
 - **V4 API and Web Service:** versionamento em `/api/v1`; cabeçalhos de segurança da API; OpenAPI só em `Development`.
 - **V5 File Handling:** `NA` até o upload de MS Project (SPEC-06).
-- **V6 Authentication / V7 Session Management:** `NA` até o 00012 (SPEC-02).
-- **V8 Authorization:** autorização por obra e isolamento por empresa (filtro EF + RLS; 00012). Testes de segurança do banco conectam como `cronoai_app`, nunca como superusuário.
-- **V9 Self-contained Tokens / V10 OAuth and OIDC:** `NA` até o provedor de login (SPEC-02, com a Segurança).
+- **V6 Authentication:** autenticação delegada ao provedor OIDC (sem senha local; MFA do provedor); fluxo de código + PKCE S256 com cliente confidencial; usuário de desenvolvimento só com `Development` + flag, falha fechada na partida (ciclo 00012; ADR 00005).
+- **V7 Session Management:** cookie `__Host-` (`HttpOnly`, `Secure`, `SameSite=Lax`), sessão revogável no servidor, sessão nova no login, inatividade e teto de duração, antiforgery nas escritas, retenção (ciclo 00012; ADR 00005).
+- **V8 Authorization:** isolamento por empresa em três camadas (coluna + filtro do EF + RLS forçado) e teste genérico de rotas; fallback de autorização autenticado; 404 para recurso de outra empresa (ciclo 00012; ADR 00006). Autorização por obra: 00014. Testes de segurança do banco conectam como `cronoai_app`, nunca como superusuário.
+- **V9 Self-contained Tokens:** `id_token` validado (assinatura obrigatória e só algoritmos assimétricos conhecidos, `iss`, `aud`, `exp`, `nonce`, `state`) e descartado; nenhum token guardado (ciclo 00012; ADR 00005).
+- **V10 OAuth and OIDC:** código + PKCE S256, `state`/`nonce`, `redirect_uri` exata, escopos `openid profile`; provedor real e fumaça com ele: Segurança (ciclo 00012).
 - **V11 Cryptography:** segredos de integração cifrados com Data Protection (00022).
 - **V12 Secure Communication:** TLS/HSTS de produção e TLS do PostgreSQL são da Infraestrutura.
 - **V13 Configuration:** sem segredo versionado (`.env`, `user-secrets`); NuGet Audit bloqueando alta/crítica; lock files; imagens por digest; compose local só em `127.0.0.1`; PostgreSQL sem `trust` no TCP; workflow sem segredo nem deploy.

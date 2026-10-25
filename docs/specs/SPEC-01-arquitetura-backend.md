@@ -60,7 +60,7 @@ Fase 2 (ciclo 00011): solução em `server/` com `Api → Dados → Dominio`, sc
 
 | Tabela | Campos principais |
 |---|---|
-| `empresa` | id, nome, cnpj |
+| `empresa` | id, nome (sem `cnpj` por ora: minimização de dados; decisão do ciclo 00012, ADR 00006 — volta com o Jurídico se um ciclo precisar) |
 | `obra` | id, empresa_id, nome, uf, municipio_ibge, responsavel_id, data_inicio, data_status_atual, calendario_id, sinapi_uf, sinapi_regime, sinapi_data_base, premissas (jsonb versionado) |
 | `tarefa` | id, obra_id, uid_msproject, wbs, nome, nivel, resumo, duracao_du, pct_concluido, inicio_real, termino_real, bac, custo_real, sinapi, lead_time, snet, versao |
 | `vinculo` | obra_id, pred_id, succ_id, tipo (FS/SS/FF/SF), lag_du |

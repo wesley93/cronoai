@@ -10,3 +10,5 @@ Candidatas conhecidas: as **Decisões em aberto** D1–D4 de `docs/specs/README.
 |---|---|---|---|
 | [00001](00001-stack-backend-dotnet-10.md) | Stack do backend: .NET 10 + PostgreSQL | 2026-10-25 | Aceito (stack); Infra/Segurança pendentes |
 | [00004](00004-estrutura-convencoes-backend.md) | Estrutura, convenções e ferramentas do backend .NET | 2026-10-25 | Proposto |
+| [00005](00005-autenticacao-oidc-bff-sessao.md) | Autenticação: OIDC genérico, BFF com cookie de sessão revogável e usuário de desenvolvimento | 2026-10-25 | Proposto |
+| [00006](00006-isolamento-entre-empresas-rls.md) | Isolamento entre empresas: coluna, filtro do EF, RLS e teste de rotas | 2026-10-25 | Proposto |

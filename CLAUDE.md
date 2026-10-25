@@ -29,7 +29,7 @@ CronoAI é o copiloto de planejamento de obras integrado ao MS Project:
 | Node | 22 LTS ou superior (`.nvmrc`) |
 | Container | `Dockerfile` multi-stage → `nginxinc/nginx-unprivileged` |
 | CI | GitHub Actions: CI (inclui o job do backend), Docker, CodeQL (JS/TS e C#), Release; Dependabot ([docs/devops.md](docs/devops.md)) |
-| Backend | **Esqueleto em `server/`** (ciclo 00011): .NET 10 (ASP.NET Core, minimal APIs) + EF Core/Npgsql + PostgreSQL 17 local (Docker Compose, perfil `backend`), xUnit v3 + Testcontainers. Convenções no [ADR 00004](.claude/adrs/00004-estrutura-convencoes-backend.md) e em `.claude/rules/backend-dotnet.md`; stack no [ADR 00001](.claude/adrs/00001-stack-backend-dotnet-10.md). Sem regra de negócio ainda; hospedagem e banco gerenciado pendentes com a Infraestrutura (SPEC-01) |
+| Backend | **`server/`** (ciclos 00011 e 00012): .NET 10 (ASP.NET Core, minimal APIs) + EF Core/Npgsql + PostgreSQL 17 local (Docker Compose, perfil `backend`), xUnit v3 + Testcontainers. Convenções no [ADR 00004](.claude/adrs/00004-estrutura-convencoes-backend.md) e em `.claude/rules/backend-dotnet.md`; stack no [ADR 00001](.claude/adrs/00001-stack-backend-dotnet-10.md). Identidade e empresas (00012): login OIDC genérico com cookie de sessão revogável, usuário de desenvolvimento só local, RLS e filtro por empresa ([ADR 00005](.claude/adrs/00005-autenticacao-oidc-bff-sessao.md), [ADR 00006](.claude/adrs/00006-isolamento-entre-empresas-rls.md)). Ainda sem regra de negócio de obra; hospedagem e banco gerenciado pendentes com a Infraestrutura (SPEC-01) |
 
 ```bash
 npm ci                    # instalar
@@ -50,6 +50,8 @@ docker compose --profile backend up -d --wait db                 # PostgreSQL lo
 dotnet build server/CronoAI.slnx -c Release                      # avisos são erros; regera server/openapi/CronoAI.Api.json
 (cd server && dotnet test --solution CronoAI.slnx)              # inclui integração (exige Docker); rodar de dentro de server/
 dotnet format server/CronoAI.slnx --verify-no-changes
+(cd server/src/CronoAI.Api && dotnet run -- semear-desenvolvimento)   # semente fictícia (só Development, flag do usuário dev; veja server/README.md)
+node --test .claude/scripts/lib/regras-cronoai.test.mjs   # testes das regras do validar-regras (R08, R14 a R17)
 dotnet list server/CronoAI.slnx package --vulnerable --include-transitive
 ```
 
@@ -73,7 +75,7 @@ dotnet list server/CronoAI.slnx package --vulnerable --include-transitive
 | `src/stores/ui.ts` | Tema, navegação por hash, toasts |
 | `src/modules/*.vue` | Telas dos módulos (Apontamento, Caminho Crítico, Suprimentos, SINAPI, EVM, EAP) |
 | `src/components/` | Layout, cards, Gantt, gráficos, ilustrações |
-| `server/` | **Backend .NET 10**: `src/CronoAI.Api` (host), `src/CronoAI.Dados` (EF Core e migrações), `tests/CronoAI.Api.Testes`, `db/bootstrap` (papéis e schema locais), `openapi/` (contrato) |
+| `server/` | **Backend .NET 10**: `src/CronoAI.Api` (host, autenticação, endpoints), `src/CronoAI.Dominio` (entidades, sem pacotes), `src/CronoAI.Dados` (EF Core, RLS e migrações), `tests/CronoAI.Api.Testes`, `db/bootstrap` (papéis e schema locais), `openapi/` (contrato) |
 | `docker/`, `Dockerfile`, `docker-compose.yml` | Execução em container (front) e PostgreSQL local (perfil `backend`) |
 | `.github/` | Workflows, Dependabot, templates |
 | `docs/specs/` | Specs e roadmap; `docs/devops.md` |
