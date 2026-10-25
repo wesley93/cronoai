@@ -37,11 +37,11 @@ function edit(t: Task, field: 'percentComplete' | 'durationDays' | 'bac' | 'actu
   if (field === 'durationDays') {
     // A tela edita a duração em dias inteiros; o estado guarda minutos
     const minutos = diasParaMinutos(Math.round(v), project.minutosPorDia)
-    if (minutos !== t.duracaoMin) project.updateTask(t.uid, { duracaoMin: minutos })
+    if (minutos !== t.duracaoMin) responder(project.updateTask(t.uid, { duracaoMin: minutos }))
     return
   }
   if (v === t[field]) return
-  project.updateTask(t.uid, { [field]: v })
+  responder(project.updateTask(t.uid, { [field]: v }))
 }
 
 /** Erro de uma edição recusada pela store (restrição, prazo ou calendário inválidos) vira aviso em português. */
@@ -85,7 +85,12 @@ function saveBaseline() {
 
 function applyStatusDate() {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(statusDate.value)) return
-  project.setStatusDate(statusDate.value)
+  const r = project.setStatusDate(statusDate.value)
+  if (!r.ok) {
+    responder(r)
+    statusDate.value = project.state.meta.statusDate // a edição recusada não fica na tela
+    return
+  }
   ui.notify('info', 'Data de status alterada', 'Cronograma, EVM e suprimentos reprogramados.')
 }
 

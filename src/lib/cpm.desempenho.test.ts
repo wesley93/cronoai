@@ -1,9 +1,11 @@
 // Desempenho do motor (RNF-05.1): 3.000 folhas, 100 frentes e cerca de 6.000 vínculos, 3 calendários (30% fora do padrão).
 // No CI: uma execução abaixo de 2.000 ms (teto largo contra máquina lenta). Local (CRONOAI_PERF=1): mediana de 5 execuções
 // do cálculo + compilação dos calendários abaixo de 500 ms. Antes do ciclo 00004, no motor em dias: mediana de 26 ms.
+// A obra mistura lag útil, corrido e em %, restrições de data (SNET, FNLT, MSO, ALAP), prazo final e tarefas iniciadas
+// (rodada 02: o desempenho medido vale para o motor completo, não só para vínculos FS/SS/FF simples).
 import { describe, expect, it } from 'vitest'
-import type { CalendarioObra, LinkType, PredecessorLink, Task } from '@/types/domain'
-import { brazilianHolidays } from './calendar'
+import type { CalendarioObra, Lag, LinkType, PredecessorLink, Restricao, Task } from '@/types/domain'
+import { addCalendarDays, brazilianHolidays } from './calendar'
 import { calendarioPadrao, compilarCalendarios, diasParaMinutos } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
 
@@ -39,17 +41,32 @@ function gerarObra(): Task[] {
       if (i === 0 && f > 0) candidatas.push(uid - 1) // a frente começa depois da última tarefa da anterior
       for (let k = 0; k < 2 && candidatas.length; k++) {
         const p = candidatas.splice(Math.floor(sorteio() * candidatas.length), 1)[0]
-        predecessors.push({ uid: p, type: tipos[Math.floor(sorteio() * tipos.length)], lag: { tipo: 'util', minutos: diasParaMinutos(Math.floor(sorteio() * 4) - 1) } })
+        const tipo = tipos[Math.floor(sorteio() * tipos.length)]
+        const dias = Math.floor(sorteio() * 4) - 1
+        const forma = sorteio()
+        const lag: Lag = forma < 0.7 ? { tipo: 'util', minutos: diasParaMinutos(dias) } : forma < 0.85 ? { tipo: 'corrido', minutos: dias * 1440 } : { tipo: 'percentual', percentual: dias * 25 }
+        predecessors.push({ uid: p, type: tipo, lag })
       }
       const r = sorteio()
       const concluida = r < 0.2
       const iniciada = !concluida && r < 0.23
       const calSorteio = sorteio()
+      const sorteioRestricao = sorteio()
+      const dataSorteada = addCalendarDays(BASE, Math.floor(sorteio() * 400))
+      const restricao: Restricao | undefined =
+        sorteioRestricao < 0.04 ? { tipo: 'SNET', data: dataSorteada }
+        : sorteioRestricao < 0.07 ? { tipo: 'FNLT', data: `${dataSorteada}T17:00` }
+        : sorteioRestricao < 0.09 ? { tipo: 'MSO', data: `${dataSorteada}T08:00` }
+        : sorteioRestricao < 0.11 ? { tipo: 'ALAP' }
+        : undefined
+      const comPrazo = sorteio() < 0.05
       tasks.push({
         uid, wbs: String(uid), name: `T${uid}`, outlineLevel: 1, isSummary: false,
         duracaoMin: diasParaMinutos(1 + Math.floor(sorteio() * 20)),
         predecessors, percentComplete: concluida ? 100 : iniciada ? 50 : 0, bac: 1000, actualCost: 0, resources: [],
         calendarioUid: calSorteio < 0.15 ? 2 : calSorteio < 0.3 ? 3 : undefined,
+        ...(restricao ? { restricao } : {}),
+        ...(comPrazo ? { prazoFinal: `${addCalendarDays(BASE, 500)}T17:00` } : {}),
       })
     }
   }
@@ -70,6 +87,12 @@ describe('desempenho do motor em minutos (RNF-05.1)', () => {
     const fora = tasks.filter((t) => t.calendarioUid !== undefined).length / tasks.length
     expect(fora).toBeGreaterThan(0.25)
     expect(fora).toBeLessThan(0.35)
+    // A mistura de recursos do motor está de fato presente (senão a medição não vale para o motor completo)
+    const lags = tasks.flatMap((t) => t.predecessors.map((p) => p.lag.tipo))
+    for (const tipo of ['util', 'corrido', 'percentual']) expect(lags.filter((l) => l === tipo).length).toBeGreaterThan(300)
+    expect(tasks.filter((t) => t.restricao).length).toBeGreaterThan(200)
+    expect(tasks.filter((t) => t.prazoFinal).length).toBeGreaterThan(80)
+    expect(tasks.filter((t) => t.percentComplete > 0 && t.percentComplete < 100).length).toBeGreaterThan(30)
   })
 
   it('calcula tudo em menos de 2.000 ms numa execução (teto largo para o CI)', () => {

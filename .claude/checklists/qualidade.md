@@ -10,12 +10,12 @@ Usado por `agents/revisor.md` e `agents/arquiteto.md` (modo revisão). **Altere 
 - Condicional que uma estrutura já presente eliminaria (tabela `as const`, `switch` por `LinkType`, `SCHEMA_ORDER`)?
 
 **Reuso**
-- Cria algo que já existe? Aponte o equivalente: calendário e dias úteis (`lib/calendar.ts`: `WorkCalendar`, `addCalendarDays`, `countWorkingBetween`), formatação (`lib/format.ts`: `fmtBRL`, `fmtDate`, `fmtIndex`, `fmtDays`), EAP (`lib/wbs.ts`), conversões MSPDI (`toDuration`, `fromDuration`, `lagToWorkingDays`), número pt-BR (`parseNumberBR`), componentes comuns (`components/common/`).
+- Cria algo que já existe? Aponte o equivalente: calendário e dias úteis (`lib/calendar.ts`: `WorkCalendar`, `addCalendarDays`, `countWorkingBetween`), formatação (`lib/format.ts`: `fmtBRL`, `fmtDate`, `fmtIndex`, `fmtDays`), EAP (`lib/wbs.ts`), conversões de unidade (`calendarioTrabalho.ts`: `diasParaMinutos`, `minutosParaDias`; MSPDI: `minutosParaDuracao`, `lagDeMspdi`, `lagParaMspdi`; exibição do lag: `lagEmDias` em `wbs.ts`), número pt-BR (`parseNumberBR`), componentes comuns (`components/common/`).
 - Cálculo refeito dentro de componente ou da store em vez de chamar `src/lib`? Duas implementações do mesmo número divergem com o tempo.
 
 **Convenções (`CLAUDE.md › Convenções`)** — aponte o item violado
 - `src/lib` puro: sem store, DOM ou `localStorage` (exceções `download.ts`, `useMsProject.ts`).
-- Datas ISO `yyyy-mm-dd` UTC; durações e lags em dias úteis inteiros; dinheiro em `number`, arredondado só na exibição.
+- Datas ISO `yyyy-mm-dd` UTC; durações, lags e folgas em minutos inteiros (ADR 00003; conversão só em `calendarioTrabalho.ts`); dinheiro em `number`, arredondado só na exibição.
 - Sem `any`, `@ts-ignore`, `as unknown as` gratuitos; sem `enum` TS (`as const` + `typeof`).
 - `<script setup lang="ts">`; estado de domínio só na store; estado de tela com `ref`/`computed`; subcomponente de módulo em `src/modules/<modulo>/`.
 - Textos de interface em português; números pelos formatadores; classes utilitárias do `style.css`; paleta e legenda dos gráficos (`SCurveChart.vue`).

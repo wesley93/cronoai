@@ -7,6 +7,8 @@ import {
   EXPEDIENTE_PADRAO,
   JANELA_ANOS_DATAS,
   MAX_INTERVALOS_POR_DIA,
+  MINUTOS_NO_DIA_CORRIDO,
+  TETO_DIAS,
   UID_CALENDARIO_PADRAO,
   calendarioDeDias,
   calendarioPadrao,
@@ -16,9 +18,9 @@ import {
   horaDoMomento,
   horaParaMinutos,
   lerDataHora,
-  minutosParaDias,
   type CalendariosCompilados,
 } from './calendarioTrabalho'
+import { alteradaDepoisDaImportacao } from './restricoes'
 import { compareWbs, normalizeText, parseFloorRange, rollupSummaries, type SummaryRollup } from './wbs'
 
 export const MSPDI_NAMESPACE = 'http://schemas.microsoft.com/project'
@@ -142,12 +144,6 @@ function render(node: XNode, depth = 0): string {
 // Conversões de unidades MSPDI
 // ---------------------------------------------------------------------------
 
-/** Duração em dias úteis -> PT{h}H{m}M{s}S. */
-export function toDuration(days: number, minutesPerDay = DEFAULT_MINUTES_PER_DAY): string {
-  const totalMinutes = Math.round(Math.max(0, days) * minutesPerDay)
-  return `PT${Math.floor(totalMinutes / 60)}H${totalMinutes % 60}M0S`
-}
-
 /** Minutos → PT{h}H{m}M0S (inteiros, sem segundos). */
 export function minutosParaDuracao(minutos: number): string {
   const total = Math.max(0, Math.round(minutos))
@@ -157,17 +153,11 @@ export function minutosParaDuracao(minutos: number): string {
 /** PT80H0M0S / P2DT4H -> minutos brutos (sem arredondar); `undefined` se o texto não é uma duração ISO 8601. */
 function durationMinutes(value: string | undefined, minutesPerDay: number): number | undefined {
   if (!value) return undefined
-  const m = value.match(/^-?P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
+  const m = value.match(/^(-?)P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
   if (!m) return undefined
-  const [, d, h, min, sec] = m.map((v) => (v ? Number(v) : 0)) as number[]
-  return d * minutesPerDay + h * 60 + min + sec / 60
-}
-
-/** PT80H0M0S / P2DT4H -> dias úteis, considerando os minutos por dia do projeto. */
-export function fromDuration(value: string | undefined, minutesPerDay = DEFAULT_MINUTES_PER_DAY): number {
-  const minutes = durationMinutes(value, minutesPerDay)
-  if (minutes === undefined) return 0
-  return Math.round((minutes / minutesPerDay) * 100) / 100
+  const [, , d, h, min, sec] = m.map((v) => (v ? Number(v) : 0)) as number[]
+  const total = d * minutesPerDay + h * 60 + min + sec / 60
+  return m[1] === '-' ? -total : total // o sinal negativo é preservado: a faixa do import o recusa
 }
 
 /** Lag do domínio → `LinkLag` (décimos de minuto; no lag %, o percentual inteiro) e `LagFormat` (o original, se veio de arquivo). */
@@ -206,6 +196,8 @@ interface TaskContext {
   /** Dia útil do calendário padrão: só para a duração das tarefas-resumo (contagem de dias úteis). */
   cal: WorkCalendar
   cals: CalendariosCompilados
+  /** Minutos por dia da obra (jornada), para converter os dias úteis do resumo em minutos. */
+  minutosPorDia: number
 }
 
 function createContext(input: MspdiExportInput): TaskContext {
@@ -215,12 +207,13 @@ function createContext(input: MspdiExportInput): TaskContext {
     rollups: rollupSummaries(input.tasks, input.schedule),
     cal: calendarioDeDias(cals.padrao),
     cals,
+    minutosPorDia: input.meta.minutosPorDia ?? DEFAULT_MINUTES_PER_DAY,
   }
 }
 
 /** Minutos do dia → hh:mm:ss do MSPDI (24:00 vira 00:00:00, como o MS Project grava). */
 function horaMspdi(minutos: number): string {
-  const m = minutos >= 1440 ? 0 : minutos
+  const m = minutos >= MINUTOS_NO_DIA_CORRIDO ? 0 : minutos
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}:00`
 }
 
@@ -254,12 +247,14 @@ const horaDe = (momento: number): string => `${horaDoMomento(momento)}:00`
 function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
   const s = ctx.schedule.byUid.get(t.uid)
   const r = ctx.rollups.get(t.uid)
-  const start = t.isSummary ? r?.start : s?.start
-  const finish = t.isSummary ? r?.finish : s?.finish
-  const duration = t.isSummary
-    ? start && finish ? ctx.cal.countWorkingBetween(start, addCalendarDays(finish, 1)) : 0
-    : minutosParaDias(t.duracaoMin)
-  const durationMin = t.isSummary ? diasParaMinutos(duration) : t.duracaoMin
+  // Tarefa agendada manualmente e não alterada no CronoAI: as datas do arquivo voltam como vieram (o MS Project não as recalcula)
+  const doArquivo = !t.isSummary && t.arquivo?.manual === true && !!t.arquivo.inicio && !!t.arquivo.termino && !alteradaDepoisDaImportacao(t)
+  const start = doArquivo ? t.arquivo?.inicio : t.isSummary ? r?.start : s?.start
+  const finish = doArquivo ? t.arquivo?.termino : t.isSummary ? r?.finish : s?.finish
+  // Duração do resumo: dias úteis do calendário padrão convertidos com os minutos por dia da obra (jornada de 7,5 h, por exemplo)
+  const durationMin = t.isSummary
+    ? start && finish ? diasParaMinutos(ctx.cal.countWorkingBetween(start, addCalendarDays(finish, 1)), ctx.minutosPorDia) : 0
+    : t.duracaoMin
   const milestone = !t.isSummary && t.duracaoMin === 0
   const pct = Math.round(t.isSummary ? (r?.percentComplete ?? 0) : t.percentComplete)
   const cost = t.isSummary ? (r?.bac ?? 0) : t.bac
@@ -272,8 +267,8 @@ function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
   // Horas reais do cálculo; datas reais (início e término) ficam no expediente padrão
   const cInicio = ctx.cals.de(t.calendarioUid)
   const cDuracao = t.duracaoCorrida ? ctx.cals.corrido : cInicio
-  const inicioHora = t.isSummary ? (r ? `${r.inicioHora}:00` : startTime) : s && !(t.percentComplete > 0 && t.actualStart) ? `${s.inicioHora}:00` : startTime
-  const terminoHora = t.isSummary ? (r ? `${r.terminoHora}:00` : '17:00:00') : s && !(t.percentComplete >= 100 && t.actualFinish) ? `${s.terminoHora}:00` : '17:00:00'
+  const inicioHora = doArquivo ? startTime : t.isSummary ? (r ? `${r.inicioHora}:00` : startTime) : s && !(t.percentComplete > 0 && t.actualStart) ? `${s.inicioHora}:00` : startTime
+  const terminoHora = doArquivo ? '17:00:00' : t.isSummary ? (r ? `${r.terminoHora}:00` : '17:00:00') : s && !(t.percentComplete >= 100 && t.actualFinish) ? `${s.terminoHora}:00` : '17:00:00'
   const restricao = t.restricao && !('inferida' in t.restricao && t.restricao.inferida) ? t.restricao : undefined // a inferida não vai ao arquivo
   const prazo = t.prazoFinal ? (t.prazoFinal.length > 10 ? `${t.prazoFinal.slice(0, 16)}:00` : dt(t.prazoFinal, '17:00:00')) : undefined
 
@@ -579,7 +574,7 @@ export interface MspdiImportResult {
 export const MAX_CALENDARIOS_IMPORTADOS = 100
 const JANELA_ANOS = JANELA_ANOS_DATAS
 /** Lag acima de ±10 anos (em minutos de relógio) e lag % fora de ±1.000 são recusados com aviso. */
-const MAX_LAG_MINUTOS = 10 * 365 * 1440
+const MAX_LAG_MINUTOS = 10 * 365 * MINUTOS_NO_DIA_CORRIDO
 const MAX_LAG_PERCENTUAL = 1000
 
 type LeituraLag = { lag: Lag; arredondado: boolean; percentualCorrido: boolean } | { erro: 'faixa' | 'desconhecido' }
@@ -624,7 +619,7 @@ function lerIntervalos(workingTimes: Element | undefined): IntervaloTrabalho[] |
     const de = horaParaMinutos(text(wt, 'FromTime') ?? '')
     const ate = horaParaMinutos(text(wt, 'ToTime') ?? '')
     if (de === undefined || ate === undefined) return undefined
-    out.push({ de, ate: ate === 0 ? 1440 : ate })
+    out.push({ de, ate: ate === 0 ? MINUTOS_NO_DIA_CORRIDO : ate })
   }
   return out.sort((a, b) => a.de - b.de)
 }
@@ -777,7 +772,11 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   if (blocking.length) throw new Error(blocking[0])
   const warnings: string[] = check.errors.slice(0, 5).map((e) => `Ignorado: ${e}`)
 
-  const minutesPerDay = num(project, 'MinutesPerDay') || DEFAULT_MINUTES_PER_DAY
+  // Jornada válida: inteiro de 1 a 1.440 minutos; fora disso vale a padrão (480) e o import avisa
+  const minutosDoArquivo = num(project, 'MinutesPerDay')
+  const jornadaValida = minutosDoArquivo !== undefined && Number.isInteger(minutosDoArquivo) && minutosDoArquivo >= 1 && minutosDoArquivo <= MINUTOS_NO_DIA_CORRIDO
+  const jornadaInvalida = minutosDoArquivo !== undefined && minutosDoArquivo !== 0 && !jornadaValida
+  const minutesPerDay = jornadaValida ? minutosDoArquivo : DEFAULT_MINUTES_PER_DAY
   const taskNodes = kids(kid(project, 'Tasks'), 'Task')
 
   // Faixa de datas aceita: ±45 anos do início do projeto (ou da primeira tarefa); nada de data absurda entra no motor
@@ -807,7 +806,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     startDate: dataSegura(text(project, 'StartDate')),
     statusDate: dataSegura(text(project, 'StatusDate')),
   }
-  if (num(project, 'MinutesPerDay') !== undefined && minutesPerDay > 0) meta.minutosPorDia = minutesPerDay
+  if (jornadaValida) meta.minutosPorDia = minutesPerDay
   const honor = num(project, 'HonorConstraints')
   if (honor !== undefined) meta.honorConstraintsArquivo = honor ? 1 : 0
   const splits = num(project, 'SplitsInProgressTasks')
@@ -878,7 +877,9 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   // Calendário padrão da obra: o do projeto. Sem ele (ausente ou rejeitado), o padrão seg–sex com os feriados nacionais.
   const uidPadrao = Number.isInteger(Number(uidProjetoTexto)) && uidProjetoTexto !== undefined ? Number(uidProjetoTexto) : UID_CALENDARIO_PADRAO
   const years = taskNodes.map((n) => Number((isoDate(text(n, 'Start')) ?? baseDaFaixa).slice(0, 4))).filter((y) => y > 1990)
-  const fromYear = Math.min(...years, Number(baseDaFaixa.slice(0, 4)), new Date().getFullYear())
+  // Laço no lugar de Math.min(...years): milhares de tarefas estourariam a pilha de argumentos
+  let fromYear = Math.min(Number(baseDaFaixa.slice(0, 4)), new Date().getFullYear())
+  for (const y of years) if (y < fromYear) fromYear = y
   const nacionais = defaultHolidays(fromYear, fromYear + 4)
   let calPadrao = importados.get(uidPadrao)
   let semFeriados = false
@@ -926,6 +927,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   let lagForaDaFaixa = 0
   let lagPercentualDecorrido = 0
   let arredondados = 0
+  let duracoesForaDaFaixa = 0
   let nullRows = 0
   let calendarioDeTarefaNaoImportado = 0
   let otherBaselines = 0
@@ -939,7 +941,17 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   let customValues = 0
   const customFields = new Set<string>()
   const minutosDe = (v: string | undefined): number => {
-    const bruto = durationMinutes(v, minutesPerDay) ?? 0
+    const lido = durationMinutes(v, minutesPerDay)
+    if (lido === undefined && v) {
+      duracoesForaDaFaixa++ // texto que não é duração ISO 8601
+      return 0
+    }
+    const bruto = lido ?? 0
+    // Faixa aceita: de 0 até o teto de 50 anos; duração negativa ou maior vira zero, com aviso (o motor não a aceitaria)
+    if (bruto < 0 || bruto > TETO_DIAS * MINUTOS_NO_DIA_CORRIDO) {
+      duracoesForaDaFaixa++
+      return 0
+    }
     const minutos = Math.round(bruto)
     if (Math.abs(bruto - minutos) > 1e-9) arredondados++ // segundos (só em durações guiadas por recurso): arredondados com aviso
     return minutos
@@ -1073,6 +1085,8 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   if (lagDesconhecido) warnings.push(`${lagDesconhecido} vínculo(s) com formato de latência desconhecido importados com latência zero.`)
   if (lagForaDaFaixa) warnings.push(`${lagForaDaFaixa} vínculo(s) com latência fora da faixa (mais de 10 anos ou % acima de ${MAX_LAG_PERCENTUAL}) importados com latência zero.`)
   if (lagPercentualDecorrido) warnings.push(`${lagPercentualDecorrido} vínculo(s) com latência em % decorrido calculados como % do tempo útil.`)
+  if (jornadaInvalida) warnings.push(`MinutesPerDay do arquivo (${minutosDoArquivo}) fora da faixa de 1 a ${MINUTOS_NO_DIA_CORRIDO} minutos inteiros: usada a jornada padrão de ${DEFAULT_MINUTES_PER_DAY} minutos.`)
+  if (duracoesForaDaFaixa) warnings.push(`${duracoesForaDaFaixa} duração(ões) negativa(s), acima de 50 anos ou ilegível(is) importada(s) como zero.`)
   if (arredondados) warnings.push(`${arredondados} valor(es) de tempo com segundos arredondado(s) para o minuto (durações guiadas por recurso).`)
   if (otherBaselines) warnings.push(`Linhas de base 1 a 10 não importadas em ${otherBaselines} tarefa(s): o CronoAI usa só a linha de base 0.`)
   // Sem término ou sem início, evm.ts devolve PV zero: a store mantém a LB0 incompleta do arquivo (withBaseline onlyMissing, CR-12).

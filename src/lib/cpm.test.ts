@@ -377,12 +377,13 @@ describe('duração corrida (CR-10)', () => {
   it('a folga da tarefa corrida é medida em 24 h e exibida em dias corridos; a sucessora segue o calendário dela', () => {
     const r = agendar([tarefa(1, 5), tarefa(2, 0, { duracaoMin: 1440, duracaoCorrida: true }), tarefa(3, 1, { predecessors: [liga(2)] })], '2026-08-07')
     const c = r.byUid.get(2)!
-    // C termina sáb 08/08 08:00; o projeto termina em 14/08 17:00 (C → D tem 1 d depois de segunda), folga em minutos de relógio
+    // C termina sáb 08/08 08:00 e D (1 d) só pode começar até qui 13/08 08:00 para o projeto terminar em 13/08 17:00:
+    // 5 dias de relógio = 7.200 min, exibidos em dias corridos (÷ 1.440), não em dias úteis (÷ 480 daria 15)
     expect(c.corrida).toBe(true)
-    expect(c.totalFloat).toBeCloseTo(c.folgaTotalMin / 1440, 10)
+    expect([c.folgaTotalMin, c.totalFloat]).toEqual([7200, 5])
     expect(r.byUid.get(3)!.start).toBe('2026-08-10') // próxima manhã útil depois do sábado
     expect(r.byUid.get(1)!.corrida).toBe(false)
-    expect(r.byUid.get(1)!.totalFloat).toBe(r.byUid.get(1)!.folgaTotalMin / 480)
+    expect([r.byUid.get(1)!.folgaTotalMin, r.byUid.get(1)!.totalFloat]).toEqual([0, 0]) // A de 5 d define o fim do projeto (13/08): crítica
   })
 
   it('tarefa corrida sem sucessora: folga = minutos de relógio até o fim do projeto ÷ 1.440', () => {
@@ -438,6 +439,89 @@ describe('opções de progresso (CR-8) e restante exato', () => {
       { mode: 'forecast', statusDate: '2026-08-05' },
     )
     expect([r.byUid.get(1)!.restanteMin, r.byUid.get(2)!.restanteMin, r.byUid.get(3)!.restanteMin]).toEqual([3456, 3802, 1])
+  })
+})
+
+describe('rodada 02: progresso com vínculos, restrições de término em tarefa iniciada, ALAP com sucessora e marco', () => {
+  /** Previsão com data de status 05/08 (início da obra em 03/08) e as opções pedidas. */
+  const prever = (tasks: Task[], opcoes?: { logica?: 'retida' | 'substituir'; moverRestante?: boolean }) =>
+    computeSchedule(tasks, compilarCalendarios('2026-08-03', [padrao, sabado4h], 1), { mode: 'forecast', statusDate: '2026-08-05', opcoes })
+  const iniciada = (uid: number, dias: number, over: Partial<Task> = {}) => tarefa(uid, dias, { percentComplete: 50, actualStart: '2026-08-03', ...over })
+
+  it('C: sem mover o restante, o restante empurrado por vínculo começa depois da parte já feita (B termina 14/08, antes 10/08)', () => {
+    const a = tarefa(1, 1)
+    const b = iniciada(2, 10, { predecessors: [liga(1)] })
+    const r = prever([a, b], { moverRestante: false })
+    // A não iniciada fica em 03/08 (não é empurrada); a parte feita de B (5 d) vai até 07/08 17:00 e o restante (5 d) até 14/08
+    expect([r.byUid.get(1)!.start, r.byUid.get(1)!.finish]).toEqual(['2026-08-03', '2026-08-03'])
+    expect([r.byUid.get(2)!.start, r.byUid.get(2)!.finish, r.byUid.get(2)!.terminoHora]).toEqual(['2026-08-03', '2026-08-14', '17:00'])
+    // Sem predecessora o resultado é o mesmo (14/08): o vínculo já satisfeito não muda nada
+    expect(prever([iniciada(2, 10)], { moverRestante: false }).byUid.get(2)!.finish).toBe('2026-08-14')
+  })
+
+  it('D: tarefa iniciada com FF usa o restante: A de 10 d (06/08 a 19/08) e B de 4 d a 50% com FF+0 terminam juntas em 19/08 17:00', () => {
+    const a = tarefa(1, 10)
+    const b = iniciada(2, 4, { predecessors: [liga(1, 'FF')] })
+    const r = prever([a, b])
+    expect([r.byUid.get(1)!.start, r.byUid.get(1)!.finish]).toEqual(['2026-08-06', '2026-08-19'])
+    expect([r.byUid.get(2)!.finish, r.byUid.get(2)!.terminoHora]).toEqual(['2026-08-19', '17:00'])
+    // SF + 0 também: o término de B não antecede o início de A (06/08), e o restante cabe antes
+    const sf = prever([a, iniciada(2, 4, { predecessors: [liga(1, 'SF')] })])
+    expect(sf.byUid.get(2)!.finish).toBe('2026-08-07') // restante de 2 d a partir do dia seguinte à data de status
+  })
+
+  it('E: FNLT e MFO continuam limitando o término tardio da tarefa iniciada (folga -3 d e conflito); SNLT e MSO deixam de valer', () => {
+    const fnlt = prever([iniciada(1, 10, { restricao: { tipo: 'FNLT', data: '2026-08-07' } })]).byUid.get(1)!
+    // O restante (5 d) parte de 06/08 e termina em 12/08; o limite é 07/08 17:00
+    expect([fnlt.finish, fnlt.folgaTotalMin / 480, fnlt.restricaoConflito, fnlt.critical]).toEqual(['2026-08-12', -3, true, true])
+    const mfo = prever([iniciada(1, 10, { restricao: { tipo: 'MFO', data: '2026-08-07' } })]).byUid.get(1)!
+    expect([mfo.folgaTotalMin / 480, mfo.restricaoConflito]).toEqual([-3, true])
+    // Limite depois do término previsto: sem conflito (a folga fica 0 porque o projeto termina na própria tarefa)
+    const folgado = prever([iniciada(1, 10, { restricao: { tipo: 'FNLT', data: '2026-08-14' } })]).byUid.get(1)!
+    expect([folgado.folgaTotalMin, folgado.restricaoConflito]).toEqual([0, false])
+    // SNLT em tarefa já iniciada não limita nada: folga 0 e sem conflito
+    const snlt = prever([iniciada(1, 10, { restricao: { tipo: 'SNLT', data: '2026-08-03' } })]).byUid.get(1)!
+    expect([snlt.folgaTotalMin, snlt.restricaoConflito]).toEqual([0, false])
+  })
+
+  it('F: ALAP com sucessora vai para as datas tardias e a sucessora FS só começa depois (Y 10/08 a 12/08, Z de 13/08 a 14/08)', () => {
+    const x = tarefa(1, 10) // define o fim do projeto em 14/08
+    const y = tarefa(2, 3, { restricao: { tipo: 'ALAP' } })
+    const z = tarefa(3, 2, { predecessors: [liga(2)] })
+    const r = agendar([x, y, z], '2026-08-03')
+    const u = (uid: number) => r.byUid.get(uid)!
+    expect([u(2).start, u(2).inicioHora, u(2).finish, u(2).terminoHora]).toEqual(['2026-08-10', '08:00', '2026-08-12', '17:00'])
+    expect([u(3).start, u(3).inicioHora, u(3).finish]).toEqual(['2026-08-13', '08:00', '2026-08-14'])
+    // Folgas coerentes: Y e Z formam a cadeia (folga 0) e o projeto continua terminando em 14/08
+    expect([u(2).folgaTotalMin, u(3).folgaTotalMin, u(2).critical, u(3).critical]).toEqual([0, 0, true, true])
+    expect(r.projectFinish).toBe('2026-08-14')
+    // ALAP em cadeia: o 2º ALAP também é travado e a sucessora parte do último
+    const cadeia = agendar([x, tarefa(2, 3, { restricao: { tipo: 'ALAP' } }), tarefa(3, 2, { restricao: { tipo: 'ALAP' }, predecessors: [liga(2)] }), tarefa(4, 1, { predecessors: [liga(3)] })], '2026-08-03')
+    expect(cadeia.byUid.get(4)!.start).toBe('2026-08-14')
+    expect(cadeia.byUid.get(3)!.finish).toBe('2026-08-13')
+    expect(cadeia.byUid.get(2)!.finish).toBe('2026-08-11')
+  })
+
+  it('F: ALAP sem sucessora segue como no CR-6b (datas tardias agendadas, folga cedo de 7 d)', () => {
+    const y = agendar([tarefa(1, 10), tarefa(2, 3, { restricao: { tipo: 'ALAP' } })], '2026-08-03').byUid.get(2)!
+    expect([y.start, y.finish, y.earlyStart, y.folgaTotalMin]).toEqual(['2026-08-12', '2026-08-14', '2026-08-03', 3360])
+  })
+
+  it('J: a data do marco é a do próprio momento (SNET e MSO em 12/08; SS +0 de tarefa que começa seg 10/08)', () => {
+    for (const tipo of ['SNET', 'MSO'] as const) {
+      const m = agendar([tarefa(1, 0, { restricao: { tipo, data: '2026-08-12' } })], '2026-08-03').byUid.get(1)!
+      expect([tipo, m.start, m.finish, m.earlyStart, m.earlyFinish, m.inicioHora]).toEqual([tipo, '2026-08-12', '2026-08-12', '2026-08-12', '2026-08-12', '08:00'])
+    }
+    const r = agendar([tarefa(1, 5, { restricao: { tipo: 'SNET', data: '2026-08-10' } }), tarefa(2, 0, { predecessors: [liga(1, 'SS')] })], '2026-08-03')
+    // Antes (motor em dias): o marco SS +0 aparecia no dia anterior ao início da predecessora, 07/08
+    expect([r.byUid.get(2)!.start, r.byUid.get(2)!.finish, r.byUid.get(2)!.inicioHora]).toEqual(['2026-08-10', '2026-08-10', '08:00'])
+  })
+
+  it('J: o marco depois de uma tarefa em calendário de 24 h, às 00:00 em ponto, fica no dia anterior', () => {
+    const h24: CalendarioObra = { uid: 3, nome: '24 Horas', semana: Array.from({ length: 7 }, () => [{ de: 0, ate: 1440 }]), excecoes: [] }
+    const cals = compilarCalendarios('2026-08-03', [padrao, h24], 1)
+    const r = computeSchedule([tarefa(1, 0, { duracaoMin: 1440, calendarioUid: 3 }), tarefa(2, 0, { calendarioUid: 3, predecessors: [liga(1)] })], cals, { mode: 'baseline' })
+    expect([r.byUid.get(1)!.finish, r.byUid.get(2)!.start, r.byUid.get(2)!.finish]).toEqual(['2026-08-03', '2026-08-03', '2026-08-03'])
   })
 })
 

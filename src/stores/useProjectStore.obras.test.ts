@@ -35,8 +35,6 @@ async function recarregar(adaptador: ArmazenamentoMemoria) {
   return store
 }
 
-const estadoDe = (s: ReturnType<typeof useProjectStore>): unknown => JSON.parse(JSON.stringify(s.state))
-
 describe('useProjectStore · multiobra', () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -61,9 +59,18 @@ describe('useProjectStore · multiobra', () => {
       expect(store.state.tasks).toHaveLength(29)
       expect(store.state.tasks.filter((t) => !t.isSummary)).toHaveLength(20)
       // O estado agora é o da v1 levado ao esquema 3 (minutos e calendários); os números são os mesmos
+      // Conferência independente da função de migração: cada duração e cada lag do JSON v1 (em dias) × 480 = minutos do estado novo
+      const v1 = JSON.parse(aurora) as { tasks: { uid: number; durationDays: number; baselineDuration?: number; predecessors: { uid: number; lagDays: number }[] }[] }
+      expect(v1.tasks).toHaveLength(store.state.tasks.length)
+      for (const t of v1.tasks) {
+        const novo = store.taskByUid.get(t.uid)!
+        expect([t.uid, novo.duracaoMin]).toEqual([t.uid, Math.round(t.durationDays * 480)])
+        expect(novo.predecessors.map((p) => [p.uid, p.lag])).toEqual(t.predecessors.map((p) => [p.uid, { tipo: 'util', minutos: Math.round(p.lagDays * 480) }]))
+      }
+      expect(store.state.calendarios).toHaveLength(1)
+      expect(store.state.calendarioPadraoUid).toBe(1)
       const migrado = lerEstadoV1(aurora, 2026)
       if (migrado.tipo !== 'ok') throw new Error('fixture inválida')
-      expect(estadoDe(store)).toEqual(JSON.parse(JSON.stringify(migrado.estado)))
       expect(store.state.tasks.find((t) => t.uid === 104)?.duracaoMin).toBe(5760)
       expect(store.migracaoV1?.resultado).toBe('migrado')
       expect(store.avisosCarga).toEqual([])

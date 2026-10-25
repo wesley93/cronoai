@@ -285,6 +285,59 @@ describe('migrarRegistro', () => {
     expect(migrarRegistro(registro(JSON.stringify(base)))).toEqual({ tipo: 'erro', mensagem: 'Os dados desta obra estão ilegíveis.' })
   })
 
+  it('B: esquema 3 com calendário secundário inválido (semana sem tempo útil) descarta só esse, com aviso, e o cronograma é o mesmo', () => {
+    const base = JSON.parse(JSON.stringify(estadoV1()))
+    base.calendarios.push({ uid: 2, nome: 'Vazio', semana: [[], [], [], [], [], [], []], excecoes: [{ data: '2026-08-15', intervalos: [{ de: 480, ate: 720 }] }] })
+    const m = migrarRegistro(registro(JSON.stringify(base)))
+    expect(m.tipo).toBe('ok')
+    if (m.tipo !== 'ok') return
+    expect(m.estado.calendarios.map((c) => c.uid)).toEqual([1])
+    expect(m.avisos).toEqual(['1 calendário(s) inválido(s) descartado(s) do estado salvo.'])
+    expect(entrega(m.estado)).toBe('2027-06-23')
+  })
+
+  it('B: calendário padrão inválido (horário 25:00 ou forma errada) é refeito com os feriados nacionais, mantendo o UID', () => {
+    for (const quebra of [
+      (c: Record<string, unknown>) => ({ ...c, semana: [[], [{ de: 480, ate: 1500 }], [], [], [], [], []] }),
+      (c: Record<string, unknown>) => ({ ...c, excecoes: 'x' }),
+      (c: Record<string, unknown>) => ({ ...c, semana: 'x' }),
+    ]) {
+      const base = JSON.parse(JSON.stringify(estadoV1()))
+      base.calendarios = [quebra(base.calendarios[0])]
+      const m = migrarRegistro(registro(JSON.stringify(base)))
+      expect(m.tipo).toBe('ok')
+      if (m.tipo !== 'ok') return
+      expect(m.avisos).toEqual(['1 calendário(s) inválido(s) descartado(s) do estado salvo; o calendário padrão foi refeito com os feriados nacionais.'])
+      expect(m.estado.calendarioPadraoUid).toBe(1)
+      expect(feriadosDe(m.estado)).toEqual(defaultHolidays(2026, 2029))
+      expect(m.estado.calendarios[0].semana[1]).toEqual([{ de: 480, ate: 720 }, { de: 780, ate: 1020 }])
+      expect(entrega(m.estado)).toBe('2027-06-23') // mesmo cronograma: o calendário refeito tem os mesmos feriados da obra
+    }
+  })
+
+  it('B: o UID do padrão refeito é preservado e as tarefas que apontavam para calendário descartado usam o padrão', () => {
+    const base = JSON.parse(JSON.stringify(estadoV1()))
+    base.calendarioPadraoUid = 7
+    base.calendarios = [{ uid: 7, nome: 'Ruim', semana: [[], [], [], [], [], [], []], excecoes: [] }]
+    base.tasks[1].calendarioUid = 7
+    const m = migrarRegistro(registro(JSON.stringify(base)))
+    expect(m.tipo).toBe('ok')
+    if (m.tipo !== 'ok') return
+    expect(m.estado.calendarioPadraoUid).toBe(7)
+    expect(m.estado.calendarios.map((c) => c.uid)).toEqual([7])
+    expect(entrega(m.estado)).toBe('2027-06-23')
+  })
+
+  it('B: v1 com feriado de data inválida no calendário também descarta o calendário migrado e refaz o padrão', () => {
+    const base = JSON.parse(aurora)
+    base.calendar.holidays.push('2026-02-30')
+    const r = lerEstadoV1(JSON.stringify(base))
+    expect(r.tipo).toBe('ok')
+    if (r.tipo !== 'ok') return
+    expect(r.avisos).toEqual(['1 calendário(s) inválido(s) descartado(s) do estado salvo; o calendário padrão foi refeito com os feriados nacionais.'])
+    expect(feriadosDe(r.estado)).toEqual(defaultHolidays(2026, 2029))
+  })
+
   it('erra quando falta o passo da cadeia', () => {
     const passos = MIGRACOES.splice(0, MIGRACOES.length)
     try {

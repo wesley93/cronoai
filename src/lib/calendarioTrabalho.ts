@@ -5,14 +5,14 @@
 // Hora local da obra, sem fuso: a aritmética de dia usa UTC só como relógio (como calendar.ts).
 // Cada calendário converte "momento" ↔ "minuto útil": W(m) = minutos úteis antes do momento m (relativo à data-base).
 import type { CalendarioObra, ExcecaoCalendario, IntervaloTrabalho } from '@/types/domain'
-import { WorkCalendar, addCalendarDays, diffCalendarDays, parseISO } from './calendar'
+import { MSG_TETO, TETO_DIAS, WorkCalendar, addCalendarDays, diffCalendarDays, parseISO } from './calendar'
+
+export { TETO_DIAS }
 
 export const MINUTOS_POR_DIA_PADRAO = 480
 export const MINUTOS_NO_DIA_CORRIDO = 1440
 /** Máximo de intervalos de trabalho num dia (limite do esquema MSPDI, `WorkingTime` maxOccurs = 5). */
 export const MAX_INTERVALOS_POR_DIA = 5
-/** Teto do horizonte: 50 anos para cada lado da data-base. Acima disso, erro explícito (nunca extrapola em silêncio). */
-export const TETO_DIAS = 50 * 365
 
 /** Datas de restrição, prazo, datas reais e linha de base a mais de 45 anos do início da obra são recusadas (o motor trava em 50). */
 export const JANELA_ANOS_DATAS = 45
@@ -111,25 +111,25 @@ function erroDeIntervalos(intervalos: readonly IntervaloTrabalho[], onde: string
 
 /** Primeiro problema do calendário (em português, sem texto livre do arquivo), ou `undefined` se é válido. */
 export function erroDoCalendario(cal: CalendarioObra): string | undefined {
-  if (!Array.isArray(cal.semana) || cal.semana.length !== 7) return 'a semana deve ter 7 dias.'
-  let temTempo = false
+  if (!Array.isArray(cal.semana) || cal.semana.length !== 7 || !cal.semana.every(Array.isArray)) return 'a semana deve ter 7 dias.'
+  if (!Array.isArray(cal.excecoes)) return 'as exceções devem ser uma lista.'
+  let temTempoNaSemana = false
   for (let d = 0; d < 7; d++) {
     const e = erroDeIntervalos(cal.semana[d], `dia ${d} da semana`)
     if (e) return e
-    if (cal.semana[d].length > 0) temTempo = true
+    if (cal.semana[d].length > 0) temTempoNaSemana = true
   }
   for (const ex of cal.excecoes) {
-    if (!eDataValida(ex.data)) return 'exceção com data inválida.'
+    if (!ex || typeof ex.data !== 'string' || !eDataValida(ex.data)) return 'exceção com data inválida.'
+    if (!Array.isArray(ex.intervalos)) return 'exceção com horário inválido.'
     const e = erroDeIntervalos(ex.intervalos, 'exceção')
     if (e) return e
-    if (ex.intervalos.length > 0) temTempo = true
   }
-  return temTempo ? undefined : 'o calendário não tem nenhum tempo útil.'
+  // A semana precisa ter tempo útil: só com exceções úteis o motor varreria dezenas de anos de dias sem trabalho
+  return temTempoNaSemana ? undefined : 'a semana do calendário não tem nenhum tempo útil.'
 }
 
 const somaIntervalos = (ivs: readonly IntervaloTrabalho[]) => ivs.reduce((a, iv) => a + (iv.ate - iv.de), 0)
-
-const MSG_TETO = 'O cronograma ultrapassa o horizonte de 50 anos a partir da data-base; confira durações, prazos e calendários.'
 
 /**
  * Calendário compilado: aritmética de minutos úteis por busca binária sobre minutos úteis acumulados por dia.

@@ -1,5 +1,5 @@
 // Regras puras da edição de restrições, prazo final e calendário por tarefa (RF-05.3): validação e rótulos para a tela.
-import type { CalendarioObra, Restricao } from '@/types/domain'
+import type { CalendarioObra, Restricao, Task } from '@/types/domain'
 import { RESTRICOES_COM_DATA } from '@/types/domain'
 import { JANELA_ANOS_DATAS, lerDataHora } from './calendarioTrabalho'
 import { diffCalendarDays } from './calendar'
@@ -60,6 +60,25 @@ export function montarRestricao(tipo: TipoRestricaoTela, data: string | undefine
   if (tipo === 'ASAP') return undefined
   if (tipo === 'ALAP') return { tipo: 'ALAP' }
   return { tipo, data: data!.length > 16 ? data!.slice(0, 16) : data! }
+}
+
+/** Restrição explícita da tarefa (a inferida pelo import não é do arquivo). */
+const explicita = (r: Restricao | undefined) => (r && !('inferida' in r && r.inferida) ? r : undefined)
+
+/** A tarefa importada foi alterada no CronoAI depois da importação (duração, % concluído ou restrição diferentes do arquivo)? */
+export function alteradaDepoisDaImportacao(t: Task): boolean {
+  const a = t.arquivo
+  if (!a) return false
+  return (
+    t.duracaoMin !== a.duracaoMin ||
+    t.percentComplete !== a.percentComplete ||
+    JSON.stringify(explicita(t.restricao) ?? null) !== JSON.stringify(a.restricao ?? null)
+  )
+}
+
+/** Quantas tarefas manuais do arquivo foram alteradas no CronoAI (a exportação delas leva as datas calculadas, não as do arquivo). */
+export function tarefasManuaisAlteradas(tasks: Task[]): number {
+  return tasks.filter((t) => !t.isSummary && t.arquivo?.manual === true && alteradaDepoisDaImportacao(t)).length
 }
 
 /** Tipo de restrição de uma tarefa para a tela (ausente = ASAP). */

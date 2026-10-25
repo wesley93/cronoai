@@ -5,6 +5,7 @@ import type { ProjectMeta, ScheduleResult, ScheduledTask, Task } from '@/types/d
 import { addCalendarDays, defaultHolidays } from './calendar'
 import { calendarioDeDias, type CalendariosCompilados } from './calendarioTrabalho'
 import { workingVariance } from './scenarios'
+import { alteradaDepoisDaImportacao } from './restricoes'
 import { sortByWbs } from './wbs'
 
 /** Causas prováveis, na ordem de precedência (a primeira que vale é a mostrada). */
@@ -38,20 +39,6 @@ export interface Divergencia {
   detalhe: string
   /** Predecessora citada quando a causa é `predecessora`. */
   predecessoraUid?: number
-}
-
-/** Restrição explícita da tarefa (a inferida pelo import não é do arquivo e não conta como alteração). */
-const explicita = (r: Task['restricao']) => (r && !('inferida' in r && r.inferida) ? r : undefined)
-
-/** A tarefa foi alterada no CronoAI depois da importação (duração, % concluído ou restrição diferentes do arquivo)? */
-function alteradaDepoisDaImportacao(t: Task): boolean {
-  const a = t.arquivo
-  if (!a) return false
-  return (
-    t.duracaoMin !== a.duracaoMin ||
-    t.percentComplete !== a.percentComplete ||
-    JSON.stringify(explicita(t.restricao) ?? null) !== JSON.stringify(a.restricao ?? null)
-  )
 }
 
 export function calcularDivergencias(tasks: Task[], schedule: ScheduleResult, cals: CalendariosCompilados, meta: ProjectMeta): Divergencia[] {

@@ -210,11 +210,18 @@ describe('validação e compilação dos calendários', () => {
     expect(erroDoCalendario({ ...ok, semana: [[{ de: -1, ate: 100 }], [], [], [], [], [], []] })).toMatch(/fora de 00:00–24:00/)
   })
 
-  it('calendário sem nenhum tempo útil é recusado (evita laço sem fim); exceção útil basta para ser aceito', () => {
+  it('calendário cuja semana não tem tempo útil é recusado, mesmo com exceções úteis (evita varrer anos sem trabalho)', () => {
     const vazio: CalendarioObra = { ...ok, semana: [[], [], [], [], [], [], []] }
-    expect(erroDoCalendario(vazio)).toBe('o calendário não tem nenhum tempo útil.')
-    expect(erroDoCalendario({ ...vazio, excecoes: [{ data: '2026-08-15', intervalos: [{ de: 480, ate: 720 }] }] })).toBeUndefined()
-    expect(() => compilarCalendarios(BASE, [vazio], 9)).toThrow('Calendário inválido: o calendário não tem nenhum tempo útil.')
+    expect(erroDoCalendario(vazio)).toBe('a semana do calendário não tem nenhum tempo útil.')
+    expect(erroDoCalendario({ ...vazio, excecoes: [{ data: '2026-08-15', intervalos: [{ de: 480, ate: 720 }] }] })).toBe('a semana do calendário não tem nenhum tempo útil.')
+    expect(() => compilarCalendarios(BASE, [vazio], 9)).toThrow('Calendário inválido: a semana do calendário não tem nenhum tempo útil.')
+  })
+
+  it('calendário com forma inválida (vindo do estado salvo) é recusado sem exceção não tratada', () => {
+    expect(erroDoCalendario({ ...ok, excecoes: 'x' as unknown as [] })).toBe('as exceções devem ser uma lista.')
+    expect(erroDoCalendario({ ...ok, semana: [1, 2, 3, 4, 5, 6, 7] as unknown as [][] })).toBe('a semana deve ter 7 dias.')
+    expect(erroDoCalendario({ ...ok, excecoes: [{ data: '2026-08-15', intervalos: 'x' as unknown as [] }] })).toBe('exceção com horário inválido.')
+    expect(erroDoCalendario({ ...ok, excecoes: [null as unknown as { data: string; intervalos: [] }] })).toBe('exceção com data inválida.')
   })
 
   it('exceção com data inválida é recusada; calendário padrão inexistente também', () => {

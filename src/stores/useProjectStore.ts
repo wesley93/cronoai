@@ -30,7 +30,7 @@ import {
   type BatchOptions,
   type BudgetLine,
 } from '@/lib/sinapiBudget'
-import { addCalendarDays } from '@/lib/calendar'
+import { addCalendarDays, defaultHolidays, type WorkCalendar } from '@/lib/calendar'
 import {
   MINUTOS_POR_DIA_PADRAO,
   UID_CALENDARIO_PADRAO,
@@ -39,6 +39,7 @@ import {
   comDiasExtras,
   compilarCalendarios,
   diasParaMinutos,
+  type CalendariosCompilados,
   minutosParaDias,
   semDiasExtras,
 } from '@/lib/calendarioTrabalho'
@@ -60,10 +61,11 @@ import {
 import { SAFETY_MARGIN_DAYS, analyzeSupplies } from '@/lib/supplies'
 import { fmtBRL, fmtMonth, uid } from '@/lib/format'
 import { calcularDivergencias } from '@/lib/divergencias'
-import { ROTULO_RESTRICAO, calendarioExiste, montarRestricao, validarPrazoFinal, validarRestricao, type TipoRestricaoTela } from '@/lib/restricoes'
+import { mensagemDoCalculo, verificarCalculo } from '@/lib/horizonte'
+import { ROTULO_RESTRICAO, calendarioExiste, montarRestricao, tarefasManuaisAlteradas, validarPrazoFinal, validarRestricao, type TipoRestricaoTela } from '@/lib/restricoes'
 import { lagEmDias, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
 import { criarRegistro, lerEstadoV1, migrarRegistro } from '@/lib/migracaoEstado'
-import { avaliarCota, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, validarIndice, type DadosObra } from '@/lib/obras'
+import { avaliarCota, erroDeStatusForaDaJanela, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, validarIndice, validarOpcoesCronograma, type DadosObra } from '@/lib/obras'
 import { obterArmazenamento, type ArmazenamentoObras } from './armazenamentoObras'
 import { useUiStore } from './ui'
 
@@ -76,6 +78,15 @@ export type EstadoGravacao = 'salvo' | 'pendente' | 'erro'
 export type ResultadoAcao = { ok: true } | { ok: false; erro: string }
 export type ResultadoCriacao = { ok: true; id: string } | { ok: false; erro: string; erros?: string[] }
 export type NovaObra = { modelo: 'exemplo' } | { modelo: 'branco'; dados: DadosObra }
+
+/** Tenta o cálculo; se estourar o horizonte (ou os dados forem incoerentes), devolve o valor vazio seguro. */
+function tentar<T>(calculo: () => T, vazio: () => T): T {
+  try {
+    return calculo()
+  } catch {
+    return vazio()
+  }
+}
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
@@ -441,28 +452,79 @@ export const useProjectStore = defineStore('project', () => {
 
   // ---------------------------------------------------------------- derivados
   const minutosPorDia = computed(() => state.meta.minutosPorDia ?? MINUTOS_POR_DIA_PADRAO)
+  /** Calendário padrão seg–sex com feriados nacionais: nunca falha, serve quando o cálculo da obra estoura o horizonte. */
+  function calendariosSeguros(): CalendariosCompilados {
+    const ano = Number(state.meta.startDate.slice(0, 4)) || new Date().getFullYear()
+    return compilarCalendarios(state.meta.startDate, [calendarioPadrao(defaultHolidays(ano, ano + 3))], UID_CALENDARIO_PADRAO)
+  }
+  /**
+   * Cálculo da obra, à prova de falha: calendários compilados (com e sem as exceções úteis), previsão e EVM.
+   * Se estourar o teto de 50 anos (estado salvo ou importado com datas absurdas) ou o calendário for inválido, a tela não quebra:
+   * devolve um cronograma vazio e `erro` em português (a tela mostra o aviso; o usuário troca de obra, exporta e corrige a data).
+   */
+  const calculo = computed(() => {
+    try {
+      const cals = compilarCalendarios(state.meta.startDate, state.calendarios, state.calendarioPadraoUid)
+      const calsPv = compilarCalendarios(state.meta.startDate, state.calendarios, state.calendarioPadraoUid, { semExcecoesUteis: true })
+      const sch = computeSchedule(state.tasks, cals, optsDaObra(state.meta, 'forecast', state.meta.statusDate))
+      const evm = computeEvm(state.tasks, calsPv, state.meta.statusDate)
+      return { cals, calsPv, sch, evm, erro: undefined as string | undefined }
+    } catch (e) {
+      const seguros = calendariosSeguros()
+      return {
+        cals: seguros,
+        calsPv: seguros,
+        sch: computeSchedule([], seguros, optsDaObra(state.meta, 'forecast', state.meta.statusDate)),
+        evm: computeEvm([], seguros, state.meta.statusDate),
+        erro: mensagemDoCalculo(e),
+      }
+    }
+  })
+  /** Mensagem (em português) quando o cálculo da obra não coube no horizonte de 50 anos; `undefined` = tudo certo. */
+  const erroCronograma = computed(() => calculo.value.erro)
   /** Calendários compilados (cálculo em minutos úteis, com os dias extras de hora extra). */
-  const calendarios = computed(() => compilarCalendarios(state.meta.startDate, state.calendarios, state.calendarioPadraoUid))
+  const calendarios = computed(() => calculo.value.cals)
   /** Calendários do valor planejado (PV): sem as exceções úteis, como a linha de base (CR-2d). */
-  const calendariosPv = computed(() => compilarCalendarios(state.meta.startDate, state.calendarios, state.calendarioPadraoUid, { semExcecoesUteis: true }))
+  const calendariosPv = computed(() => calculo.value.calsPv)
   /** Contas por dia útil ("+16 d.u."): o calendário padrão, com dias extras. */
   const calendar = computed(() => calendarioDeDias(calendarios.value.padrao))
   const baseCalendar = computed(() => calendarioDeDias(calendariosPv.value.padrao))
+  /** Variação em dias úteis sem deixar o teto de 50 anos derrubar a tela (0 quando não cabe). */
+  const variacaoSegura = (cal: WorkCalendar, a: string, b: string) => tentar(() => workingVariance(cal, a, b), () => 0)
   /** Cronograma previsto de uma lista de tarefas (a da obra ou uma hipótese: apontamento, inclusão, planilha). */
   function agendar(tasks: Task[]) {
-    return computeSchedule(tasks, calendarios.value, optsDaObra(state.meta, 'forecast', state.meta.statusDate))
+    return tentar(() => computeSchedule(tasks, calendarios.value, optsDaObra(state.meta, 'forecast', state.meta.statusDate)), () => schedule.value)
   }
-  const schedule = computed(() => agendar(state.tasks))
+  const schedule = computed(() => calculo.value.sch)
   /** Tarefas cuja data difere da do arquivo importado, com a causa provável (RF-05.8). */
-  const divergencias = computed(() => calcularDivergencias(state.tasks, schedule.value, calendarios.value, state.meta))
+  const divergencias = computed(() => tentar(() => calcularDivergencias(state.tasks, schedule.value, calendarios.value, state.meta), () => []))
   const rollups = computed(() => rollupSummaries(state.tasks, schedule.value))
   const tasksByWbs = computed(() => sortByWbs(state.tasks))
   const leaves = computed(() => tasksByWbs.value.filter((t) => !t.isSummary))
   const taskByUid = computed(() => new Map(state.tasks.map((t) => [t.uid, t])))
-  const evm = computed(() => computeEvm(state.tasks, calendariosPv.value, state.meta.statusDate))
-  const packageEvm = computed(() => computePackageEvm(state.tasks, calendariosPv.value, state.meta.statusDate))
-  const sCurve = computed(() => computeSCurve(state.tasks, calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth))
-  const delay = computed(() => analyzeDelay(state.tasks, schedule.value, baseCalendar.value))
+  const evm = computed(() => calculo.value.evm)
+  const packageEvm = computed(() => tentar(() => computePackageEvm(state.tasks, calendariosPv.value, state.meta.statusDate), () => []))
+  const sCurve = computed(() => tentar(() => computeSCurve(state.tasks, calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth), () => []))
+  const delay = computed(() =>
+    tentar(
+      () => analyzeDelay(state.tasks, schedule.value, baseCalendar.value),
+      () => analyzeDelay([], schedule.value, baseCalendar.value),
+    ),
+  )
+  /**
+   * Obra com "não mover o restante" e tarefa iniciada cujo restante termina ANTES da data de status: o cálculo é a política do
+   * CronoAI (o restante segue contínuo desde o início real), mas o resultado fica no passado e o usuário precisa saber.
+   */
+  const avisoRestanteAntesDoStatus = computed(() => {
+    if (state.meta.opcoesCronograma?.moverRestante !== false) return 0
+    let n = 0
+    for (const t of state.tasks) {
+      if (t.isSummary || !(t.percentComplete > 0 && t.percentComplete < 100)) continue
+      const s = schedule.value.byUid.get(t.uid)
+      if (s && s.finish < state.meta.statusDate) n++
+    }
+    return n
+  })
   /** Menor data de início real entre as tarefas (indefinida enquanto a obra não tem avanço). */
   const primeiroInicioReal = computed(() => state.tasks.map((t) => t.actualStart).filter((d): d is string => !!d).sort()[0])
   /** Obra com avanço: alguma tarefa com % concluído ou início real. */
@@ -477,10 +539,10 @@ export const useProjectStore = defineStore('project', () => {
     return wbs ? state.tasks.filter((t) => t.wbs === wbs || t.wbs.startsWith(wbs + '.')) : state.tasks
   }
   function sCurveFor(wbs?: string) {
-    return wbs ? computeSCurve(tasksOf(wbs), calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth) : sCurve.value
+    return wbs ? tentar(() => computeSCurve(tasksOf(wbs), calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth), () => []) : sCurve.value
   }
   function evmFor(wbs?: string) {
-    return wbs ? computeEvm(tasksOf(wbs), calendariosPv.value, state.meta.statusDate) : evm.value
+    return wbs ? tentar(() => computeEvm(tasksOf(wbs), calendariosPv.value, state.meta.statusDate), () => computeEvm([], calendariosPv.value, state.meta.statusDate)) : evm.value
   }
   /** EAC por três premissas + término previsto pelo SPI comparado ao CPM. */
   const evmForecast = computed(() => {
@@ -489,7 +551,10 @@ export const useProjectStore = defineStore('project', () => {
     const bFinish = leavesWithBaseline.map((t) => t.baselineFinish!).sort().at(-1) ?? schedule.value.projectFinish
     return {
       eac: eacVariants(evm.value),
-      bySpi: forecastFinishBySpi(baseCalendar.value, bStart, bFinish, evm.value.spi),
+      bySpi: tentar(
+        () => forecastFinishBySpi(baseCalendar.value, bStart, bFinish, evm.value.spi),
+        () => ({ plannedDays: 0, estimatedDays: 0, date: bStart }),
+      ),
       cpmFinish: schedule.value.projectFinish,
       baselineFinish: bFinish,
     }
@@ -498,15 +563,26 @@ export const useProjectStore = defineStore('project', () => {
   /** Parâmetros do simulador "E se?" (ajustados pelo engenheiro na tela; não são persistidos). */
   const scenarioParams = reactive<ScenarioParams>(clone(DEFAULT_SCENARIO_PARAMS))
   const scenarioCtx = computed(() => ({
-    tasks: state.tasks,
+    // Com o cálculo da obra fora do horizonte o cronograma é vazio: o simulador não tem tarefa para comprimir
+    tasks: calculo.value.erro ? [] : state.tasks,
     calendarios: state.calendarios,
     calendarioPadraoUid: state.calendarioPadraoUid,
     meta: state.meta,
     forecast: schedule.value,
     origin: delay.value.origin,
   }))
-  const scenarios = computed(() => simulateAll(scenarioCtx.value, scenarioParams))
-  const scenarioOptions = computed(() => ({ crashing: crashingTargets(scenarioCtx.value), fastTracking: fastTrackOptions(scenarioCtx.value) }))
+  const scenarios = computed(() =>
+    tentar(
+      () => simulateAll(scenarioCtx.value, scenarioParams),
+      () => simulateAll({ ...scenarioCtx.value, tasks: [] }, scenarioParams),
+    ),
+  )
+  const scenarioOptions = computed(() =>
+    tentar(
+      () => ({ crashing: crashingTargets(scenarioCtx.value), fastTracking: fastTrackOptions(scenarioCtx.value) }),
+      () => ({ crashing: [], fastTracking: [] }),
+    ),
+  )
   const recommendation = computed(() => recommendScenario(scenarios.value, state.appliedScenarios))
   const safetyMarginDays = computed(() => state.meta.safetyMarginDays ?? SAFETY_MARGIN_DAYS)
   const supplies = computed(() =>
@@ -522,7 +598,7 @@ export const useProjectStore = defineStore('project', () => {
   /** Tarefas no formato MS Project (folhas + resumos), sempre coerentes com o CPM e o EVM atuais. */
   const msProjectTasks = computed<MSProjectTask[]>(() => {
     const status = state.meta.statusDate
-    const pvOf = (t: Task) => t.bac * plannedFraction(t, calendariosPv.value, status)
+    const pvOf = (t: Task) => tentar(() => t.bac * plannedFraction(t, calendariosPv.value, status), () => 0)
     return tasksByWbs.value.map((t): MSProjectTask => {
       if (t.isSummary) {
         const r = rollups.value.get(t.uid)
@@ -535,7 +611,7 @@ export const useProjectStore = defineStore('project', () => {
           Name: t.name,
           OutlineLevel: t.outlineLevel,
           Summary: true,
-          Duration: Math.max(0, calendar.value.countWorkingBetween(start, addCalendarDays(finish, 1))),
+          Duration: tentar(() => Math.max(0, calendar.value.countWorkingBetween(start, addCalendarDays(finish, 1))), () => 0),
           Start: start,
           Finish: finish,
           PercentComplete: Math.round((r?.percentComplete ?? 0) * 10) / 10,
@@ -588,7 +664,7 @@ export const useProjectStore = defineStore('project', () => {
   function finishVarianceDays(t: Task): number {
     const s = schedule.value.byUid.get(t.uid)
     if (!s || !t.baselineFinish) return 0
-    return workingVariance(baseCalendar.value, t.baselineFinish, s.finish)
+    return variacaoSegura(baseCalendar.value, t.baselineFinish, s.finish)
   }
 
   // ---------------------------------------------------------------- helpers
@@ -635,7 +711,7 @@ export const useProjectStore = defineStore('project', () => {
   function previewProgress(taskUid: number, pct: number, reportDate = state.meta.statusDate) {
     const tasks = state.tasks.map((t) => (t.uid === taskUid ? { ...t, ...progressPatch(t, pct, reportDate) } : t))
     const s = agendar(tasks)
-    return { finish: s.projectFinish, deltaDays: workingVariance(calendar.value, schedule.value.projectFinish, s.projectFinish) }
+    return { finish: s.projectFinish, deltaDays: variacaoSegura(calendar.value, schedule.value.projectFinish, s.projectFinish) }
   }
 
   /** Elemento <Task> do MSPDI antes e depois de um apontamento (prévia do que vai para o MS Project). */
@@ -667,7 +743,7 @@ export const useProjectStore = defineStore('project', () => {
     report.approvedUid = taskUid
     report.approvedPercent = pct ?? before
     report.previousPercent = before
-    const delta = workingVariance(calendar.value, finishBefore, schedule.value.projectFinish)
+    const delta = variacaoSegura(calendar.value, finishBefore, schedule.value.projectFinish)
     log(
       'apontamento',
       `[UID ${taskUid}] ${task.wbs} atualizado via canteiro`,
@@ -884,7 +960,7 @@ export const useProjectStore = defineStore('project', () => {
       critical: !!sched?.critical,
       totalFloat: sched?.totalFloat ?? 0,
       projectFinish: s.projectFinish,
-      deltaDays: workingVariance(calendar.value, schedule.value.projectFinish, s.projectFinish),
+      deltaDays: variacaoSegura(calendar.value, schedule.value.projectFinish, s.projectFinish),
     }
   }
 
@@ -992,7 +1068,7 @@ export const useProjectStore = defineStore('project', () => {
     return {
       created: created.map((t) => ({ task: t, sched: s.byUid.get(t.uid)! })),
       projectFinish: s.projectFinish,
-      deltaDays: workingVariance(calendar.value, schedule.value.projectFinish, s.projectFinish),
+      deltaDays: variacaoSegura(calendar.value, schedule.value.projectFinish, s.projectFinish),
       bac: created.reduce((a, t) => a + t.bac, 0),
     }
   }
@@ -1013,7 +1089,17 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   // ---------------------------------------------------------------- EAP / XML
-  function updateTask(taskUid: number, patch: Partial<Task>) {
+  /** Recusa a edição que, aplicada, estouraria o horizonte de 50 anos (simula antes de gravar). */
+  function erroSeAplicar(tasks: Task[], meta: ProjectState['meta'] = state.meta): string | undefined {
+    return verificarCalculo(tasks, meta, state.calendarios, state.calendarioPadraoUid)
+  }
+
+  function updateTask(taskUid: number, patch: Partial<Task>): ResultadoAcao {
+    const atual = taskByUid.value.get(taskUid)
+    if (!atual) return { ok: false, erro: 'Tarefa não encontrada.' }
+    const completo = patch.percentComplete !== undefined ? { ...patch, ...progressPatch(atual, patch.percentComplete, state.meta.statusDate) } : patch
+    const erro = erroSeAplicar(state.tasks.map((t) => (t.uid === taskUid ? { ...t, ...completo } : t)))
+    if (erro) return { ok: false, erro }
     if (patch.percentComplete !== undefined) {
       applyProgress(taskUid, patch.percentComplete, state.meta.statusDate)
       const { percentComplete: _ignored, ...rest } = patch
@@ -1021,6 +1107,7 @@ export const useProjectStore = defineStore('project', () => {
     } else {
       patchTask(taskUid, patch)
     }
+    return { ok: true }
   }
 
   function saveBaseline() {
@@ -1031,13 +1118,17 @@ export const useProjectStore = defineStore('project', () => {
     log('sistema', 'Nova linha de base salva', `Linha de base substituída pelo cronograma reprogramado em ${state.meta.statusDate.split('-').reverse().join('/')}.`)
   }
 
-  function setStatusDate(iso: string) {
+  /** Muda a data de status; recusa data inválida, a mais de 45 anos do início ou que estoure o horizonte de cálculo. */
+  function setStatusDate(iso: string): ResultadoAcao {
+    const erro = erroDeStatusForaDaJanela(state.meta.startDate, iso) ?? erroSeAplicar(state.tasks, { ...state.meta, statusDate: iso })
+    if (erro) return { ok: false, erro }
     state.meta.statusDate = iso
     log('sistema', 'Data de status alterada', `Nova data de status: ${iso.split('-').reverse().join('/')}.`)
+    return { ok: true }
   }
 
   /** Gera o .xml MSPDI do estado atual e valida estrutura e ordem dos elementos antes de entregar. */
-  function exportXml(): { filename: string; xml: string; validation: MspdiValidation } {
+  function exportXml(): { filename: string; xml: string; validation: MspdiValidation; avisos: string[] } {
     const xml = buildMspdiXml({
       meta: state.meta,
       tasks: state.tasks,
@@ -1050,7 +1141,10 @@ export const useProjectStore = defineStore('project', () => {
     if (validation.valid) {
       log('importacao', 'Exportado para MS Project (.xml)', `${validation.taskCount - 1} tarefas e ${validation.linkCount} vínculos exportados no padrão MSPDI.`)
     }
-    return { filename: `${safe}_${state.meta.statusDate}.xml`, xml, validation }
+    // Tarefa manual alterada no CronoAI sai com as datas calculadas (a não alterada sai com as do arquivo)
+    const manuais = tarefasManuaisAlteradas(state.tasks)
+    const avisos = manuais ? [`${manuais} tarefa(s) manual(is) exportada(s) com datas do CronoAI: foram alteradas depois da importação.`] : []
+    return { filename: `${safe}_${state.meta.statusDate}.xml`, xml, validation, avisos }
   }
 
 
@@ -1062,7 +1156,15 @@ export const useProjectStore = defineStore('project', () => {
       ...daObra,
       ...Object.fromEntries(Object.entries(result.meta).filter(([, v]) => v !== undefined && v !== '')),
     }
-    const tasks = baselineFor(result.tasks, meta, result.calendarios, result.calendarioPadraoUid, true)
+    let tasks: Task[]
+    try {
+      tasks = baselineFor(result.tasks, meta, result.calendarios, result.calendarioPadraoUid, true)
+    } catch (e) {
+      throw new Error(`Arquivo não importado: ${mensagemDoCalculo(e)}`)
+    }
+    // O cálculo previsto (data de status), o EVM e a Curva S do estado novo também precisam caber no horizonte de 50 anos
+    const erroHorizonte = verificarCalculo(tasks, meta, result.calendarios, result.calendarioPadraoUid)
+    if (erroHorizonte) throw new Error(`Arquivo não importado: ${erroHorizonte}`)
     const uids = new Set(tasks.map((t) => t.uid))
     state.meta = meta
     state.tasks = tasks
@@ -1109,7 +1211,10 @@ export const useProjectStore = defineStore('project', () => {
     const restricao = montarRestricao(tipo, data)
     const { restricao: _antiga, ...resto } = alvo.tarefa
     const idx = state.tasks.findIndex((t) => t.uid === taskUid)
-    state.tasks[idx] = restricao ? { ...resto, restricao } : resto
+    const nova: Task = restricao ? { ...resto, restricao } : resto
+    const estouro = erroSeAplicar(state.tasks.map((t) => (t.uid === taskUid ? nova : t)))
+    if (estouro) return { ok: false, erro: estouro }
+    state.tasks[idx] = nova
     log(
       'sistema',
       `Restrição alterada: [UID ${taskUid}] ${alvo.tarefa.wbs}`,
@@ -1126,7 +1231,10 @@ export const useProjectStore = defineStore('project', () => {
     if (erros.length) return { ok: false, erro: erros[0] }
     const { prazoFinal: _antigo, ...resto } = alvo.tarefa
     const idx = state.tasks.findIndex((t) => t.uid === taskUid)
-    state.tasks[idx] = data ? { ...resto, prazoFinal: data.length > 16 ? data.slice(0, 16) : data } : resto
+    const nova: Task = data ? { ...resto, prazoFinal: data.length > 16 ? data.slice(0, 16) : data } : resto
+    const estouro = erroSeAplicar(state.tasks.map((t) => (t.uid === taskUid ? nova : t)))
+    if (estouro) return { ok: false, erro: estouro }
+    state.tasks[idx] = nova
     log('sistema', `Prazo final alterado: [UID ${taskUid}] ${alvo.tarefa.wbs}`, data ? `Prazo final em ${data.replace('T', ' ')}.` : 'Prazo final removido.')
     return { ok: true }
   }
@@ -1138,7 +1246,10 @@ export const useProjectStore = defineStore('project', () => {
     if (!calendarioExiste(state.calendarios, calendarioUid)) return { ok: false, erro: 'O calendário escolhido não existe nesta obra.' }
     const { calendarioUid: _antigo, ...resto } = alvo.tarefa
     const idx = state.tasks.findIndex((t) => t.uid === taskUid)
-    state.tasks[idx] = calendarioUid !== undefined && calendarioUid !== state.calendarioPadraoUid ? { ...resto, calendarioUid } : resto
+    const nova: Task = calendarioUid !== undefined && calendarioUid !== state.calendarioPadraoUid ? { ...resto, calendarioUid } : resto
+    const estouro = erroSeAplicar(state.tasks.map((t) => (t.uid === taskUid ? nova : t)))
+    if (estouro) return { ok: false, erro: estouro }
+    state.tasks[idx] = nova
     const nome = state.calendarios.find((c) => c.uid === (calendarioUid ?? state.calendarioPadraoUid))?.nome ?? ''
     log('sistema', `Calendário da tarefa alterado: [UID ${taskUid}] ${alvo.tarefa.wbs}`, `Calendário "${nome}".`)
     return { ok: true }
@@ -1146,8 +1257,10 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Define as opções de cronograma da obra (lógica de progresso e mover o restante). */
   function definirOpcoesCronograma(opcoes: OpcoesCronograma): ResultadoAcao {
-    if (opcoes.logica !== 'retida' && opcoes.logica !== 'substituir') return { ok: false, erro: 'Selecione uma lógica de progresso válida.' }
-    if (typeof opcoes.moverRestante !== 'boolean') return { ok: false, erro: 'Informe se o restante deve ser movido para depois da data de status.' }
+    const erros = validarOpcoesCronograma(opcoes.logica, opcoes.moverRestante)
+    if (erros.length) return { ok: false, erro: erros[0] }
+    const estouro = erroSeAplicar(state.tasks, { ...state.meta, opcoesCronograma: { ...opcoes } })
+    if (estouro) return { ok: false, erro: estouro }
     gravarOpcoesCronograma(opcoes)
     return { ok: true }
   }
@@ -1305,6 +1418,16 @@ export const useProjectStore = defineStore('project', () => {
       primeiroInicioReal: primeiroInicioReal.value,
     })
     if (erros.length) return { ok: false, erros }
+    // Simula antes de gravar: início, status e opções que estourem o horizonte de 50 anos são recusados
+    const opcoesNovas =
+      dados.logicaProgresso !== undefined || dados.moverRestante !== undefined
+        ? {
+            logica: dados.logicaProgresso ?? state.meta.opcoesCronograma?.logica ?? 'retida',
+            moverRestante: dados.moverRestante ?? state.meta.opcoesCronograma?.moverRestante ?? true,
+          }
+        : state.meta.opcoesCronograma
+    const estouro = erroSeAplicar(state.tasks, { ...state.meta, startDate: dados.dataInicio, statusDate: dados.dataStatus, opcoesCronograma: opcoesNovas })
+    if (estouro) return { ok: false, erros: [estouro] }
     const meta = state.meta
     meta.name = dados.nome.trim()
     meta.manager = (dados.responsavel ?? '').trim()
@@ -1338,6 +1461,8 @@ export const useProjectStore = defineStore('project', () => {
     calendarios,
     minutosPorDia,
     schedule,
+    erroCronograma,
+    avisoRestanteAntesDoStatus,
     divergencias,
     definirRestricao,
     definirPrazoFinal,

@@ -1,6 +1,6 @@
 // Utilitários de EAP: hierarquia, consolidação (rollup) de tarefas-resumo e leitura de pavimentos.
 import type { Lag, ScheduleResult, Task } from '@/types/domain'
-import { MINUTOS_POR_DIA_PADRAO, minutosParaDias } from './calendarioTrabalho'
+import { MINUTOS_NO_DIA_CORRIDO, MINUTOS_POR_DIA_PADRAO, minutosParaDias } from './calendarioTrabalho'
 
 export interface SummaryRollup {
   uid: number
@@ -140,12 +140,10 @@ export function nextUid(tasks: Task[]): number {
 
 const LINK_PT: Record<string, string> = { FS: 'Término-Início', SS: 'Início-Início', FF: 'Término-Término', SF: 'Início-Término' }
 
-const MINUTOS_DIA_CORRIDO = 1440
-
 /** Lag em dias: úteis (dias da obra) para lag útil, corridos para lag em dias corridos; 0 para lag em % (não é tempo). */
 export function lagEmDias(lag: Lag, minutosPorDia = MINUTOS_POR_DIA_PADRAO): number {
   if (lag.tipo === 'percentual') return 0
-  return minutosParaDias(lag.minutos, lag.tipo === 'corrido' ? MINUTOS_DIA_CORRIDO : minutosPorDia)
+  return minutosParaDias(lag.minutos, lag.tipo === 'corrido' ? MINUTOS_NO_DIA_CORRIDO : minutosPorDia)
 }
 
 /** Rótulo do lag no estilo MS Project: "+10" (dias úteis), "-2", "+0,5", "+7dc" (dias corridos), "+50%"; vazio quando é zero. */

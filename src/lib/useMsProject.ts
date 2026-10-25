@@ -10,7 +10,7 @@ export function useMsProject() {
   const ui = useUiStore()
 
   function exportXml() {
-    const { filename, xml, validation } = project.exportXml()
+    const { filename, xml, validation, avisos } = project.exportXml()
     if (!validation.valid) {
       ui.notify('error', 'XML não exportado: falhou na validação MSPDI', validation.errors.slice(0, 2).join(' '))
       return
@@ -21,6 +21,7 @@ export function useMsProject() {
       'XML do MS Project gerado e validado',
       `${filename} · ${validation.taskCount - 1} tarefas, ${validation.linkCount} vínculos. Abra no MS Project em Arquivo › Abrir (tipo XML).`,
     )
+    for (const a of avisos) ui.notify('warning', 'Atenção na exportação', a)
   }
 
   async function importFile(file: File) {

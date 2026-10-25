@@ -2,7 +2,8 @@
 // Cada ciclo que muda o formato da obra acrescenta um passo em MIGRACOES e o teste com o formato anterior.
 import type { PersistedState, RegistroObra } from '@/types/obra'
 import { defaultHolidays } from './calendar'
-import { UID_CALENDARIO_PADRAO, calendarioPadrao, diasParaMinutos } from './calendarioTrabalho'
+import { UID_CALENDARIO_PADRAO, calendarioPadrao, diasParaMinutos, erroDoCalendario } from './calendarioTrabalho'
+import type { CalendarioObra } from '@/types/domain'
 
 /**
  * Esquema 1 = formato do `cronoai-state-v1`; esquema 2 = o mesmo estado dentro de um registro por obra;
@@ -169,6 +170,35 @@ function avisoDePreenchidas(preenchidas: string[]): string[] {
     : []
 }
 
+/** Problema de um calendário vindo do estado salvo (forma ou conteúdo), ou `undefined` se está íntegro. */
+function erroDoCalendarioSalvo(c: unknown): string | undefined {
+  if (!eObjeto(c) || !eNumero(c.uid) || typeof c.nome !== 'string') return 'forma inválida'
+  // Fronteira de confiança: uid e nome já conferidos; `erroDoCalendario` valida o resto (semana, exceções, horários)
+  return erroDoCalendario(c as unknown as CalendarioObra)
+}
+
+/**
+ * Valida cada calendário do estado (qualquer esquema): o inválido é descartado com aviso, para não derrubar o cálculo.
+ * Se o descartado era o padrão, entra o calendário padrão com os feriados nacionais (mesmo UID: as tarefas continuam apontando para ele).
+ */
+function descartarCalendariosInvalidos(estado: EstadoBruto, anoPadrao: number): string[] {
+  const lista = Array.isArray(estado.calendarios) ? estado.calendarios : []
+  const validos = lista.filter((c) => erroDoCalendarioSalvo(c) === undefined)
+  const descartados = lista.length - validos.length
+  if (descartados === 0) return []
+  const padraoUid = eNumero(estado.calendarioPadraoUid) ? estado.calendarioPadraoUid : UID_CALENDARIO_PADRAO
+  const refeito = !validos.some((c) => eObjeto(c) && c.uid === padraoUid)
+  if (refeito) {
+    const ano = anoDaObra(estado, anoPadrao)
+    validos.unshift(calendarioPadrao(defaultHolidays(ano, ano + 3), [], padraoUid))
+  }
+  estado.calendarios = validos
+  estado.calendarioPadraoUid = padraoUid
+  return [
+    `${descartados} calendário(s) inválido(s) descartado(s) do estado salvo${refeito ? '; o calendário padrão foi refeito com os feriados nacionais' : ''}.`,
+  ]
+}
+
 /** Cada tarefa precisa de duração em minutos: não se inventa duração para registro sem ela. */
 const tarefasCompletas = (tasks: unknown[]): boolean => tasks.every((t) => eObjeto(t) && eNumero(t.duracaoMin))
 
@@ -181,10 +211,11 @@ function levarAoAtual(bruto: EstadoBruto, de: number, anoPadrao: number): Result
     if (!passo) return { tipo: 'erro', mensagem: `Não há migração do esquema ${v} para o ${v + 1}.` }
     estado = passo.aplicar(estado)
   }
+  const descartes = descartarCalendariosInvalidos(estado, anoPadrao)
   if (!eEstado(estado) || !tarefasCompletas(estado.tasks)) {
     return { tipo: 'erro', mensagem: 'Os dados desta obra estão ilegíveis.' }
   }
-  return { tipo: 'ok', estado, avisos: avisoDePreenchidas(preenchidas) }
+  return { tipo: 'ok', estado, avisos: [...avisoDePreenchidas(preenchidas), ...descartes] }
 }
 
 /** Lê o texto gravado em `cronoai-state-v1`. */

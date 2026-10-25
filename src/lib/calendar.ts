@@ -3,6 +3,10 @@ import type { WorkCalendarConfig } from '@/types/domain'
 
 const DAY_MS = 86_400_000
 
+/** Teto do horizonte: 50 anos, em dias corridos, para cada lado da data-base. Acima disso, erro explícito (nunca laço sem fim). */
+export const TETO_DIAS = 50 * 365
+export const MSG_TETO = 'O cronograma ultrapassa o horizonte de 50 anos a partir da data-base; confira durações, prazos e calendários.'
+
 export function parseISO(iso: string): Date {
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
   return new Date(Date.UTC(y, m - 1, d))
@@ -61,8 +65,9 @@ export function defaultHolidays(fromYear: number, toYear: number): string[] {
 }
 
 /**
- * Calendário indexado: o índice 0 é o primeiro dia útil a partir da data-base.
- * Todo o motor de CPM trabalha com índices inteiros de dias úteis.
+ * Calendário indexado por dia útil: o índice 0 é o primeiro dia útil a partir da data-base.
+ * O motor de CPM trabalha em minutos (calendarioTrabalho.ts); este calendário só serve às contas por dia
+ * ("+16 d.u.", previsão pelo SPI, duração das tarefas-resumo) e a limites de data.
  */
 export class WorkCalendar {
   private readonly dates: string[] = []
@@ -84,7 +89,8 @@ export class WorkCalendar {
     this.holidays = new Set(typeof config === 'function' ? [] : config.holidays)
     this.extra = new Set(typeof config === 'function' ? [] : config.extraWorkingDays)
     let cursor = parseISO(baseDate)
-    while (this.dates.length < this.horizon) {
+    for (let dias = 0; this.dates.length < this.horizon; dias++) {
+      if (dias > TETO_DIAS) throw new Error(MSG_TETO) // calendário sem dia útil: nunca laço sem fim
       const iso = toISO(cursor)
       if (this.isWorkingDay(iso)) {
         this.indexByDate.set(iso, this.dates.length)
@@ -138,6 +144,7 @@ export class WorkCalendar {
   /** Dias úteis no intervalo [from, to). */
   countWorkingBetween(fromIso: string, toIso: string): number {
     if (toIso <= fromIso) return 0
+    if (diffCalendarDays(fromIso, toIso) > TETO_DIAS) throw new Error(MSG_TETO)
     let n = 0
     let cursor = fromIso
     while (cursor < toIso) {
@@ -150,7 +157,8 @@ export class WorkCalendar {
   private walkForward(fromIso: string, workingDays: number): string {
     let cursor = fromIso
     let left = workingDays
-    while (left > 0) {
+    for (let dias = 0; left > 0; dias++) {
+      if (dias > TETO_DIAS) throw new Error(MSG_TETO)
       cursor = addCalendarDays(cursor, 1)
       if (this.isWorkingDay(cursor)) left--
     }
@@ -160,7 +168,8 @@ export class WorkCalendar {
   private walkBack(fromIso: string, workingDays: number): string {
     let cursor = fromIso
     let left = workingDays
-    while (left > 0) {
+    for (let dias = 0; left > 0; dias++) {
+      if (dias > TETO_DIAS) throw new Error(MSG_TETO)
       cursor = addCalendarDays(cursor, -1)
       if (this.isWorkingDay(cursor)) left--
     }

@@ -33,7 +33,7 @@ Fonte da verdade: `CLAUDE.md` › **Convenções › Testes** e › **Invioláve
 ## Cálculo em minutos e desempenho
 
 - Teste de motor com **calendário e horas**: monte a rede com `calendarioPadrao(...)` e `compilarCalendarios(...)` (`calendarioTrabalho.ts`) e afirme data **e hora** (`inicioHora`, `terminoHora`) e minutos de folga (`folgaTotalMin`), como `cpm.test.ts`. Os números do Aurora estão fixados em `cpm.caracterizacao.test.ts` (linha de base igual ao motor em dias; previsão com o antes → depois do restante exato). Teste de propriedade (RNF-05.2): 200 redes com semente fixa (gerador congruencial), nunca `Math.random`.
-- **Desempenho (RNF-05.1):** `cpm.desempenho.test.ts` gera 3.000 folhas e ~6.000 vínculos com 3 calendários. No CI roda uma execução com teto largo (2.000 ms); localmente, `CRONOAI_PERF=1 npx vitest run src/lib/cpm.desempenho.test.ts` mede a mediana de 5 execuções (meta < 500 ms; medido ~50 ms, contra 26 ms do motor em dias).
+- **Desempenho (RNF-05.1):** `cpm.desempenho.test.ts` gera 3.000 folhas e ~6.000 vínculos com 3 calendários. No CI roda uma execução com teto largo (2.000 ms); localmente, `CRONOAI_PERF=1 npx vitest run src/lib/cpm.desempenho.test.ts` mede a mediana de 5 execuções (meta < 500 ms; medido ~130 ms com lag útil/corrido/%, restrições, prazo final e tarefas iniciadas na mistura, contra 26 ms do motor em dias com vínculos simples).
 
 ## Store
 

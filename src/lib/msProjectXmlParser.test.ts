@@ -11,7 +11,6 @@ import {
   MAX_MSPDI_CHARS,
   buildMspdiXml,
   buildTaskXml,
-  fromDuration,
   lagParaMspdi,
   lagDeMspdi,
   parseMspdiXml,
@@ -133,9 +132,11 @@ describe('parseMspdiXml (arquivos vindos do MS Project)', () => {
     expect(r.warnings.join(' ')).not.toMatch(/h\/dia/) // a jornada do arquivo agora é preservada, sem aviso
   })
 
-  it('converte durações e latências', () => {
-    expect(fromDuration('PT45H0M0S', 540)).toBe(5)
-    expect(fromDuration('P1DT4H', 480)).toBe(1.5)
+  it('converte durações em minutos exatos (a jornada do arquivo só vale para o "D" da duração ISO)', () => {
+    const importar = (dur: string, mpd = 480) => parseMspdiXml(projeto({ head: `<MinutesPerDay>${mpd}</MinutesPerDay>`, tasks: tarefa(1, { duration: dur }) })).tasks[0].duracaoMin
+    expect(importar('PT45H0M0S', 540)).toBe(2700)
+    expect(importar('P1DT4H', 480)).toBe(720) // 1 dia de 480 min + 4 h
+    expect(importar('P1DT4H', 540)).toBe(780) // o dia vale a jornada do arquivo
   })
 
   it('lag do MSPDI em todos os formatos: útil, corrido, percentual (inteiro), estimados e fora da faixa', () => {
@@ -849,5 +850,69 @@ describe('limites do import de calendários, restrições e lags (S-1 e S-2)', (
   it('S-4: DOCTYPE e ENTITY continuam recusados e o XML malformado dá erro em português', () => {
     expect(() => parseMspdiXml('<!DOCTYPE x [<!ENTITY a "b">]><Project/>')).toThrow(/DOCTYPE/)
     expect(() => parseMspdiXml('<Project><Tasks>')).toThrow(/inválido ou corrompido/)
+  })
+})
+
+describe('parseMspdiXml: rodada 02 (faixas de Duration e MinutesPerDay, calendário sem tempo útil, manual na volta)', () => {
+  const importar = (head: string, duration = 'PT8H0M0S') => parseMspdiXml(projeto({ head, tasks: tarefa(1, { duration }) }))
+
+  it('K: MinutesPerDay fora de 1 a 1.440 inteiros (0 e negativo à parte: 0 = ausente) volta à jornada padrão, com aviso', () => {
+    for (const mpd of ['-480', '1441', '99999', '450.5']) {
+      const r = importar(`<MinutesPerDay>${mpd}</MinutesPerDay>`)
+      expect([mpd, r.meta.minutosPorDia]).toEqual([mpd, undefined])
+      expect(r.warnings.join(' ')).toMatch(/MinutesPerDay do arquivo .* fora da faixa de 1 a 1440/)
+    }
+    const ok = importar('<MinutesPerDay>1440</MinutesPerDay>')
+    expect(ok.meta.minutosPorDia).toBe(1440)
+    expect(ok.warnings.join(' ')).not.toMatch(/MinutesPerDay/)
+  })
+
+  it('K: duração negativa ou acima de 50 anos entra como zero, com aviso; a válida segue exata', () => {
+    for (const d of ['-PT8H0M0S', 'PT-8H0M0S', 'oito horas']) {
+      const r = importar('', d)
+      expect([d, r.tasks[0].duracaoMin]).toEqual([d, 0])
+      expect(r.warnings.join(' ')).toMatch(/1 duração\(ões\) negativa\(s\), acima de 50 anos ou ilegível\(is\) importada\(s\) como zero/)
+    }
+  })
+
+  it('K: duração gigante é recusada (zero) com aviso', () => {
+    const r = importar('', 'PT99999999H0M0S')
+    expect(r.tasks[0].duracaoMin).toBe(0)
+    expect(r.warnings.join(' ')).toMatch(/1 duração\(ões\) negativa\(s\), acima de 50 anos ou ilegível\(is\) importada\(s\) como zero/)
+    expect(importar('', 'PT8H0M0S').tasks[0].duracaoMin).toBe(480)
+  })
+
+  it('G: calendário cuja semana não tem tempo útil é rejeitado com aviso, mesmo com exceção de dia útil extra', () => {
+    const semana = `<WeekDays>${[1, 2, 3, 4, 5, 6, 7].map((d) => `<WeekDay><DayType>${d}</DayType><DayWorking>0</DayWorking></WeekDay>`).join('')}</WeekDays>`
+    const extra = '<Exceptions><Exception><EnteredByOccurrences>0</EnteredByOccurrences>' + periodo('2026-03-07', '2026-03-07') + '<Name>X</Name><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime></WorkingTimes></Exception></Exceptions>'
+    const r = importar(`<CalendarUID>1</CalendarUID>${calendario(`<IsBaseCalendar>1</IsBaseCalendar>${semana}${extra}`)}`)
+    expect(r.warnings.join(' ')).toMatch(/calendário\(s\) rejeitado\(s\)|rejeitado/)
+    // O calendário padrão volta a ser o seg–sex padrão (a semana toda sem expediente não vira calendário da obra)
+    expect(r.calendarios.find((c) => c.uid === r.calendarioPadraoUid)!.semana[1]).toEqual([{ de: 480, ate: 720 }, { de: 780, ate: 1020 }])
+  })
+  it('H: tarefa manual não alterada volta com as datas do arquivo; alterada no CronoAI, com as calculadas', () => {
+    const xml = projeto({
+      head: '<StartDate>2026-03-02T08:00:00</StartDate><StatusDate>2026-03-01T17:00:00</StatusDate>',
+      tasks:
+        tarefa(1) +
+        `<Task><UID>2</UID><ID>2</ID><Name>Manual</Name><WBS>2</WBS><OutlineLevel>1</OutlineLevel><Manual>1</Manual><Start>2026-03-16T08:00:00</Start><Finish>2026-03-20T17:00:00</Finish><Duration>PT40H0M0S</Duration><PredecessorLink><PredecessorUID>1</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink></Task>`,
+    })
+    const exportar = (alterar: boolean) => {
+      const r = parseMspdiXml(xml)
+      const meta = { name: 'Obra', company: '', manager: '', startDate: r.meta.startDate!, statusDate: r.meta.statusDate!, dailyIndirectCost: 0, ...r.meta }
+      const tasks = alterar ? r.tasks.map((t) => (t.uid === 2 ? { ...t, duracaoMin: 2400 + 480 } : t)) : r.tasks
+      const cs = compilarCalendarios(meta.startDate, r.calendarios, r.calendarioPadraoUid)
+      const schedule = computeSchedule(tasks, cs, optsDaObra(meta, 'forecast', meta.statusDate))
+      const exportado = buildMspdiXml({ meta, tasks, calendarios: r.calendarios, calendarioPadraoUid: r.calendarioPadraoUid, schedule })
+      expect(validateMspdi(exportado, { strictOrder: true }).errors).toEqual([])
+      const d = new DOMParser().parseFromString(exportado, 'application/xml')
+      const t2 = Array.from(d.getElementsByTagName('Task')).find((x) => x.getElementsByTagName('UID')[0]?.textContent === '2')!
+      const campo = (nome: string) => Array.from(t2.children).find((c) => c.localName === nome)?.textContent
+      return [campo('Start'), campo('Finish')]
+    }
+    // Calculado pelo CronoAI: B começa no dia seguinte ao fim de A (03/03) e leva 5 dias úteis (até 09/03)
+    expect(exportar(true)).toEqual(['2026-03-03T08:00:00', '2026-03-10T17:00:00'])
+    // Não alterada: as datas manuais do arquivo (16/03 a 20/03)
+    expect(exportar(false)).toEqual(['2026-03-16T08:00:00', '2026-03-20T17:00:00'])
   })
 })

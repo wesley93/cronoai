@@ -5,7 +5,7 @@ import { calendarioDeDias, compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
 import { computeEvm } from './evm'
 import { interpretReport } from './fieldAi'
-import { buildMspdiXml, fromDuration, parseMspdiXml, toDuration } from './msProjectXmlParser'
+import { buildMspdiXml, minutosParaDuracao, parseMspdiXml } from './msProjectXmlParser'
 import { analyzeDelay, simulateAll } from './scenarios'
 import { analyzeSupplies } from './supplies'
 import { durationFromTeam } from './sinapi'
@@ -101,8 +101,9 @@ describe('SINAPI', () => {
 
 describe('MSPDI', () => {
   it('converte durações', () => {
-    expect(toDuration(10)).toBe('PT80H0M0S')
-    expect(fromDuration('PT80H0M0S')).toBe(10)
+    expect(minutosParaDuracao(4800)).toBe('PT80H0M0S')
+    expect(minutosParaDuracao(5400)).toBe('PT90H0M0S')
+    expect(minutosParaDuracao(1)).toBe('PT0H1M0S')
   })
   it('exporta e reimporta sem perda', () => {
     const xml = buildMspdiXml({ meta: seed.meta, tasks: seed.tasks, calendarios: seed.calendarios, calendarioPadraoUid: seed.calendarioPadraoUid, schedule: forecast })

@@ -200,58 +200,84 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
     return m
   }
 
+  let terminoProjeto = 0
   // ---------- Passo de ida ----------
-  for (const uid of order) {
-    const t = byUid.get(uid)!
-    const c = cal(uid)
-    const cd = calD(uid)
-    const dur = Math.max(0, Math.round(t.duracaoMin))
-    const inicioReal = t.actualStart ? c.proximoUtil(diaRelativo(base, t.actualStart) * MINUTOS_NO_DIA_CORRIDO) : undefined
-    if (done(t)) {
-      const s = inicioReal ?? Math.min(iniciarEm(c, comLimitesInferiores(t, doProjeto(t, dur), dur), dur), c.inicioDoDiaUtilNoOuAntes(statusDia))
-      const f = t.actualFinish
-        ? c.fimUtilAte((diaRelativo(base, t.actualFinish) + 1) * MINUTOS_NO_DIA_CORRIDO)
-        : Math.min(terminarEm(cd, s, dur), c.fimUtilAte(aposStatus(c)))
-      es.set(uid, s)
-      ef.set(uid, Math.max(s, f))
-      restante.set(uid, 0)
-    } else if (started(t)) {
-      const porLigacao = iniciarEm(c, comLimitesInferiores(t, doProjeto(t, dur), dur), dur)
-      const s = inicioReal ?? Math.min(porLigacao, c.inicioDoDiaUtilNoOuAntes(statusDia))
-      // Só os vínculos (sem o piso do início do projeto) restringem o restante: ele já está em andamento
-      const vinculos = porVinculos(t, dur)
-      const apos = vinculos === undefined ? undefined : iniciarEm(c, vinculos, dur)
-      const rem = restanteDe(dur, t.percentComplete)
-      // Lógica retida: o restante começa depois da predecessora (fora de sequência); substituir: o progresso ignora o vínculo.
-      // Mover o restante (política do CronoAI): o restante começa depois da data de status.
-      let rs = mover ? Math.max(s, aposStatus(c)) : s
-      if (retida && apos !== undefined) rs = Math.max(rs, apos)
-      es.set(uid, s)
-      ef.set(uid, mover || rs > s ? terminarEm(cd, rs, rem) : terminarEm(cd, s, dur))
-      restante.set(uid, rem)
-    } else {
-      let m = Math.max(doProjeto(t, dur), forecast && mover ? aposStatus(c) : 0)
-      m = comLimitesInferiores(t, m, dur)
-      let s = iniciarEm(c, m, dur)
-      const sVinculos = s
-      const r = t.restricao
-      const limInicio = r && (r.tipo === 'SNLT' || r.tipo === 'MSO') ? momentoDeInicio(r.data, c) : undefined
-      if (limInicio !== undefined) s = r?.tipo === 'MSO' ? iniciarEm(c, limInicio, dur) : Math.min(s, limInicio)
-      let f = terminarEm(cd, s, dur)
-      const limTermino = r && (r.tipo === 'FNLT' || r.tipo === 'MFO') ? momentoDeTermino(r.data, cd) : undefined
-      if (limTermino !== undefined && (r?.tipo === 'MFO' || f > limTermino)) {
-        f = limTermino
-        s = dur > 0 ? cd.somarUteis(f, -dur) : f
+  /** `fixos` trava tarefas ALAP com sucessora nas datas agendadas (2ª rodada). */
+  const ida = (fixos?: Map<number, { s: number; f: number }>) => {
+    es.clear()
+    ef.clear()
+    restante.clear()
+    conflito.clear()
+    for (const uid of order) {
+      const t = byUid.get(uid)!
+      const c = cal(uid)
+      const cd = calD(uid)
+      const dur = Math.max(0, Math.round(t.duracaoMin))
+      const fixo = fixos?.get(uid)
+      if (fixo) {
+        // ALAP com sucessora (2ª rodada): a tarefa fica nas datas agendadas e as sucessoras partem delas
+        es.set(uid, fixo.s)
+        ef.set(uid, fixo.f)
+        restante.set(uid, dur)
+        continue
       }
-      // A restrição prevalece sobre o vínculo (honrar restrições, gate P2): sinaliza quando começa antes do que os vínculos permitem
-      if (s < sVinculos) conflito.add(uid)
-      es.set(uid, s)
-      ef.set(uid, f)
-      restante.set(uid, dur)
+      const inicioReal = t.actualStart ? c.proximoUtil(diaRelativo(base, t.actualStart) * MINUTOS_NO_DIA_CORRIDO) : undefined
+      if (done(t)) {
+        const s = inicioReal ?? Math.min(iniciarEm(c, comLimitesInferiores(t, doProjeto(t, dur), dur), dur), c.inicioDoDiaUtilNoOuAntes(statusDia))
+        const f = t.actualFinish
+          ? c.fimUtilAte((diaRelativo(base, t.actualFinish) + 1) * MINUTOS_NO_DIA_CORRIDO)
+          : Math.min(terminarEm(cd, s, dur), c.fimUtilAte(aposStatus(c)))
+        es.set(uid, s)
+        ef.set(uid, Math.max(s, f))
+        restante.set(uid, 0)
+      } else if (started(t)) {
+        const porLigacao = iniciarEm(c, comLimitesInferiores(t, doProjeto(t, dur), dur), dur)
+        const s = inicioReal ?? Math.min(porLigacao, c.inicioDoDiaUtilNoOuAntes(statusDia))
+        const rem = restanteDe(dur, t.percentComplete)
+        // Só os vínculos (sem o piso do início do projeto) restringem o restante: ele já está em andamento.
+        // FF e SF contam com a duração do RESTANTE (início do restante = término exigido − restante).
+        const vinculos = porVinculos(t, rem)
+        const apos = vinculos === undefined ? undefined : iniciarEm(c, vinculos, rem)
+        // Parte já feita: termina (duração − restante) minutos úteis depois do início real
+        const feito = dur > rem ? cd.somarUteis(s, dur - rem) : s
+        // Lógica retida: o restante começa depois da predecessora (fora de sequência); substituir: o progresso ignora o vínculo.
+        // Mover o restante (política do CronoAI): começa depois da data de status; sem mover, logo depois da parte já feita.
+        let rs = mover ? Math.max(s, aposStatus(c)) : feito
+        if (retida && apos !== undefined) rs = Math.max(rs, apos)
+        es.set(uid, s)
+        const fim = terminarEm(cd, rs, rem)
+        ef.set(uid, fim)
+        restante.set(uid, rem)
+        // FNLT e MFO continuam valendo na tarefa iniciada: término previsto depois do limite é conflito
+        const rIni = t.restricao
+        if (rIni && (rIni.tipo === 'FNLT' || rIni.tipo === 'MFO')) {
+          const lim = momentoDeTermino(rIni.data, cd)
+          if (lim !== undefined && fim > lim) conflito.add(uid)
+        }
+      } else {
+        let m = Math.max(doProjeto(t, dur), forecast && mover ? aposStatus(c) : 0)
+        m = comLimitesInferiores(t, m, dur)
+        let s = iniciarEm(c, m, dur)
+        const sVinculos = s
+        const r = t.restricao
+        const limInicio = r && (r.tipo === 'SNLT' || r.tipo === 'MSO') ? momentoDeInicio(r.data, c) : undefined
+        if (limInicio !== undefined) s = r?.tipo === 'MSO' ? iniciarEm(c, limInicio, dur) : Math.min(s, limInicio)
+        let f = terminarEm(cd, s, dur)
+        const limTermino = r && (r.tipo === 'FNLT' || r.tipo === 'MFO') ? momentoDeTermino(r.data, cd) : undefined
+        if (limTermino !== undefined && (r?.tipo === 'MFO' || f > limTermino)) {
+          f = limTermino
+          s = dur > 0 ? cd.somarUteis(f, -dur) : f
+        }
+        // A restrição prevalece sobre o vínculo (honrar restrições, gate P2): sinaliza quando começa antes do que os vínculos permitem
+        if (s < sVinculos) conflito.add(uid)
+        es.set(uid, s)
+        ef.set(uid, f)
+        restante.set(uid, dur)
+      }
     }
+    terminoProjeto = order.reduce((m, u) => Math.max(m, ef.get(u) ?? 0), 0)
   }
-
-  const terminoProjeto = order.reduce((m, u) => Math.max(m, ef.get(u) ?? 0), 0)
+  ida()
 
   // Duração efetiva (do início ao término cedo), em minutos úteis do calendário em que a duração corre
   const efetiva = (uid: number) => calD(uid).minutosUteisEntre(es.get(uid)!, ef.get(uid)!)
@@ -261,47 +287,66 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
   const lf = new Map<number, number>()
   /** Início tarde do RESTANTE: o que restringe a predecessora quando a sucessora está iniciada (lógica retida). */
   const lsRestante = new Map<number, number>()
-  for (let i = order.length - 1; i >= 0; i--) {
-    const uid = order[i]
-    const t = byUid.get(uid)!
-    const c = cal(uid)
-    const cd = calD(uid)
-    const d = efetiva(uid)
-    /** Término tarde que corresponde a um limite de INÍCIO tarde (LF = LS + d). */
-    const doInicio = (limite: number) => terminarEm(cd, iniciarEm(c, limite, d), d)
-    let late = terminoProjeto
-    for (const e of outgoing.get(uid) ?? []) {
-      const succ = byUid.get(e.succ)!
-      if (done(succ) || (started(succ) && !retida)) continue // sucessora concluída não restringe; iniciada só em "substituir"
-      const sLs = lsRestante.get(e.succ) ?? terminoProjeto
-      const sLf = lf.get(e.succ) ?? terminoProjeto
-      switch (e.type) {
-        case 'FS': late = Math.min(late, menosLag(sLs, e)); break
-        case 'SS': late = Math.min(late, doInicio(menosLag(sLs, e))); break
-        case 'FF': late = Math.min(late, menosLag(sLf, e)); break
-        case 'SF': late = Math.min(late, doInicio(menosLag(sLf, e))); break
+  const volta = () => {
+    ls.clear()
+    lf.clear()
+    lsRestante.clear()
+    for (let i = order.length - 1; i >= 0; i--) {
+      const uid = order[i]
+      const t = byUid.get(uid)!
+      const c = cal(uid)
+      const cd = calD(uid)
+      const d = efetiva(uid)
+      /** Término tarde que corresponde a um limite de INÍCIO tarde (LF = LS + d). */
+      const doInicio = (limite: number) => terminarEm(cd, iniciarEm(c, limite, d), d)
+      let late = terminoProjeto
+      for (const e of outgoing.get(uid) ?? []) {
+        const succ = byUid.get(e.succ)!
+        if (done(succ) || (started(succ) && !retida)) continue // sucessora concluída não restringe; iniciada só em "substituir"
+        const sLs = lsRestante.get(e.succ) ?? terminoProjeto
+        const sLf = lf.get(e.succ) ?? terminoProjeto
+        switch (e.type) {
+          case 'FS': late = Math.min(late, menosLag(sLs, e)); break
+          case 'SS': late = Math.min(late, doInicio(menosLag(sLs, e))); break
+          case 'FF': late = Math.min(late, menosLag(sLf, e)); break
+          case 'SF': late = Math.min(late, doInicio(menosLag(sLf, e))); break
+        }
       }
-    }
-    // Restrições que limitam o término tarde (SNLT, FNLT, MSO e MFO) e o prazo final (LF = min(LF, prazo))
-    const r = t.restricao
-    if (!started(t)) {
-      if (r && (r.tipo === 'SNLT' || r.tipo === 'MSO')) {
+      // Restrições que limitam o término tarde (SNLT, FNLT, MSO e MFO) e o prazo final (LF = min(LF, prazo))
+      const r = t.restricao
+      // SNLT e MSO deixam de valer na tarefa iniciada (o início já aconteceu); FNLT e MFO continuam limitando o término
+      if (r && !started(t) && (r.tipo === 'SNLT' || r.tipo === 'MSO')) {
         const lim = momentoDeInicio(r.data, c)
         if (lim !== undefined) late = Math.min(late, doInicio(lim))
       }
-      if (r && (r.tipo === 'FNLT' || r.tipo === 'MFO')) {
+      if (r && !done(t) && (r.tipo === 'FNLT' || r.tipo === 'MFO')) {
         const lim = momentoDeTermino(r.data, cd)
         if (lim !== undefined) late = Math.min(late, lim)
       }
+      if (t.prazoFinal) {
+        const prazo = momentoDeTermino(t.prazoFinal, cd)
+        if (prazo !== undefined) late = Math.min(late, prazo)
+      }
+      lf.set(uid, late)
+      const lateStart = cd.somarUteis(late, -d)
+      ls.set(uid, lateStart)
+      lsRestante.set(uid, started(t) && !done(t) ? cd.somarUteis(late, -(restante.get(uid) ?? d)) : lateStart)
     }
-    if (t.prazoFinal) {
-      const prazo = momentoDeTermino(t.prazoFinal, cd)
-      if (prazo !== undefined) late = Math.min(late, prazo)
+  }
+  volta()
+
+  // ALAP com sucessora: a tarefa vai para as datas tardias e as sucessoras partem delas (nenhuma FS começa antes de o ALAP terminar).
+  // 2ª rodada de ida e volta com o ALAP travado; sem sucessora, o ALAP só muda as datas agendadas e mantém as folgas cedo.
+  const fixados = new Map<number, { s: number; f: number }>()
+  for (const uid of order) {
+    const t = byUid.get(uid)!
+    if (t.restricao?.tipo === 'ALAP' && !started(t) && (outgoing.get(uid)?.length ?? 0) > 0) {
+      fixados.set(uid, { s: cal(uid).proximoUtil(ls.get(uid)!), f: calD(uid).fimUtilAte(lf.get(uid)!) })
     }
-    lf.set(uid, late)
-    const lateStart = cd.somarUteis(late, -d)
-    ls.set(uid, lateStart)
-    lsRestante.set(uid, started(t) && !done(t) ? cd.somarUteis(late, -(restante.get(uid) ?? d)) : lateStart)
+  }
+  if (fixados.size) {
+    ida(fixados)
+    volta()
   }
 
   // ---------- Folgas e datas ----------
@@ -330,17 +375,32 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
     }
 
     // ALAP: depois da volta, a tarefa vai para as datas tardias; as datas cedo e as folgas continuam as do cálculo cedo
-    const alap = t.restricao?.tipo === 'ALAP' && !started(t)
+    const alap = t.restricao?.tipo === 'ALAP' && !started(t) && !fixados.has(uid)
     const sAgendado = alap ? c.proximoUtil(ls.get(uid)!) : s
     const fAgendado = alap ? lf.get(uid)! : f
     const marco = fAgendado === sAgendado
     const dataTermino = (m: number) => dataDoMomento(base, cd.fimUtilAte(m) - 1)
     const inicioNorm = c.proximoUtil(sAgendado)
-    // Marco: início e término no mesmo momento (o do término da predecessora; no início do projeto, o 1º momento útil)
-    const marcoMomento = c.uteisAte(sAgendado) === 0 ? inicioNorm : cd.fimUtilAte(sAgendado)
-    // Marco: data do último trecho útil até o momento (o dia da predecessora); no início do projeto, o 1º dia útil
-    let finish = marco ? (c.uteisAte(sAgendado) === 0 ? dataDoMomento(base, inicioNorm) : dataTermino(sAgendado)) : dataTermino(fAgendado)
-    let start = marco ? finish : dataDoMomento(base, sAgendado)
+    /**
+     * Data e momento de um marco: os do próprio momento (SNET/MSO em 12/08 aparece em 12/08; SS +0 de tarefa que começa
+     * seg 10/08 aparece em 10/08). Só às 00:00 em ponto (fim de um dia de 24 h) vale o dia anterior; antes de qualquer
+     * tempo útil (início do projeto), o 1º momento útil.
+     */
+    const marcoDe = (m: number): { data: string; momento: number } => {
+      if (c.uteisAte(m) === 0) {
+        const n = c.proximoUtil(m)
+        return { data: dataDoMomento(base, n), momento: n }
+      }
+      if (m === Math.floor(m / MINUTOS_NO_DIA_CORRIDO) * MINUTOS_NO_DIA_CORRIDO) {
+        const fim = cd.fimUtilAte(m)
+        return { data: dataDoMomento(base, fim - 1), momento: fim }
+      }
+      return { data: dataDoMomento(base, m), momento: m }
+    }
+    const marcoAgendado = marco ? marcoDe(sAgendado) : undefined
+    const marcoMomento = marcoAgendado?.momento ?? 0
+    let finish = marcoAgendado ? marcoAgendado.data : dataTermino(fAgendado)
+    let start = marcoAgendado ? marcoAgendado.data : dataDoMomento(base, sAgendado)
     if (forecast && t.percentComplete > 0 && t.actualStart) start = t.actualStart
     if (concluida && t.actualFinish) finish = t.actualFinish
 
@@ -353,10 +413,10 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
       terminoCedoMin: f,
       inicioTardeMin: ls.get(uid)!,
       terminoTardeMin: lf.get(uid)!,
-      earlyStart: dataDoMomento(base, c.proximoUtil(s)),
-      earlyFinish: f === s ? finish : dataTermino(f),
-      lateStart: dataDoMomento(base, c.proximoUtil(ls.get(uid)!)),
-      lateFinish: dataTermino(lf.get(uid)!),
+      earlyStart: f === s ? marcoDe(s).data : dataDoMomento(base, c.proximoUtil(s)),
+      earlyFinish: f === s ? marcoDe(s).data : dataTermino(f),
+      lateStart: lf.get(uid) === ls.get(uid) ? marcoDe(cd.fimUtilAte(lf.get(uid)!)).data : dataDoMomento(base, c.proximoUtil(ls.get(uid)!)),
+      lateFinish: lf.get(uid) === ls.get(uid) ? marcoDe(cd.fimUtilAte(lf.get(uid)!)).data : dataTermino(lf.get(uid)!),
       start,
       finish,
       inicioHora: horaDoMomento(marco ? marcoMomento : inicioNorm),

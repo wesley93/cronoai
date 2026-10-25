@@ -34,6 +34,23 @@ describe('calendário: bordas', () => {
 })
 
 // CR-11: data útil (ou não) anterior à data-base. Antes da correção: -2, -2 e -1 (um dia a menos nas duas úteis).
+describe('limite de 50 anos do WorkCalendar (calendário por função de dia útil)', () => {
+  it('calendário sem nenhum dia útil: erro em português, nunca laço sem fim', () => {
+    expect(() => new WorkCalendar('2026-08-03', () => false)).toThrow(/horizonte de 50 anos/)
+  })
+
+  it('contar dias úteis entre datas a mais de 50 anos uma da outra é erro explícito', () => {
+    expect(() => cal().countWorkingBetween('2026-05-04', '2100-01-01')).toThrow(/horizonte de 50 anos/)
+    expect(cal().countWorkingBetween('2026-05-04', '2026-05-11')).toBe(6) // 04 a 08/05 e o sábado útil 09/05
+  })
+
+  it('andar para frente ou para trás sem dia útil também respeita o teto', () => {
+    const c = new WorkCalendar('2026-05-04', (iso) => iso === '2026-05-04', 1)
+    expect(() => c.dateAt(5)).toThrow(/horizonte de 50 anos/)
+    expect(() => c.dateAt(-5)).toThrow(/horizonte de 50 anos/)
+  })
+})
+
 describe('indexOnOrBefore antes da data-base (CR-11)', () => {
   it('quinta útil antes de um feriado e da data-base (01/05 é feriado)', () => {
     expect(cal().indexOnOrBefore('2026-04-30')).toBe(-1)

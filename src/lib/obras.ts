@@ -2,8 +2,8 @@
 import type { IndiceObras, PersistedState, ResumoObra } from '@/types/obra'
 import type { ProjectMeta } from '@/types/domain'
 import { REGIMES_SINAPI, ROTULO_REGIME_SINAPI, UFS, type RegimeSinapi, type UF } from '@/data/ufs'
-import { defaultHolidays, parseISO, toISO } from './calendar'
-import { UID_CALENDARIO_PADRAO, calendarioPadrao } from './calendarioTrabalho'
+import { defaultHolidays, diffCalendarDays, parseISO, toISO } from './calendar'
+import { JANELA_ANOS_DATAS, UID_CALENDARIO_PADRAO, calendarioPadrao } from './calendarioTrabalho'
 
 export const MAX_NOME_OBRA = 120
 export const MAX_MUNICIPIO = 80
@@ -69,6 +69,27 @@ function validarDatasComAvanco(d: DadosObra, c: ContextoInicio): string[] {
   return erros
 }
 
+/**
+ * A data de status precisa estar a menos de 45 anos da data de início: além disso o cálculo previsto (que reprograma o restante a partir
+ * da data de status) estoura o horizonte de 50 anos do motor. Data inválida também é recusada.
+ */
+export function erroDeStatusForaDaJanela(inicio: string, status: string): string | undefined {
+  if (!dataIsoValida(status)) return 'Informe uma data de status válida.'
+  if (!dataIsoValida(inicio)) return undefined
+  if (Math.abs(diffCalendarDays(inicio, status)) > JANELA_ANOS_DATAS * 365) {
+    return `A data de status deve estar a menos de ${JANELA_ANOS_DATAS} anos da data de início.`
+  }
+  return undefined
+}
+
+/** Valida as opções de cronograma (lógica de progresso e mover o restante); uma só regra para o formulário e a ação da store. */
+export function validarOpcoesCronograma(logica: unknown, moverRestante: unknown): string[] {
+  const erros: string[] = []
+  if (logica !== undefined && logica !== 'retida' && logica !== 'substituir') erros.push('Selecione uma lógica de progresso válida.')
+  if (moverRestante !== undefined && typeof moverRestante !== 'boolean') erros.push('Informe se o restante deve ser movido para depois da data de status.')
+  return erros
+}
+
 /** Valida os dados de uma obra; devolve as mensagens de erro em português (lista vazia = válido). */
 export function validarDadosObra(d: DadosObra, contexto?: ContextoInicio): string[] {
   const erros: string[] = []
@@ -83,8 +104,11 @@ export function validarDadosObra(d: DadosObra, contexto?: ContextoInicio): strin
   if (contexto?.comAvanco) erros.push(...validarDatasComAvanco(d, contexto))
   if (d.regimeSinapi && !REGIMES_SINAPI.includes(d.regimeSinapi)) erros.push('Selecione um regime SINAPI válido.')
   if (d.dataBaseSinapi && !/^\d{4}-(0[1-9]|1[0-2])$/.test(d.dataBaseSinapi)) erros.push('A data-base do SINAPI deve estar no formato AAAA-MM (ex.: 2026-09).')
-  if (d.logicaProgresso !== undefined && d.logicaProgresso !== 'retida' && d.logicaProgresso !== 'substituir') erros.push('Selecione uma lógica de progresso válida.')
-  if (d.moverRestante !== undefined && typeof d.moverRestante !== 'boolean') erros.push('Informe se o restante deve ser movido para depois da data de status.')
+  erros.push(...validarOpcoesCronograma(d.logicaProgresso, d.moverRestante))
+  if (dataIsoValida(d.dataInicio) && dataIsoValida(d.dataStatus)) {
+    const janela = erroDeStatusForaDaJanela(d.dataInicio, d.dataStatus)
+    if (janela) erros.push(janela)
+  }
   return erros
 }
 

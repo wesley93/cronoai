@@ -19,7 +19,7 @@ TAREFA: revisão de arquitetura.
   src/types; telas em src/modules/<modulo>/ e src/components/; nada de lógica de
   cálculo duplicada em componente.
 - MSPDI (T3): elemento novo entra no SCHEMA_ORDER na posição do esquema; conversões
-  de unidade num só lugar (toDuration/fromDuration/lagToWorkingDays); o import avisa
+  de unidade num só lugar (`minutosParaDuracao`, `lagDeMspdi`/`lagParaMspdi`, `diasParaMinutos`/`minutosParaDias`); o import avisa
   o usuário do que não consegue preservar (Inviolável 2).
 - Estado salvo (T4): compatibilidade com o formato anterior conforme o plano.
 - Entrada externa (T5): limite de tamanho e validação antes do parse; erro sem

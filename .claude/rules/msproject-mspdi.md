@@ -22,14 +22,14 @@ Referência do esquema: [Project XML Data Interchange Schema Reference](https://
 
 | Campo | Unidade no MSPDI | Conversão no código |
 |---|---|---|
-| `Duration`, `RemainingDuration` etc. | duração ISO 8601 (`PT{h}H{m}M{s}S`) | import: minutos exatos (`durationMinutes`, segundos arredondados para o minuto com aviso); export: `minutosParaDuracao`. `DurationFormat` corrido (4/6/8/10/12 e estimados 36…44) vira `duracaoCorrida` e volta como 8 |
-| `MinutesPerDay` | minutos por dia (padrão 480) | `meta.minutosPorDia` (só para exibir dias); volta no export com `MinutesPerWeek` = 5 × |
+| `Duration`, `RemainingDuration` etc. | duração ISO 8601 (`PT{h}H{m}M{s}S`) | import: minutos exatos (`durationMinutes`, segundos arredondados para o minuto com aviso; negativa, acima de 50 anos ou ilegível entra como 0 com aviso); export: `minutosParaDuracao`. `DurationFormat` corrido (4/6/8/10/12 e estimados 36…44) vira `duracaoCorrida` e volta como 8 |
+| `MinutesPerDay` | minutos por dia (padrão 480) | `meta.minutosPorDia` (só para exibir dias e para o `D` da duração ISO); inteiro de 1 a 1.440, fora disso vale 480 com aviso; volta no export com `MinutesPerWeek` = 5 × |
 | `LinkLag` | **décimos de minuto**; nos formatos de % (19/20/51/52), o **percentual inteiro** (50 = 50%) | `lagDeMspdi` (import) e `lagParaMspdi` (export): minutos exatos, sem 5/7 |
 | `LagFormat` | 3/5/7/9/11 úteis (min, h, d, sem, mês); 4/6/8/10/12 corridos; 19/20 percentual (20 calculado como %, com aviso); 35+ = estimados (código − 32); 21/53 nulos | o código original fica em `lag.codigoMspdi` e volta no export; sem código: 7 (útil), 8 (corrido), 19 (%) |
 | `ConstraintType` / `ConstraintDate` / `Deadline` | 0 ASAP, 1 ALAP, 2 MSO, 3 MFO, 4 SNET, 5 SNLT, 6 FNET, 7 FNLT; data e hora sem fuso | `Task.restricao` (`yyyy-mm-ddThh:mm`) e `Task.prazoFinal`; a restrição **inferida** pelo import (tarefa sem vínculo e sem avanço recebe SNET = início do arquivo) é marcada `inferida` e volta como `ConstraintType` 0 |
 | `CalendarUID` | calendário-base da tarefa | `Task.calendarioUid` (só quando é um calendário importado diferente do padrão) |
 | `HonorConstraints`, `SplitsInProgressTasks`, `Move*` | cabeçalho | `honorConstraintsArquivo` só para a volta (o cálculo sempre honra as restrições; obra sem valor de arquivo grava 0); `SplitsInProgressTasks` ↔ lógica retida/substituir; as 4 `Move*` são preservadas sem entrar no cálculo |
-| `Active`, `Manual` | marcas da tarefa (2010+) | `Task.arquivo.ativa`/`manual`, devolvidas só quando o arquivo as trouxe (entram no `SCHEMA_ORDER.Task` depois de `Name`) |
+| `Active`, `Manual` | marcas da tarefa (2010+) | `Task.arquivo.ativa`/`manual`, devolvidas só quando o arquivo as trouxe (entram no `SCHEMA_ORDER.Task` depois de `Name`). Tarefa **manual não alterada** no CronoAI (duração, % e restrição iguais às do arquivo, `alteradaDepoisDaImportacao`) volta com `Start`/`Finish` do arquivo (08:00 e 17:00); alterada, com as datas calculadas, e a exportação avisa quantas foram (`tarefasManuaisAlteradas`) |
 | `Type` do vínculo | 0 FF, 1 FS, 2 SF, 3 SS | `LINK_TO_CODE` / `CODE_TO_LINK` |
 | Datas | `yyyy-mm-ddThh:mm:ss` | horário padrão de início/fim do dia; data do domínio em ISO `yyyy-mm-dd` |
 | Campos personalizados | `ExtendedAttribute` (`FieldID`) | SINAPI em Text1 (`FIELD_SINAPI`), lead time em Number1 (`FIELD_LEAD_TIME`) |
