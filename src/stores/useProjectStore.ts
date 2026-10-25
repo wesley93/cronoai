@@ -14,6 +14,7 @@ import type {
   Task,
 } from '@/types/domain'
 import type { MSProjectTask } from '@/types/msProject'
+import type { PersistedState, ScenarioUndo } from '@/types/obra'
 import { SEED_HOLIDAYS, SEED_MATERIALS, SEED_META, SEED_REPORTS, SEED_TASKS } from '@/data/seed'
 import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
 import {
@@ -48,17 +49,6 @@ import { fmtBRL, fmtMonth, uid } from '@/lib/format'
 import { nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
 
 const STORAGE_KEY = 'cronoai-state-v1'
-
-interface ScenarioUndo {
-  kind: ScenarioKind
-  taskUid?: number
-  before?: Partial<Task>
-  addedDays?: string[]
-  costId: string
-  result: ScenarioResult
-}
-
-type PersistedState = ProjectState & { undo: ScenarioUndo[]; budget: BudgetLine[] }
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T

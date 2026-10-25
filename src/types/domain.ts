@@ -1,4 +1,5 @@
 // Tipos de domínio do CronoAI (cronograma, EVM, suprimentos e apontamentos de canteiro)
+import type { RegimeSinapi, UF } from '@/data/ufs'
 
 export type LinkType = 'FS' | 'SS' | 'FF' | 'SF'
 
@@ -77,6 +78,13 @@ export interface ProjectMeta {
   dailyIndirectCost: number
   /** Margem de segurança da Data Limite de Pedido (dias corridos). */
   safetyMarginDays?: number
+  /** UF da obra (ausente = não informada; nunca assumida). */
+  uf?: UF
+  municipio?: string
+  /** Regime de encargos da tabela SINAPI da obra. */
+  regimeSinapi?: RegimeSinapi
+  /** Data-base da tabela SINAPI (AAAA-MM). */
+  dataBaseSinapi?: string
 }
 
 export interface ScheduledTask {

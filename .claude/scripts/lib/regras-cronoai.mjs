@@ -248,7 +248,7 @@ const ARQ_T2 = /^src\/lib\/(evm|scenarios|supplies|sinapi|sinapiBudget|diagnosis
 /** Arquivos de cálculo (T1/T2): exigem teste no mesmo diff (CLAUDE.md › Invioláveis 1). */
 export const ARQ_CALCULO = /^src\/lib\/(cpm|calendar|evm|scenarios|supplies|sinapi|sinapiBudget|diagnosis)\.ts$/
 const ARQ_T3 = /^src\/lib\/(msProjectXmlParser[^/]*|sinapiBudget)\.ts$/
-const ARQ_T4 = /^src\/(types\/domain\.ts|stores\/useProjectStore\.ts)$/
+const ARQ_T4 = /^src\/(types\/(domain|obra)\.ts|lib\/(migracaoEstado|obras)\.ts|stores\/(useProjectStore|armazenamentoObras)\.ts)$/
 const ARQ_T6 = /^src\/(lib\/fieldAi\.ts|(.*\/)?AiMappingPanel\.vue)$/
 const ARQ_T7 = /^(Dockerfile|\.dockerignore|docker\/.*|docker-compose[^/]*\.ya?ml|\.github\/.*|\.nvmrc)$/
 const ARQ_T8 = /^(api|backend|server)\//
