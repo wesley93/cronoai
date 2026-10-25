@@ -41,12 +41,12 @@ inicio: 2026-10-25
   - fazer merge da `master` antes do PR; o PR é empilhado em `feat/00012-identidade-empresas` se o 00012 não tiver entrado;
   - conferir os jobs do backend e o CodeQL C# verdes no PR;
   - levar à **Segurança da Informação**, ao **Jurídico** e à **Infraestrutura** os itens da última seção.
-- **Estado:** validadores aprovados até a rodada 02, rodada 03 em validação (testes) e auditoria independente pendente.
+- **Estado:** validadores aprovados na rodada 03 (5279222). Auditoria independente r01 (a238652): REPROVADO por 1 Alto (lint do CI quebrado em `regras-cronoai.test.mjs:139-140`) e 2 Baixos de registro → corrigido em 87a6206 e neste registro; reauditoria: A PREENCHER.
   - `testes`: APROVADO na r01 (409 3x) e na r02 (434 3x); r03 (451 3x).
-  - `arquiteto`: REPROVADO na r01 (R-1) → APROVADO na r02 (N-1 a N-6).
+  - `arquiteto`: REPROVADO na r01 (R-1) → APROVADO na r02 (N-1 a N-6) → APROVADO na r03 (confirmação de 5279222).
   - `dba`: OK na r01 (6 observações) e na r02.
   - `seguranca`: APROVADO na r01 → REPROVADO na r02 (1 Médio) → APROVADO na r03 (5279222), sem achados.
-  - Auditoria independente: A PREENCHER.
+  - Auditoria independente: r01 REPROVADO (achados 1 a 3, corrigidos); reauditoria: A PREENCHER.
 
 ## Pedido
 "Pode fazer todas as fases" → PLANO-FASE-2 §5.3, ciclo 00013.
@@ -75,7 +75,8 @@ inicio: 2026-10-25
 | 01 (bd508ed) | APROVADO: 409/409 3x; subida local completa (V-2); defeito de teste no T77 (não bloqueia) | REPROVADO: R-1 (R18 com falso negativo, Alta); R-2 Média; R-3 a R-5 Baixas; R-6 registro; avaliação dos 17 desvios | OK: 6 observações (2 MÉDIA, 4 BAIXA) | APROVADO: 4 Baixos e 5 Info |
 | 02 (a2bbad5) | APROVADO: 434/434 3x; subida local refeita com a migração nova; 2 defeitos de teste (não bloqueiam) | APROVADO: N-1 a N-6, nenhuma bloqueia | OK: migração refeita confere com a original mais as 2 mudanças pedidas; alerta de recriar o banco local | REPROVADO: 1 Médio (número exponencial no `jsonb`); 3 Info |
 | 03 (5279222) | APROVADO: 451/451 3x; 111/111 das regras; 2 defeitos menores de teste (POST sem afirmar ausência de gravação; PUT sem afirmar a chave) | APROVADO (confirmação): ADR 00004, camadas e documentação ok; N-1 e N-6 fechados; N-2 a N-4 como registro; N-5 fechado | — (sem mudança de banco) | APROVADO: sem achados; 79/79 focados e 111/111 das regras |
-| auditoria | — | — | — | A PREENCHER (`revisor` MODO AUDITAR) |
+| auditoria r01 (a238652) | — | — | — | REPROVADO: 1 Alto (lint), 2 Baixos (evidência anterior a 5279222 em linhas da matriz; registro contraditório sobre a r03); 44 de 45 evidências conferidas |
+| reauditoria | — | — | — | A PREENCHER |
 
 ### Testes do backend, antes → depois
 | Ponto | Total | Fonte |
@@ -118,18 +119,18 @@ Regras do `validar-regras` (`node --test`): 40 no fim do 00012, 77 em bd508ed, 1
 
 | Item | Requisito | Verificação | Obrig. | Estado | Evidência |
 |---|---|---|---|---|---|
-| G-restore | Lock files | `dotnet restore --locked-mode` | sim | PASS | 4 projetos restaurados (`testes` r01 e r02); ok no HEAD 5279222 (`dev-backend` r03) |
-| G-build | Build Release sem avisos | `dotnet build CronoAI.slnx -c Release --no-incremental` | sim | PASS | `0 Aviso(s) 0 Erro(s)` (`testes` r02, a2bbad5); 0/0 no HEAD 5279222 (`dev-backend` r03) |
-| G-format | Format limpo | `dotnet format … --verify-no-changes` | sim | PASS | exit=0 (`testes` r02); limpo em 5279222 (`dev-backend` r03) |
-| G-test | Suíte completa | `dotnet test --solution CronoAI.slnx -c Release --no-build` | sim | PASS | 409/409 3x (`testes` r01, bd508ed); 434/434 3x (`testes` r02, a2bbad5); 451/451 3x (`testes` r03, 5279222) |
-| G-openapi | Contrato bate com o build | `git diff --exit-code -- server/openapi/` | sim | PASS | exit=0 (`testes` r01 e r02) |
-| G-pending | Sem migração pendente | `dotnet ef migrations has-pending-model-changes` | sim | PASS | `No changes have been made to the model since the last migration.` (`testes` r01 e r02; `dev-backend` r03) |
-| G-vuln | Sem pacote vulnerável | `dotnet list … --vulnerable --include-transitive` | sim | PASS | "não tem nenhum pacote vulnerável" nos 4 projetos (`testes` r01 e r02) |
-| G-node | Regras R18 e R19 | `node --test .claude/scripts/lib/regras-cronoai.test.mjs` | sim | PASS | `tests 106 pass 106 fail 0` (`testes` r02); 111/111 em 5279222 (`seguranca` r03) |
-| G-regras | validar-regras | `validar-regras.mjs --base feat/00012-identidade-empresas --commits` | sim | PASS | `114 arquivo(s) … 0 bloqueia, 0 alerta` (`testes` r02); 0/0 em 5279222 (`dev-backend` r03) |
-| G-classif | classificar-diff | `classificar-diff.mjs --commits` | sim | PASS | faixa 3, T8, `seguranca` obrigatório, `especialista-obra` não exigido (`testes` r01 e r02) |
-| AC-1 | Build, format, testes, OpenAPI | gates acima | sim | PASS | G-build, G-format, G-test, G-openapi (r02) |
-| AC-2 | Migração | X1, `Migracao_ObrasAuditoria_down_remove_tudo_e_reaplica`, `Modelo_sem_mudanca_pendente`, subida local | sim | PASS | verdes 3x (r01, r02). Subida local r02: `ef database update` aplicou `Inicial`, `IdentidadeEmpresas` e `20261025201449_ObrasAuditoria`, "Done." (`testes`). `dba` r02: `diff` com a original só mostra as 4 mudanças pedidas; 17/17 em `MigracoesTestes`, `CatalogoTestes`, `AppendOnlyTestes` |
+| G-restore | Lock files | `dotnet restore --locked-mode` | sim | PASS | 4 projetos restaurados (`testes` r01 e r02); ok no HEAD 5279222 (`dev-backend` r03); auditoria r01 reexecutou no HEAD a238652: 4 projetos restaurados |
+| G-build | Build Release sem avisos | `dotnet build CronoAI.slnx -c Release --no-incremental` | sim | PASS | `0 Aviso(s) 0 Erro(s)` (`testes` r02, a2bbad5); 0/0 no HEAD 5279222 (`dev-backend` r03); auditoria r01 reexecutou no HEAD a238652: `0 Aviso(s) 0 Erro(s)` |
+| G-format | Format limpo | `dotnet format … --verify-no-changes` | sim | PASS | exit=0 (`testes` r02); limpo em 5279222 (`dev-backend` r03); auditoria r01 reexecutou no HEAD a238652: exit 0 |
+| G-test | Suíte completa | `dotnet test --solution CronoAI.slnx -c Release --no-build` | sim | PASS | 409/409 3x (`testes` r01, bd508ed); 434/434 3x (`testes` r02, a2bbad5); 451/451 3x (`testes` r03, 5279222); auditoria r01 reexecutou no HEAD a238652: total 451, falhou 0 |
+| G-openapi | Contrato bate com o build | `git diff --exit-code -- server/openapi/` | sim | PASS | exit=0 (`testes` r01 e r02); auditoria r01 reexecutou no HEAD a238652: exit 0 |
+| G-pending | Sem migração pendente | `dotnet ef migrations has-pending-model-changes` | sim | PASS | `No changes have been made to the model since the last migration.` (`testes` r01 e r02; `dev-backend` r03); auditoria r01 reexecutou no HEAD a238652: "No changes have been made to the model since the last migration." |
+| G-vuln | Sem pacote vulnerável | `dotnet list … --vulnerable --include-transitive` | sim | PASS | "não tem nenhum pacote vulnerável" nos 4 projetos (`testes` r01 e r02); auditoria r01 reexecutou no HEAD a238652: 4 projetos sem pacote vulnerável |
+| G-node | Regras R18 e R19 | `node --test .claude/scripts/lib/regras-cronoai.test.mjs` | sim | PASS | `tests 106 pass 106 fail 0` (`testes` r02); 111/111 em 5279222 (`seguranca` r03); orquestrador em 87a6206 (depois da correção do lint): `tests 111 pass 111 fail 0` |
+| G-regras | validar-regras | `validar-regras.mjs --base feat/00012-identidade-empresas --commits` | sim | PASS | `114 arquivo(s) … 0 bloqueia, 0 alerta` (`testes` r02); 0/0 em 5279222 (`dev-backend` r03); orquestrador em 87a6206: `116 arquivo(s) … 0 bloqueia, 0 alerta` |
+| G-classif | classificar-diff | `classificar-diff.mjs --commits` | sim | PASS | faixa 3, T8, `seguranca` obrigatório, `especialista-obra` não exigido (`testes` r01 e r02); auditoria r01 reexecutou no HEAD a238652: T8 |
+| AC-1 | Build, format, testes, OpenAPI | gates acima | sim | PASS | G-build, G-format, G-test, G-openapi (r02); e no HEAD pela auditoria r01, no HEAD a238652 |
+| AC-2 | Migração | X1, `Migracao_ObrasAuditoria_down_remove_tudo_e_reaplica`, `Modelo_sem_mudanca_pendente`, subida local | sim | PASS | verdes 3x (r01, r02). Subida local r02: `ef database update` aplicou `Inicial`, `IdentidadeEmpresas` e `20261025201449_ObrasAuditoria`, "Done." (`testes`). `dba` r02: `diff` com a original só mostra as 4 mudanças pedidas; 17/17 em `MigracoesTestes`, `CatalogoTestes`, `AppendOnlyTestes`; auditoria r01 reexecutou no HEAD a238652: has-pending limpo e `MigracoesTestes` verdes na suíte de 451 |
 | AC-3 | Referências | T10 a T12, T29, X2, X4 | sim | PASS | 27 linhas exatas; `municipio_referencia` vazia; INSERT do app dá 42501; T29 prova `NOT VALID` → `VALIDATE` na gêmea (r01). Conferência no IBGE: V-1 |
 | AC-4 | RLS de obra e auditoria | T13 a T15, T44, X2, X3, X6, `Predicados_das_politicas_sao_os_do_plano` | sim | PASS | `qual` e `with_check` exatos; negativos de UPDATE sem `WHERE` nem `RETURNING`, com `SET` constante; `SET empresa_id = B` dá 42501 (r01). Mutação do dev: cada afrouxamento de política reprova teste. `dba` r01 confirma que `SET x = x` mascararia `USING (true)` (https://www.postgresql.org/docs/current/ddl-rowsecurity.html) |
 | AC-5 | Append-only em 3 camadas | T16 a T19, X3, X4 | sim | PASS | catálogo `["trg_auditoria_append_only|A|58"]`; app sem UPDATE, DELETE, TRUNCATE, TRIGGER e REFERENCES; dono recebe `restrict_violation` com 0 linhas e TRUNCATE; GRANT em transação desfeita e o gatilho ainda recusa (r01). Mutações do dev detectadas |
@@ -146,7 +147,7 @@ Regras do `validar-regras` (`node --test`): 40 no fim do 00012, 77 em bd508ed, 1
 | AC-16 | R18/R19 e arquitetura | T40 a T43, T78, T79, `Sem_SQL_de_escrita_em_obra_ou_auditoria_fora_de_migracao`, G-regras | sim | PASS | R18 acusa a própria linha do SQL, sem schema, com aspas, `ONLY` e `ExecuteSqlInterpolatedAsync` (r02); `MERGE INTO` e aspas escapadas (5279222; `seguranca` r03 conferiu por sonda). R19 ampliada e `r19PorInstrucao` (r02). A migração real não aciona |
 | AC-17 | Documentação | `git diff --name-only` | sim | PASS | ADR 00009 `Proposto`, ADRs 00004 e 00006, `adrs/README.md`, `backend-dotnet.md`, checklist ASVS, SPEC-01 §5, SPEC-02 RF-02.4, `CLAUDE.md`, `server/README.md` (r01, r02). README com recriar banco local e conferência do `#fim` por parser RFC 4180 (5279222) |
 | AC-18 (diff) | Front intacto | `git diff --name-only feat/00012-identidade-empresas...HEAD` | sim | PASS | nada em `src/`, `e2e/`, `Dockerfile`, `docker/`, `docker-compose` nem `.github/` (r01, r02) |
-| AC-18 (`npm run ci`) | `npm run ci` verde | `npm run ci` no worktree c13 | sim | PASS | orquestrador, rodada 01: `Test Files 10 passed (10)`, `Tests 67 passed (67)`, `Statements : 92.79% ( 1817/1958 )`, `✓ built`, exit=0 (`scratchpad\c13-npm-ci.log`); `testes` r01 também PASS (G-11). Não repetido depois: o front não mudou |
+| AC-18 (`npm run ci`) | `npm run ci` verde | `npm run ci` no worktree c13 | sim | PASS | auditoria r01 (a238652): `npm run lint` FAIL, 6× `no-useless-escape` em `.claude/scripts/lib/regras-cronoai.test.mjs:139-140` (entraram em a2bbad5; o ESLint 9 flat também percorre `.claude/`). Corrigido em 87a6206 (escapes inúteis removidos; os casos de teste não mudam). Orquestrador em 87a6206: lint e tipos ok, `Test Files 10 passed (10)`, `Tests 67 passed (67)`, `Statements : 92.79% ( 1817/1958 )`, `✓ built`, exit=0; `node --test` 111/111 |
 | AC-19 | DV do IBGE | T01, T02, T47 | sim | PASS | casos 3550308, 2611606, 5300108, 2699999 (r01) |
 | AC-20 | Logs | T66, `LogsObraTestes` | sim | PASS | id da obra no log como controle; "Obra Ficticia" e `cmd|calc` com 0 ocorrências no log da subida local (r01, r02). Teste de Development renomeado e comentado: a proteção real é o teste do `appsettings.Development.json` (5279222) |
 | R-1 | Camadas | `ArquiteturaTestes` | sim | PASS | `Api → Dados → Dominio`; domínio só com `System.Text.Json` (r01) |
@@ -166,7 +167,7 @@ Regras do `validar-regras` (`node --test`): 40 no fim do 00012, 77 em bd508ed, 1
 | E2E | `npm run e2e` | — | não | NA | front intacto |
 | R02 | Rodada 02: 15 itens | `testes`, `arquiteto`, `dba` e `seguranca` sobre a2bbad5 | sim | PASS | `testes` r02 APROVADO (434 3x, N-1 a N-11 PASS); `arquiteto` r02 APROVADO; `dba` r02 OK; mutações do dev detectadas (cota compartilhada, sem `#fim`, contagem n+1, sem faixa de datas, sem `fk_auditoria_empresa` e outras). `seguranca` r02 REPROVADO pelo Médio novo → rodada 03 |
 | R03 | Rodada 03: exponencial, `MERGE`, aspas escapadas, README, testes de log e piso | `testes` e `seguranca` sobre 5279222 | sim | PASS | `seguranca` r03 APROVADO, sem achados (79/79 focados, 111/111). Mutação do dev: sem a recusa de exponencial, 5 falhas; sem o teto de 32, 1; sem o mapeamento, 1. `testes` r03: 451/451 3x, N-1 a N-7 PASS (recusa de `1e131071`, `1e-16383`, `1E5`, `[1,2.5e3]` e 33 caracteres; controle com 5 números de até 32 caracteres; PUT com versão e trilha intactas; `MapeadorErrosObraTestes`; R18 e detector com MERGE e aspas escapadas; piso `== 8`). `arquiteto` r03 APROVADO |
-| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | A PREENCHER | A PREENCHER |
+| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | A PREENCHER | r01 (a238652): REPROVADO, achados 1 (Alto, lint) a 3 (Baixos, registro) → 87a6206 e este registro. Reauditoria: A PREENCHER |
 
 ## Ressalvas dos validadores e destino
 | Origem | Ressalva | Destino |
@@ -227,7 +228,11 @@ Regras do `validar-regras` (`node --test`): 40 no fim do 00012, 77 em bd508ed, 1
 | seguranca r03 | Nenhum achado | — |
 | dev-backend r01 | Limite de 64 KB em chunked provado só no TestServer | pendência registrada |
 | testes r03 | POST de número exponencial não afirma que nada foi gravado; PUT não afirma a chave do erro | pendência registrada (menor): o domínio recusa antes de qualquer escrita |
-| auditoria | A PREENCHER | A PREENCHER |
+| auditoria r01 | 1 [Alto]: AC-18 PASS com evidência da r01; o `npm run lint` falha no HEAD (`regras-cronoai.test.mjs:139-140`, `no-useless-escape`) | corrigido (87a6206); `npm run ci` reexecutado pelo orquestrador no HEAD novo |
+| auditoria r01 | 2 [Baixo]: linhas G-openapi, G-vuln, G-classif, AC-1, AC-2 e AC-18 com evidência anterior a 5279222 | corrigido neste registro com as execuções da auditoria no HEAD a238652 e do orquestrador em 87a6206 |
+| auditoria r01 | 3 [Baixo]: registro contraditório sobre a r03 (linhas de estado e de pendências) | corrigido neste registro |
+| auditoria r01 (observação) | O T31 isolado não prova rollback (o EF insere a trilha antes do UPDATE); a atomicidade é provada pelo T39, pelo conflito de nome no restaurar e pelos PUTs paralelos | registrado; lição para os testes de atomicidade do 00015 |
+| reauditoria | A PREENCHER | A PREENCHER |
 
 ## Pendências registradas
 - **V-1 do usuário (bloqueia o merge):** conferir os 27 códigos de UF da migração `20261025201449_ObrasAuditoria` contra a fonte oficial do IBGE.
@@ -247,7 +252,7 @@ Regras do `validar-regras` (`node --test`): 40 no fim do 00012, 77 em bd508ed, 1
 - **Regra do ROLLBACK para o 00015:** em transação explícita, `DbUpdateConcurrencyException` ou `DbUpdateException` exige ROLLBACK. Está no ADR 00009 e no `backend-dotnet.md`; falta o teste no 00015.
 - **`Content-Disposition`:** sai `filename=` sem aspas mais `filename*=`, e não `filename="..."` como o AC-15. Nome fixo, sem entrada do usuário. Aceito com registro pelo `arquiteto`; o usuário confirma no PR.
 - **Limite de 64 KB:** provado só no TestServer; Kestrel real não exercitado.
-- **Rodada 03 sem `arquiteto` nem `dba`:** a r03 mexeu em `JsonOpcoes`, `MapeadorErrosObra` e nas regras, e foi validada só pela `seguranca` e pelo `testes`.
+- **Rodada 03:** validada pelo `testes` (451 3x), pela `seguranca` (APROVADO) e pelo `arquiteto` (confirmação, APROVADO). O `dba` não foi acionado porque a r03 não mudou banco, migração nem consulta.
 - **Herdado do 00012, ainda aberto:** ver "Pendências registradas" do registro do 00012.
 - **Antes do PR:** fazer merge da `master`. PR empilhado em `feat/00012-identidade-empresas` se o 00012 não tiver entrado.
 
