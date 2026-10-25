@@ -4,6 +4,8 @@ import type { ProjectMeta } from '@/types/domain'
 import { REGIMES_SINAPI, ROTULO_REGIME_SINAPI, UFS, type RegimeSinapi, type UF } from '@/data/ufs'
 import { defaultHolidays, diffCalendarDays, parseISO, toISO } from './calendar'
 import { JANELA_ANOS_DATAS, UID_CALENDARIO_PADRAO, calendarioPadrao } from './calendarioTrabalho'
+import { configFeriadosPadrao } from './feriadosObra'
+import { premissasPadrao } from './premissas'
 
 export const MAX_NOME_OBRA = 120
 export const MAX_MUNICIPIO = 80
@@ -114,9 +116,9 @@ export function validarDadosObra(d: DadosObra, contexto?: ContextoInicio): strin
 
 /**
  * Estado de uma obra em branco: sem tarefas, com feriados nacionais e sem UF (a UF só entra se informada).
- * O custo indireto diário vem de quem chama (premissa ilustrativa até o ciclo 00005).
+ * As premissas nascem na versão 1 padrão (ilustrativas), com vigência na data de início da obra.
  */
-export function estadoObraVazia(d: DadosObra, custoIndiretoDiario: number): PersistedState {
+export function estadoObraVazia(d: DadosObra): PersistedState {
   const ano = Number(d.dataInicio.slice(0, 4))
   const meta: PersistedState['meta'] = {
     name: d.nome.trim(),
@@ -124,7 +126,6 @@ export function estadoObraVazia(d: DadosObra, custoIndiretoDiario: number): Pers
     manager: (d.responsavel ?? '').trim(),
     startDate: d.dataInicio,
     statusDate: d.dataStatus,
-    dailyIndirectCost: custoIndiretoDiario,
   }
   if (d.uf) meta.uf = d.uf
   if (d.municipio?.trim()) meta.municipio = d.municipio.trim()
@@ -135,6 +136,8 @@ export function estadoObraVazia(d: DadosObra, custoIndiretoDiario: number): Pers
     tasks: [],
     calendarios: [calendarioPadrao(defaultHolidays(ano, ano + 3))],
     calendarioPadraoUid: UID_CALENDARIO_PADRAO,
+    premissas: [{ versao: 1, vigencia: d.dataInicio, motivo: 'Premissas iniciais da obra (ilustrativas)', valores: premissasPadrao() }],
+    feriados: configFeriadosPadrao(),
     reports: [],
     restrictions: [],
     materials: [],

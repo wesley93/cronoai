@@ -9,8 +9,26 @@ const dateShort = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-d
 const dateLong = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
 const weekday = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', timeZone: 'UTC' })
 
+/**
+ * Arredondamento bancário (meio para o par) em `casas` casas decimais — RNF-03.2, gate P2 = a. Só para EXIBIÇÃO: o cálculo
+ * guarda o valor sem arredondar. O empate é detectado no valor decimal (15 algarismos significativos), não no binário:
+ * 2,675 (que o ponto flutuante guarda como 2,67499…) é empate e vai para o par, 2,68. Fonte da regra: ABNT NBR 5891 (a confirmar
+ * com Orçamento/Custos). Ex.: 0,125 → 0,12; 0,135 → 0,14; 2,675 → 2,68; 1,005 → 1,00; −0,125 → −0,12.
+ */
+export function arredondarBancario(valor: number, casas = 2): number {
+  if (!Number.isFinite(valor)) return 0
+  const fator = 10 ** casas
+  const escalado = Number((Math.abs(valor) * fator).toPrecision(15))
+  const piso = Math.floor(escalado)
+  const resto = escalado - piso
+  const arredondado = resto > 0.5 ? piso + 1 : resto < 0.5 ? piso : piso % 2 === 0 ? piso : piso + 1
+  const r = (valor < 0 ? -arredondado : arredondado) / fator
+  return r === 0 ? 0 : r // sem -0
+}
+
 export const fmtBRL = (v: number) => brl.format(Number.isFinite(v) ? v : 0)
-export const fmtBRLCents = (v: number) => brlCents.format(Number.isFinite(v) ? v : 0)
+/** Reais com centavos, arredondados pelo método bancário (meio para o par). */
+export const fmtBRLCents = (v: number) => brlCents.format(Number.isFinite(v) ? arredondarBancario(v, 2) : 0)
 export const fmtNum = (v: number) => num.format(Number.isFinite(v) ? v : 0)
 /** Minutos úteis em dias da obra, até 1 casa (pt-BR): 5760 → "12", 26534 → "55,3" (sem a unidade). */
 export const fmtDiasUteis = (minutos: number, minutosPorDia = MINUTOS_POR_DIA_PADRAO) => fmtNum(minutosParaDias(minutos, minutosPorDia))

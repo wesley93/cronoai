@@ -6,6 +6,8 @@ import { calendarioDeDias, compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
 import { analyzeDelay, crashingTargets, fastTrackOptions, recommendScenario, simulateAll, simulateCrashing, simulateFastTracking, simulateOvertime } from './scenarios'
 import { analyzeSupplies } from './supplies'
+import { premissasPadrao } from './premissas'
+import type { PremissasObra } from '@/types/domain'
 
 const seed = buildSeedState()
 const cals = compilarCalendarios(seed.meta.startDate, seed.calendarios, seed.calendarioPadraoUid)
@@ -125,5 +127,74 @@ describe('Suprimentos', () => {
     expect(store.scenarios.overtime.daysRecovered).toBe(before + 1)
     store.resetScenarioParams()
     expect(store.scenarios.overtime.daysRecovered).toBe(before)
+  })
+})
+
+describe('Premissas da obra nos cenários (ciclo 00005)', () => {
+  const comPremissas = (parcial: Partial<PremissasObra>, versaoPremissas = { versao: 2, vigencia: '2026-10-23' }) => ({
+    ...ctx,
+    premissas: { ...premissasPadrao(), ...parcial },
+    versaoPremissas,
+  })
+
+  it('PR-2: indireto de R$ 12.000 muda a economia dos três cenários na hora (dias, custos e entregas iguais ao padrão)', () => {
+    const r = simulateAll(comPremissas({ custoIndiretoDiario: 12000 }))
+    // economia = max(0, d.u.) × indireto diário
+    expect([r.crashing.daysRecovered, r.crashing.indirectSavings, r.crashing.newFinish]).toEqual([3, 36000, '2027-06-18'])
+    expect(r.crashing.extraCost).toBeCloseTo(12616.8, 2)
+    expect(r.crashing.netImpact).toBeCloseTo(-23383.2, 2)
+    expect([r['fast-tracking'].daysRecovered, r['fast-tracking'].indirectSavings, r['fast-tracking'].newFinish]).toEqual([13, 156000, '2027-06-04'])
+    expect(r['fast-tracking'].netImpact).toBeCloseTo(-130650, 2)
+    expect([r.overtime.daysRecovered, r.overtime.indirectSavings, r.overtime.newFinish]).toEqual([2, 24000, '2027-06-21'])
+    expect(r.overtime.extraCost).toBeCloseTo(22315.2, 2)
+    expect(r.overtime.netImpact).toBeCloseTo(-1684.8, 2)
+    expect(r.overtime.risk).toBe('Baixo') // antes: Médio (saldo +2.615,20); com o indireto de 12.000 o saldo é negativo
+    expect(recommendScenario(r).kind).toBe('crashing')
+  })
+
+  it('o resultado registra a versão das premissas usada; sem versão informada o campo não existe', () => {
+    expect(simulateCrashing(comPremissas({})).premissas).toEqual({ versao: 2, vigencia: '2026-10-23' })
+    expect(simulateOvertime(comPremissas({}, { versao: 3, vigencia: '2026-11-01' })).premissas).toEqual({ versao: 3, vigencia: '2026-11-01' })
+    expect(simulateCrashing(ctx).premissas).toBeUndefined()
+  })
+
+  it('PR-5: taxa de R$ 20,00/h sem encargos (57%) dá o mesmo crashing de R$ 12.616,80', () => {
+    const base = premissasPadrao()
+    const p: Partial<PremissasObra> = {
+      encargosSociaisPct: 57,
+      taxas: base.taxas.map((t) => (t.funcao === 'Pedreiro' ? { ...t, valorHora: 20, incluiEncargos: false } : t)),
+    }
+    const c = simulateCrashing(comPremissas(p))
+    // (2 × 20 × 1,57 + 23,90) × 8 h × 13 d + 3 × 1.200
+    expect(c.extraCost).toBeCloseTo(12616.8, 2)
+  })
+
+  it('cada premissa muda só o que deve: congestionamento, mobilização, contingência e adicional de HE', () => {
+    // sem perda por congestionamento: ⌈16 × 6 ÷ 8⌉ = 12 d (e não 13)
+    const semPerda = simulateCrashing(comPremissas({ perdaCongestionamentoPct: 0 }))
+    expect(semPerda.memory[0]).toContain('⌈16 × 6 ÷ (6 + 2) × 1⌉ = ⌈12⌉ = 12 d.u.')
+    expect(semPerda.daysRecovered).toBe(4)
+    expect(simulateCrashing(comPremissas({ mobilizacaoPorProfissional: 2000 })).extraCost).toBeCloseTo((2 * 31.4 + 23.9) * 8 * 13 + 3 * 2000, 2)
+    // contingência 8%: o dobro dos R$ 25.350,00
+    expect(simulateFastTracking(comPremissas({ contingenciaRetrabalhoPct: 8 })).extraCost).toBeCloseTo(50700, 2)
+    // adicional de 100%: (929,80 × 8 h × 2) × 2 sábados
+    const he = simulateOvertime(comPremissas({ adicionalHoraExtraPct: 100 }))
+    expect(he.extraCost).toBeCloseTo(929.8 * 8 * 2 * 2, 2)
+    expect(he.summary).toContain('(8 h, adicional de 100%)')
+  })
+
+  it('a memória diz qual versão foi usada e marca como ilustrativas as premissas padrão (Inviolável 7)', () => {
+    const c = simulateCrashing(comPremissas({}, { versao: 1, vigencia: '2026-05-04' }))
+    expect(c.memory.at(-1)).toBe(
+      'Premissas v1 — vigência 04/05/2026. Ilustrativas, sem validação: perda por congestionamento, mobilização por profissional, custo indireto diário, taxas por função.',
+    )
+    expect(c.memory[0]).toContain('⌈16 × 6 ÷ (6 + 2) × 1,05⌉')
+  })
+
+  it('a jornada do custo vem dos minutos por dia do calendário (480 → 8 h; 450 → 7,5 h)', () => {
+    const meta450 = { ...ctx.meta, minutosPorDia: 450 }
+    const he = simulateOvertime({ ...ctx, meta: meta450 })
+    expect(he.summary).toContain('(7,5 h, adicional de 50%)')
+    expect(he.extraCost).toBeCloseTo(929.8 * 7.5 * 1.5 * 2, 2)
   })
 })

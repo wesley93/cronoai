@@ -40,7 +40,7 @@ const rawTeamForDuration = computed(() => teamFromDuration(quantity.value, item.
 const days = computed(() => (mode.value === 'equipe' ? scheduleDays(rawDuration.value) : scheduleDays(durationFromTeam(quantity.value, item.rup, officials.value))))
 const helpers = computed(() => Math.ceil(officials.value * item.helperRatio - 1e-9))
 const bac = computed(() => quantity.value * item.unitCost)
-const laborCost = computed(() => hh.value * rateOf(item.professional) + days.value * HOURS_PER_DAY * helpers.value * rateOf('Servente'))
+const laborCost = computed(() => hh.value * rateOf(project.premissasVigentes, item.professional) + days.value * HOURS_PER_DAY * helpers.value * rateOf(project.premissasVigentes, 'Servente'))
 const dailyOutput = computed(() => (days.value ? quantity.value / days.value : 0))
 
 // Inserção na EAP

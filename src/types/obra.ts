@@ -9,6 +9,9 @@ export interface ScenarioUndo {
   taskUid?: number
   before?: Partial<Task>
   addedDays?: string[]
+  /** Hora extra por frente: calendários derivados criados pelo cenário (UIDs) e o calendário que cada tarefa tinha antes. */
+  calendariosCriados?: number[]
+  calendariosAntes?: { uid: number; calendarioUid?: number }[]
   costId: string
   result: ScenarioResult
 }

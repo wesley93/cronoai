@@ -3,13 +3,16 @@
 import type { PersistedState, RegistroObra } from '@/types/obra'
 import { defaultHolidays, parseISO, toISO } from './calendar'
 import { UID_CALENDARIO_PADRAO, calendarioPadrao, diasParaMinutos, erroDoCalendario } from './calendarioTrabalho'
-import type { CalendarioObra } from '@/types/domain'
+import type { CalendarioObra, ChavePremissa, VersaoPremissas } from '@/types/domain'
+import { configFeriadosPadrao, configFeriadosValida } from './feriadosObra'
+import { premissasPadrao, versoesValidas } from './premissas'
 
 /**
  * Esquema 1 = formato do `cronoai-state-v1`; esquema 2 = o mesmo estado dentro de um registro por obra;
- * esquema 3 = tempo em minutos inteiros e calendários por intervalo (ciclo 00004, ADR 00003).
+ * esquema 3 = tempo em minutos inteiros e calendários por intervalo (ciclo 00004, ADR 00003);
+ * esquema 4 = premissas versionadas e feriados da obra (ciclo 00005).
  */
-export const ESQUEMA_ATUAL = 3
+export const ESQUEMA_ATUAL = 4
 
 /** Estado como foi lido do armazenamento, ainda sem forma garantida. */
 export type EstadoBruto = Record<string, unknown>
@@ -81,10 +84,45 @@ function migrar2Para3(estado: EstadoBruto): EstadoBruto {
   return saida
 }
 
+const INDIRETO_VALIDO = (v: unknown): v is number => eNumero(v) && v >= 0 && v <= 1e9
+const MARGEM_VALIDA = (v: unknown): v is number => eNumero(v) && Number.isInteger(v) && v >= 0 && v <= 30
+
+/**
+ * Passo 3 → 4: o custo indireto e a margem da DLP saem do `meta` e viram a versão 1 das premissas (vigência = início da obra).
+ * Valor diferente do padrão ganha origem 'nao-documentada'; igual, 'ilustrativa'. Valor inválido volta ao padrão (o aviso sai em
+ * `levarAoAtual`). Os feriados ganham a configuração padrão. Calendários e `undo` não mudam: nenhuma data muda.
+ */
+function migrar3Para4(estado: EstadoBruto): EstadoBruto {
+  const saida: EstadoBruto = { ...estado }
+  const meta: Record<string, unknown> = eObjeto(saida.meta) ? { ...saida.meta } : {}
+  const padrao = premissasPadrao()
+  const valores = premissasPadrao()
+  const indireto = meta.dailyIndirectCost
+  const margem = meta.safetyMarginDays
+  if (INDIRETO_VALIDO(indireto)) valores.custoIndiretoDiario = indireto
+  if (MARGEM_VALIDA(margem)) valores.margemDlpDias = margem
+  const origem = (chave: ChavePremissa) => ({ origem: valores[chave] === padrao[chave] ? ('ilustrativa' as const) : ('nao-documentada' as const) })
+  valores.origens.custoIndiretoDiario = origem('custoIndiretoDiario')
+  valores.origens.margemDlpDias = origem('margemDlpDias')
+  const v1: VersaoPremissas = {
+    versao: 1,
+    vigencia: typeof meta.startDate === 'string' ? meta.startDate : '',
+    motivo: 'Premissas anteriores ao ciclo 00005 (migradas)',
+    valores,
+  }
+  delete meta.dailyIndirectCost
+  delete meta.safetyMarginDays
+  saida.meta = meta
+  saida.premissas = [v1]
+  saida.feriados = configFeriadosPadrao()
+  return saida
+}
+
 export const MIGRACOES: PassoMigracao[] = [
   // v1 → v2: só embrulha o estado num registro por obra; o conteúdo não muda.
   { de: 1, para: 2, aplicar: (estado) => estado },
   { de: 2, para: 3, aplicar: migrar2Para3 },
+  { de: 3, para: 4, aplicar: migrar3Para4 },
 ]
 
 export type LeituraV1 =
@@ -121,6 +159,8 @@ function eEstado(v: Record<string, unknown>): v is Record<string, unknown> & Per
     dataIsoValida(v.meta.statusDate) &&
     Array.isArray(v.calendarios) &&
     v.calendarios.every(eObjeto) &&
+    Array.isArray(v.premissas) &&
+    eObjeto(v.feriados) &&
     eNumero(v.calendarioPadraoUid) &&
     CHAVES_LISTA.every((c) => Array.isArray(v[c]))
   )
@@ -134,7 +174,7 @@ function anoDaObra(estado: Record<string, unknown>, anoPadrao: number): number {
 /**
  * Completa as chaves ausentes ou de tipo errado com o valor vazio. Diferente do merge raso antigo,
  * não injeta orçamento nem relatos do Edifício Aurora numa obra que não é o Aurora.
- * Esquema ≤ 2: completa `calendar`. Esquema ≥ 3: completa `calendarios` e o calendário padrão.
+ * Esquema ≤ 2: completa `calendar`. Esquema ≥ 3: completa `calendarios` e o calendário padrão; esquema ≥ 4: `premissas` e `feriados`.
  */
 function completarChaves(bruto: EstadoBruto, anoPadrao: number, esquema: number): { estado: EstadoBruto; preenchidas: string[] } {
   const preenchidas: string[] = []
@@ -172,6 +212,19 @@ function completarChaves(bruto: EstadoBruto, anoPadrao: number, esquema: number)
         saida.calendarioPadraoUid = lista[0].uid
         preenchidas.push('calendarioPadraoUid')
       }
+    }
+  }
+  if (esquema >= 4) {
+    // Premissas ausentes, vazias ou inválidas voltam à versão 1 padrão (vigência = início da obra); feriados, ao padrão
+    if (!versoesValidas(saida.premissas)) {
+      const meta = eObjeto(saida.meta) ? saida.meta : {}
+      const vigencia = typeof meta.startDate === 'string' ? meta.startDate : ''
+      saida.premissas = [{ versao: 1, vigencia, motivo: 'Premissas padrão (o estado salvo não tinha premissas válidas)', valores: premissasPadrao() }]
+      preenchidas.push('premissas')
+    }
+    if (!configFeriadosValida(saida.feriados)) {
+      saida.feriados = configFeriadosPadrao()
+      preenchidas.push('feriados')
     }
   }
   return { estado: saida, preenchidas }
@@ -219,6 +272,14 @@ const tarefasCompletas = (tasks: unknown[]): boolean => tasks.every((t) => eObje
 function levarAoAtual(bruto: EstadoBruto, de: number, anoPadrao: number): ResultadoMigracao {
   const { estado: completo, preenchidas } = completarChaves(bruto, anoPadrao, de)
   let estado = completo
+  // Antes do esquema 4 o indireto e a margem moravam no meta: valor inválido volta ao padrão, com aviso
+  const avisosPremissas: string[] = []
+  if (de < 4 && eObjeto(estado.meta)) {
+    const { dailyIndirectCost: indireto, safetyMarginDays: margem } = estado.meta
+    if ((indireto !== undefined && !INDIRETO_VALIDO(indireto)) || (margem !== undefined && !MARGEM_VALIDA(margem)) || indireto === undefined) {
+      avisosPremissas.push('O custo indireto ou a margem da DLP do estado salvo estavam ausentes ou inválidos: valem os valores padrão (ilustrativos) nas premissas da obra.')
+    }
+  }
   for (let v = de; v < ESQUEMA_ATUAL; v++) {
     const passo = MIGRACOES.find((p) => p.de === v)
     if (!passo) return { tipo: 'erro', mensagem: `Não há migração do esquema ${v} para o ${v + 1}.` }
@@ -228,7 +289,7 @@ function levarAoAtual(bruto: EstadoBruto, de: number, anoPadrao: number): Result
   if (!eEstado(estado) || !tarefasCompletas(estado.tasks)) {
     return { tipo: 'erro', mensagem: 'Os dados desta obra estão ilegíveis.' }
   }
-  return { tipo: 'ok', estado, avisos: [...avisoDePreenchidas(preenchidas), ...descartes] }
+  return { tipo: 'ok', estado, avisos: [...avisoDePreenchidas(preenchidas), ...avisosPremissas, ...descartes] }
 }
 
 /** Lê o texto gravado em `cronoai-state-v1`. */

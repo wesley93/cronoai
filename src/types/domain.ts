@@ -13,6 +13,8 @@ export interface IntervaloTrabalho {
 export interface ExcecaoCalendario {
   data: string
   intervalos: IntervaloTrabalho[]
+  /** Descrição livre da exceção (até 80 caracteres), só para a tela. */
+  descricao?: string
 }
 
 /** Calendário da obra: semana por intervalo de horário e exceções (ADR 00003). */
@@ -23,6 +25,12 @@ export interface CalendarioObra {
   /** 7 posições: 0 = domingo … 6 = sábado; no máximo 5 intervalos por dia (esquema MSPDI). */
   semana: IntervaloTrabalho[][]
   excecoes: ExcecaoCalendario[]
+  /** Aplica os feriados da obra (nacionais, Carnaval, Corpus Christi e manuais) a este calendário; ausente = não aplica. */
+  aplicaFeriadosObra?: boolean
+  /** Calendário de hora extra: UID do calendário de que foi copiado. */
+  derivadoDe?: number
+  /** `'hora-extra'`: criado por um cenário de hora extra por frente; só sai pelo "desfazer" do cenário. */
+  origem?: 'hora-extra'
 }
 
 /**
@@ -157,10 +165,6 @@ export interface ProjectMeta {
   manager: string
   startDate: string
   statusDate: string
-  /** Custo indireto diário da obra (R$/dia útil): canteiro, equipe técnica, equipamentos. */
-  dailyIndirectCost: number
-  /** Margem de segurança da Data Limite de Pedido (dias corridos). */
-  safetyMarginDays?: number
   /** UF da obra (ausente = não informada; nunca assumida). */
   uf?: UF
   municipio?: string
@@ -323,12 +327,105 @@ export interface RecoveryCost {
   amount: number
 }
 
+/** De onde vem uma premissa (RF-03.2). `'ilustrativa'` = valor de exemplo, ainda sem validação (Inviolável 7). */
+export const ORIGENS_PREMISSA = ['ilustrativa', 'nao-documentada', 'sinapi', 'acordo-coletivo', 'proposta-empreiteiro', 'orcamento-obra', 'outra'] as const
+export type OrigemPremissa = (typeof ORIGENS_PREMISSA)[number]
+
+export interface Origem {
+  origem: OrigemPremissa
+  /** Fonte em texto livre (até 120 caracteres), ex.: "SINAPI SP 09/2026 desonerado". */
+  referencia?: string
+}
+
+/** Taxa horária de uma função. Com `incluiEncargos = false` a taxa efetiva soma os encargos sociais da premissa. */
+export interface TaxaFuncao extends Origem {
+  funcao: string
+  valorHora: number
+  incluiEncargos: boolean
+  /** Data-base da taxa (AAAA-MM). */
+  dataReferencia?: string
+}
+
+/** Chaves das premissas escalares que têm origem própria. */
+export const CHAVES_PREMISSA = [
+  'custoIndiretoDiario',
+  'encargosSociaisPct',
+  'taxaFuncaoNaoCadastrada',
+  'perdaCongestionamentoPct',
+  'mobilizacaoPorProfissional',
+  'adicionalHoraExtraPct',
+  'contingenciaRetrabalhoPct',
+  'margemDlpDias',
+] as const
+export type ChavePremissa = (typeof CHAVES_PREMISSA)[number]
+
+/** Premissas da obra usadas nos cenários e na DLP. Percentuais de 0 a 100 (convertidos na função: `1 + p/100`). */
+export interface PremissasObra {
+  /** R$ por dia útil: é o valor que o cálculo usa. */
+  custoIndiretoDiario: number
+  /** Se o indireto foi informado por mês: o valor, o divisor (dias úteis do ano) e o ano usados na conversão. */
+  custoIndiretoMensal?: { valor: number; diasUteisAno: number; ano: number }
+  /** Ausente = não informado (nenhum número é inventado). */
+  encargosSociaisPct?: number
+  taxas: TaxaFuncao[]
+  /** R$/h de uma função que não está nas taxas. */
+  taxaFuncaoNaoCadastrada: number
+  perdaCongestionamentoPct: number
+  /** R$ por profissional adicional (integração, EPI, exames). */
+  mobilizacaoPorProfissional: number
+  adicionalHoraExtraPct: number
+  /** % do BAC da sucessora reservado para retrabalho no paralelismo. */
+  contingenciaRetrabalhoPct: number
+  /** Margem de segurança da DLP, em dias corridos. */
+  margemDlpDias: number
+  origens: Partial<Record<ChavePremissa, Origem>>
+}
+
+/** Versão imutável das premissas: alterar uma premissa cria uma versão nova (RF-03.3). */
+export interface VersaoPremissas {
+  versao: number
+  /** Data (yyyy-mm-dd) a partir da qual a versão vale (versão vigente = a de maior número com vigência até a data de status). */
+  vigencia: string
+  criadaEm?: string
+  motivo: string
+  valores: PremissasObra
+}
+
+export const ABRANGENCIAS_FERIADO = ['estadual', 'municipal', 'ponto-facultativo', 'paralisacao', 'outro'] as const
+export type AbrangenciaFeriado = (typeof ABRANGENCIAS_FERIADO)[number]
+
+/** Feriado cadastrado à mão, sempre com a fonte (nenhuma lista oficial é embutida). */
+export interface FeriadoManual {
+  id: string
+  data: string
+  nome: string
+  abrangencia: AbrangenciaFeriado
+  fonte: string
+  /** Mesmo dia e mês em todo ano. */
+  recorrenteAnual: boolean
+  /** UF e município da obra quando o feriado foi cadastrado. */
+  uf?: UF
+  municipio?: string
+}
+
+/** Feriados da obra: nacionais calculados, Carnaval e Corpus Christi como opção e os manuais. */
+export interface ConfigFeriadosObra {
+  nacionais: boolean
+  carnaval: boolean
+  corpusChristi: boolean
+  manuais: FeriadoManual[]
+}
+
 export interface ProjectState {
   meta: ProjectMeta
   tasks: Task[]
   calendarios: CalendarioObra[]
   /** UID do calendário padrão da obra (o das tarefas sem `calendarioUid`). */
   calendarioPadraoUid: number
+  /** Versões das premissas da obra, da mais antiga para a mais nova (nunca se apaga uma versão). */
+  premissas: VersaoPremissas[]
+  /** Feriados da obra (padrão: nacionais, Carnaval e Corpus Christi ligados, sem feriados manuais). */
+  feriados: ConfigFeriadosObra
   reports: FieldReport[]
   restrictions: SiteRestriction[]
   materials: MaterialItem[]

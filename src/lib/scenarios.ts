@@ -1,6 +1,5 @@
 // Efeito dominó e simulador de recuperação (Crashing, Fast Tracking e Hora Extra).
-import type { CalendarioObra, ProjectMeta, ScenarioKind, ScheduleResult, Task } from '@/types/domain'
-import { HOURLY_RATES } from '@/data/seed'
+import type { CalendarioObra, PremissasObra, ProjectMeta, ScenarioKind, ScheduleResult, Task, VersaoPremissas } from '@/types/domain'
 import { WorkCalendar, diffCalendarDays, nextSaturdays } from './calendar'
 import {
   MINUTOS_NO_DIA_CORRIDO,
@@ -14,14 +13,11 @@ import {
   minutosParaDias,
 } from './calendarioTrabalho'
 import { computeSchedule, downstreamOf, optsDaObra } from './cpm'
+import { memoriaPremissas, premissasPadrao, taxaHora } from './premissas'
 import { normalizeText, rotuloLag } from './wbs'
 
-export const CONGESTION_FACTOR = 1.05 // perda de produtividade por adensamento da frente
-export const MOBILIZATION_PER_WORKER = 1200 // integração, EPI, exames (R$/profissional)
-export const OVERTIME_PREMIUM = 0.5 // adicional de 50% (validar convenção coletiva com RH/Jurídico)
-export const REWORK_CONTINGENCY = 0.04 // % do BAC da sucessora reservado para retrabalho no paralelismo
-
-export const rateOf = (resource: string) => (HOURLY_RATES as Record<string, number>)[resource] ?? 30
+/** Taxa horária da função nas premissas da obra (R$/h); função não cadastrada usa a taxa padrão das premissas. */
+export const rateOf = (premissas: PremissasObra, resource: string) => taxaHora(premissas, resource)
 
 export interface AffectedTask {
   uid: number
@@ -127,6 +123,8 @@ export interface ScenarioResult {
   details: { label: string; value: string }[]
   /** Memória de cálculo, linha a linha, com os números usados. */
   memory: string[]
+  /** Versão das premissas usada no cálculo (ausente em cenário aplicado antes do ciclo 00005). */
+  premissas?: { versao: number; vigencia: string }
   /** Alterações a aplicar no estado se o engenheiro aprovar. */
   taskPatch?: { uid: number; patch: Partial<Task> }
   addedWorkingDays?: string[]
@@ -145,7 +143,16 @@ interface Ctx {
   meta: ProjectMeta
   forecast: ScheduleResult
   origin?: Task
+  /** Premissas vigentes da obra; ausente = premissas padrão (ilustrativas). */
+  premissas?: PremissasObra
+  /** Versão das premissas vigentes (registrada no resultado do cenário). */
+  versaoPremissas?: Pick<VersaoPremissas, 'versao' | 'vigencia'>
 }
+
+const premissasDe = (ctx: Ctx): PremissasObra => ctx.premissas ?? premissasPadrao()
+/** Registra no resultado a versão das premissas usada. */
+const comVersao = (ctx: Ctx, r: ScenarioResult): ScenarioResult =>
+  ctx.versaoPremissas ? { ...r, premissas: { versao: ctx.versaoPremissas.versao, vigencia: ctx.versaoPremissas.vigencia } } : r
 
 const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 const fmtRate = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 })
@@ -155,6 +162,8 @@ const shortName = (name: string) =>
   name.replace('Alvenaria de vedação bloco cerâmico 14x19x29', 'Alvenaria').replace('Estrutura de concreto armado fck 30', 'Estrutura')
 
 const minutosPorDiaDe = (ctx: Ctx) => ctx.meta.minutosPorDia ?? MINUTOS_POR_DIA_PADRAO
+/** Horas por dia do custo: jornada do calendário, minutos por dia ÷ 60 (480 → 8 h). */
+const horasPorDiaDe = (ctx: Ctx) => minutosPorDiaDe(ctx) / 60
 
 function reschedule(ctx: Ctx, tasks: Task[], calendarios: CalendarioObra[]) {
   const cals = compilarCalendarios(ctx.meta.startDate, calendarios, ctx.calendarioPadraoUid)
@@ -167,10 +176,11 @@ function recovered(ctx: Ctx, newFinish: string): number {
   return workingVariance(calendarioDeDias(cals.padrao), newFinish, ctx.forecast.projectFinish)
 }
 
-const notApplicable = (kind: ScenarioKind, title: string, reason: string, ctx: Ctx): ScenarioResult => ({
-  kind, applicable: false, reason, title, summary: reason, daysRecovered: 0, newFinish: ctx.forecast.projectFinish,
-  extraCost: 0, indirectSavings: 0, netImpact: 0, costPerDay: 0, risk: 'Baixo', riskNote: '', details: [], memory: [],
-})
+const notApplicable = (kind: ScenarioKind, title: string, reason: string, ctx: Ctx): ScenarioResult =>
+  comVersao(ctx, {
+    kind, applicable: false, reason, title, summary: reason, daysRecovered: 0, newFinish: ctx.forecast.projectFinish,
+    extraCost: 0, indirectSavings: 0, netImpact: 0, costPerDay: 0, risk: 'Baixo', riskNote: '', details: [], memory: [],
+  })
 
 const perDay = (extra: number, days: number) => (days > 0 ? extra / days : Infinity)
 
@@ -216,9 +226,12 @@ export function simulateCrashing(ctx: Ctx, p: ScenarioParams['crashing'] = DEFAU
   if (add + addS === 0) return notApplicable('crashing', title, 'Informe ao menos 1 profissional adicional.', ctx)
 
   const mpd = minutosPorDiaDe(ctx)
+  const prem = premissasDe(ctx)
+  const congestionamento = 1 + prem.perdaCongestionamentoPct / 100 // 1 + 5/100 = 1,05
+  const horas = horasPorDiaDe(ctx)
   const durDias = minutosParaDias(target.duracaoMin, mpd)
   const raw = (durDias * trade.units) / (trade.units + add)
-  const newDuration = Math.max(1, Math.ceil(raw * CONGESTION_FACTOR - 1e-9))
+  const newDuration = Math.max(1, Math.ceil(raw * congestionamento - 1e-9))
   const resources = target.resources.map((r) =>
     r.resource === trade.resource ? { ...r, units: r.units + add } : r.resource === 'Servente' ? { ...r, units: r.units + addS } : r,
   )
@@ -229,15 +242,15 @@ export function simulateCrashing(ctx: Ctx, p: ScenarioParams['crashing'] = DEFAU
   const days = recovered(ctx, schedule.projectFinish)
   const critical = !!ctx.forecast.byUid.get(target.uid)?.critical
 
-  const rateO = rateOf(trade.resource)
-  const rateS = rateOf('Servente')
-  const labor = (add * rateO + addS * rateS) * 8 * newDuration
-  const mobilization = MOBILIZATION_PER_WORKER * (add + addS)
+  const rateO = rateOf(prem, trade.resource)
+  const rateS = rateOf(prem, 'Servente')
+  const labor = (add * rateO + addS * rateS) * horas * newDuration
+  const mobilization = prem.mobilizacaoPorProfissional * (add + addS)
   const extraCost = labor + mobilization
-  const indirectSavings = Math.max(0, days) * ctx.meta.dailyIndirectCost
+  const indirectSavings = Math.max(0, days) * prem.custoIndiretoDiario
   const density = (trade.units + add) / trade.units
 
-  return {
+  return comVersao(ctx, {
     kind: 'crashing',
     applicable: true,
     targetUid: target.uid,
@@ -251,7 +264,7 @@ export function simulateCrashing(ctx: Ctx, p: ScenarioParams['crashing'] = DEFAU
     costPerDay: perDay(extraCost, days),
     risk: density > 1.6 ? 'Alto' : density > 1.35 ? 'Médio' : 'Baixo',
     riskNote: critical
-      ? `A equipe passa a ${Math.round(density * 100)}% da original. Acima de ~135% a frente congestiona (perda de ${Math.round((CONGESTION_FACTOR - 1) * 100)}% já considerada).`
+      ? `A equipe passa a ${Math.round(density * 100)}% da original. Acima de ~135% a frente congestiona (perda de ${Math.round(prem.perdaCongestionamentoPct)}% já considerada).`
       : 'Atenção: a tarefa escolhida não está no caminho crítico — reduzir a duração dela não antecipa a entrega.',
     details: [
       { label: 'Duração', value: `${num(durDias)} → ${newDuration} dias úteis` },
@@ -260,14 +273,15 @@ export function simulateCrashing(ctx: Ctx, p: ScenarioParams['crashing'] = DEFAU
       { label: 'Mobilização/EPI', value: fmt(mobilization) },
     ],
     memory: [
-      `Duração nova = ⌈${num(durDias)} × ${trade.units} ÷ (${trade.units} + ${add}) × ${num(CONGESTION_FACTOR)}⌉ = ⌈${num(raw * CONGESTION_FACTOR)}⌉ = ${newDuration} d.u.`,
-      `Mão de obra extra = (${add} × ${fmtRate(rateO)}/h + ${addS} × ${fmtRate(rateS)}/h) × 8 h × ${newDuration} d = ${fmt(labor)}`,
-      `Mobilização = ${add + addS} × ${fmt(MOBILIZATION_PER_WORKER)} = ${fmt(mobilization)}`,
+      `Duração nova = ⌈${num(durDias)} × ${trade.units} ÷ (${trade.units} + ${add}) × ${num(congestionamento)}⌉ = ⌈${num(raw * congestionamento)}⌉ = ${newDuration} d.u.`,
+      `Mão de obra extra = (${add} × ${fmtRate(rateO)}/h + ${addS} × ${fmtRate(rateS)}/h) × ${num(horas)} h × ${newDuration} d = ${fmt(labor)}`,
+      `Mobilização = ${add + addS} × ${fmt(prem.mobilizacaoPorProfissional)} = ${fmt(mobilization)}`,
       `CPM recalculado: entrega ${br(ctx.forecast.projectFinish)} → ${br(schedule.projectFinish)} (${days} d.u.)`,
-      `Economia de indireto = ${Math.max(0, days)} d × ${fmt(ctx.meta.dailyIndirectCost)} = ${fmt(indirectSavings)}`,
+      `Economia de indireto = ${Math.max(0, days)} d × ${fmt(prem.custoIndiretoDiario)} = ${fmt(indirectSavings)}`,
+      memoriaPremissas(ctx.versaoPremissas, prem, ['perdaCongestionamentoPct', 'mobilizacaoPorProfissional', 'custoIndiretoDiario'], [trade.resource, 'Servente']),
     ],
     taskPatch: { uid: target.uid, patch },
-  }
+  })
 }
 
 // ---------------------------------------------------------------- Fast tracking
@@ -327,10 +341,11 @@ export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking']
   const predDur = Math.max(1, minutosParaDias(predSched.duracaoMin, mpd))
   const overlap = Math.max(0, Math.min(1, (predDur - lag) / predDur))
   const risk: RiskLevel = overlap > 0.6 ? 'Alto' : overlap > 0.3 ? 'Médio' : 'Baixo'
-  const contingency = succ.bac * REWORK_CONTINGENCY * overlap
-  const indirectSavings = Math.max(0, days) * ctx.meta.dailyIndirectCost
+  const prem = premissasDe(ctx)
+  const contingency = succ.bac * (prem.contingenciaRetrabalhoPct / 100) * overlap // 4/100 = 0,04
+  const indirectSavings = Math.max(0, days) * prem.custoIndiretoDiario
 
-  return {
+  return comVersao(ctx, {
     kind: 'fast-tracking',
     applicable: true,
     targetUid: succ.uid,
@@ -354,11 +369,13 @@ export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking']
       `Antes: início de ${succ.wbs} ≥ término de ${pred.wbs}${oldLagMemoria} (FS)`,
       `Depois: início de ${succ.wbs} ≥ início de ${pred.wbs} + ${lag} d (SS)`,
       `Sobreposição = (${predDur} − ${lag}) ÷ ${predDur} = ${Math.round(overlap * 100)}% da predecessora`,
-      `Contingência de retrabalho = ${Math.round(REWORK_CONTINGENCY * 100)}% × ${fmt(succ.bac)} × ${Math.round(overlap * 100)}% = ${fmt(contingency)}`,
+      `Contingência de retrabalho = ${Math.round(prem.contingenciaRetrabalhoPct)}% × ${fmt(succ.bac)} × ${Math.round(overlap * 100)}% = ${fmt(contingency)}`,
       `CPM recalculado: entrega ${br(ctx.forecast.projectFinish)} → ${br(schedule.projectFinish)} (${days} d.u.)`,
+      `Economia de indireto = ${Math.max(0, days)} d × ${fmt(prem.custoIndiretoDiario)} = ${fmt(indirectSavings)}`,
+      memoriaPremissas(ctx.versaoPremissas, prem, ['contingenciaRetrabalhoPct', 'custoIndiretoDiario']),
     ],
     taskPatch: { uid: succ.uid, patch },
-  }
+  })
 }
 
 // ---------------------------------------------------------------- Hora extra
@@ -382,6 +399,9 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
   const aposStatus = cals.padrao.proximoUtil((diaRelativo(cals.base, ctx.meta.statusDate) + 1) * MINUTOS_NO_DIA_CORRIDO)
 
   // Custo de HE: todas as equipes com frente ativa nos sábados convocados
+  const prem = premissasDe(ctx)
+  const horas = horasPorDiaDe(ctx)
+  const adicional = prem.adicionalHoraExtraPct / 100 // 50/100 = 0,5
   let overtimeCost = 0
   let workers = 0
   const byTask = new Map<string, number>()
@@ -392,22 +412,22 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
       // Frente ativa no dia: o restante já começou (nunca antes da data de status) e ainda não terminou
       if (!s || Math.max(s.inicioCedoMin, aposStatus) >= inicioDia + MINUTOS_NO_DIA_CORRIDO || s.terminoCedoMin <= inicioDia) continue
       for (const r of t.resources) {
-        const c = r.units * 8 * rateOf(r.resource) * (1 + OVERTIME_PREMIUM)
+        const c = r.units * horas * rateOf(prem, r.resource) * (1 + adicional)
         overtimeCost += c
         workers += r.units
         byTask.set(t.wbs, (byTask.get(t.wbs) ?? 0) + c)
       }
     }
   }
-  const indirectSavings = Math.max(0, gained) * ctx.meta.dailyIndirectCost
+  const indirectSavings = Math.max(0, gained) * prem.custoIndiretoDiario
   const net = overtimeCost - indirectSavings
   const fmtDay = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`
 
-  return {
+  return comVersao(ctx, {
     kind: 'overtime',
     applicable: true,
     title,
-    summary: `Trabalho em ${days.length} sábado(s): ${days.map(fmtDay).join(', ')} (8 h, adicional de ${OVERTIME_PREMIUM * 100}%)`,
+    summary: `Trabalho em ${days.length} sábado(s): ${days.map(fmtDay).join(', ')} (${num(horas)} h, adicional de ${num(prem.adicionalHoraExtraPct)}%)`,
     daysRecovered: gained,
     newFinish: schedule.projectFinish,
     extraCost: overtimeCost,
@@ -422,13 +442,14 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
       { label: 'Economia de indireto', value: fmt(indirectSavings) },
     ],
     memory: [
-      `Custo HE = Σ profissionais × 8 h × taxa × ${num(1 + OVERTIME_PREMIUM)} = ${fmt(overtimeCost)}`,
+      `Custo HE = Σ profissionais × ${num(horas)} h × taxa × ${num(1 + adicional)} = ${fmt(overtimeCost)}`,
       ...[...byTask.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([wbs, c]) => `   · frente ${wbs}: ${fmt(c)}`),
       `CPM recalculado com ${days.length} dia(s) útil(eis) a mais: entrega ${br(ctx.forecast.projectFinish)} → ${br(schedule.projectFinish)} (${gained} d.u.)`,
-      `Economia de indireto = ${Math.max(0, gained)} d × ${fmt(ctx.meta.dailyIndirectCost)} = ${fmt(indirectSavings)}`,
+      `Economia de indireto = ${Math.max(0, gained)} d × ${fmt(prem.custoIndiretoDiario)} = ${fmt(indirectSavings)}`,
+      memoriaPremissas(ctx.versaoPremissas, prem, ['adicionalHoraExtraPct', 'custoIndiretoDiario'], [...new Set(ctx.tasks.flatMap((t) => t.resources.map((r) => r.resource)))]),
     ],
     addedWorkingDays: days,
-  }
+  })
 }
 
 export function simulateAll(ctx: Ctx, params: ScenarioParams = DEFAULT_SCENARIO_PARAMS): Record<ScenarioKind, ScenarioResult> {

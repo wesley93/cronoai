@@ -1,9 +1,8 @@
 // Orquestrador Just-in-Time: Data Necessária, Data Limite de Pedido (DLP) e alertas de suprimentos.
 import type { MaterialItem, ScheduleResult, SiteRestriction, Task } from '@/types/domain'
 import { addCalendarDays, diffCalendarDays } from './calendar'
+import { premissasPadrao } from './premissas'
 import { normalizeText } from './wbs'
-
-export const SAFETY_MARGIN_DAYS = 3
 
 export type SupplyStatus = 'ruptura' | 'atrasada' | 'entrega-tardia' | 'reagendar' | 'atencao' | 'entregue' | 'ok'
 
@@ -30,7 +29,8 @@ export function analyzeSupplies(
   schedule: ScheduleResult,
   statusDate: string,
   restrictions: SiteRestriction[],
-  marginDays = SAFETY_MARGIN_DAYS,
+  /** Margem de segurança em dias corridos (premissa da obra `margemDlpDias`; sem informar, o padrão das premissas). */
+  marginDays = premissasPadrao().margemDlpDias,
 ): SupplyAnalysis[] {
   const byUid = new Map(tasks.map((t) => [t.uid, t]))
   const openMaterialAlerts = restrictions.filter((r) => r.kind === 'material' && !r.resolved && r.material)

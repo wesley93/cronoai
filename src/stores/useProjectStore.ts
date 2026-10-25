@@ -15,10 +15,11 @@ import type {
   ScenarioKind,
   ScheduleResult,
   Task,
+  VersaoPremissas,
 } from '@/types/domain'
 import type { MSProjectPredecessor, MSProjectTask } from '@/types/msProject'
 import type { IndiceObras, MigracaoV1, PersistedState, ResumoObra, ScenarioUndo } from '@/types/obra'
-import { SEED_HOLIDAYS, SEED_MATERIALS, SEED_META, SEED_REPORTS, SEED_TASKS } from '@/data/seed'
+import { SEED_HOLIDAYS, SEED_MATERIALS, SEED_META, SEED_PREMISSAS, SEED_REPORTS, SEED_TASKS } from '@/data/seed'
 import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
 import {
   DEFAULT_BATCH_OPTIONS,
@@ -59,7 +60,9 @@ import {
   type ScenarioParams,
   type ScenarioResult,
 } from '@/lib/scenarios'
-import { SAFETY_MARGIN_DAYS, analyzeSupplies } from '@/lib/supplies'
+import { analyzeSupplies } from '@/lib/supplies'
+import { premissasPadrao, validarNovaVersao, versaoVigente, type NovaVersaoPremissas } from '@/lib/premissas'
+import { configFeriadosPadrao } from '@/lib/feriadosObra'
 import { fmtBRL, fmtMonth, uid } from '@/lib/format'
 import { calcularDivergencias } from '@/lib/divergencias'
 import type { PreviaPlanilha, PreviaProgresso, PreviaSinapi } from '@/types/previas'
@@ -114,6 +117,8 @@ export function buildSeedState(): PersistedState {
     tasks,
     calendarios,
     calendarioPadraoUid: UID_CALENDARIO_PADRAO,
+    premissas: clone(SEED_PREMISSAS),
+    feriados: configFeriadosPadrao(),
     reports: clone(SEED_REPORTS),
     restrictions: [],
     materials,
@@ -569,14 +574,23 @@ export const useProjectStore = defineStore('project', () => {
   const recoveryTotal = computed(() => state.recoveryCosts.reduce((a, c) => a + c.amount, 0))
   /** Parâmetros do simulador "E se?" (ajustados pelo engenheiro na tela; não são persistidos). */
   const scenarioParams = reactive<ScenarioParams>(clone(DEFAULT_SCENARIO_PARAMS))
+  /** Versão das premissas vigente na data de status (a de maior número com vigência até a data); lista vazia = padrão. */
+  const versaoPremissasVigente = computed<VersaoPremissas>(
+    () => versaoVigente(state.premissas, state.meta.statusDate) ?? { versao: 1, vigencia: state.meta.startDate, motivo: 'Premissas padrão', valores: premissasPadrao() },
+  )
+  const premissasVigentes = computed(() => versaoPremissasVigente.value.valores)
+  // toRaw: o simulador reprograma a obra inteira 3 vezes e não precisa de reatividade (ler 3.000 tarefas pelo proxy do Vue é ~4x mais
+  // lento). A dependência continua registrada: `schedule` (e `calculo`) já leem tarefas, meta e calendários.
   const scenarioCtx = computed(() => ({
     // Com o cálculo da obra fora do horizonte o cronograma é vazio: o simulador não tem tarefa para comprimir
-    tasks: calculo.value.erro ? [] : state.tasks,
-    calendarios: state.calendarios,
+    tasks: calculo.value.erro ? [] : toRaw(state.tasks),
+    calendarios: toRaw(state.calendarios),
     calendarioPadraoUid: state.calendarioPadraoUid,
-    meta: state.meta,
+    meta: toRaw(state.meta),
     forecast: schedule.value,
     origin: delay.value.origin,
+    premissas: premissasVigentes.value,
+    versaoPremissas: { versao: versaoPremissasVigente.value.versao, vigencia: versaoPremissasVigente.value.vigencia },
   }))
   const scenarios = computed(() =>
     tentar(
@@ -591,7 +605,8 @@ export const useProjectStore = defineStore('project', () => {
     ),
   )
   const recommendation = computed(() => recommendScenario(scenarios.value, state.appliedScenarios))
-  const safetyMarginDays = computed(() => state.meta.safetyMarginDays ?? SAFETY_MARGIN_DAYS)
+  /** Margem de segurança da DLP (dias corridos): premissa da obra. */
+  const safetyMarginDays = computed(() => premissasVigentes.value.margemDlpDias)
   const supplies = computed(() =>
     analyzeSupplies(state.materials, state.tasks, schedule.value, state.meta.statusDate, state.restrictions, safetyMarginDays.value),
   )
@@ -871,11 +886,17 @@ export const useProjectStore = defineStore('project', () => {
     log('suprimentos', `Entrega reagendada: ${m.name}`, `De ${old?.split('-').reverse().join('/') ?? '—'} para ${deliveryDate.split('-').reverse().join('/')} (frente atrasada).`)
   }
 
-  function setSafetyMargin(days: number) {
-    const v = Math.max(0, Math.min(30, Math.round(days)))
-    if (v === safetyMarginDays.value) return
-    state.meta.safetyMarginDays = v
-    log('suprimentos', 'Margem de segurança da DLP alterada', `DLP = Data necessária − lead time − ${v} dia(s).`)
+  /**
+   * Cria uma versão nova das premissas (RF-03.3): valida a vigência (igual ou posterior à da última versão), o motivo e os valores,
+   * grava a versão imutável e registra no log. As versões antigas nunca são alteradas nem apagadas.
+   */
+  function criarVersaoPremissas(nova: NovaVersaoPremissas): ResultadoAcao {
+    const erros = validarNovaVersao(state.premissas, nova)
+    if (erros.length) return { ok: false, erro: erros[0] }
+    const versao = state.premissas.reduce((m, v) => Math.max(m, v.versao), 0) + 1
+    state.premissas.push({ versao, vigencia: nova.vigencia, criadaEm: agora(), motivo: nova.motivo.trim(), valores: clone(nova.valores) })
+    log('sistema', `Premissas v${versao} criada`, `Vigência ${nova.vigencia.split('-').reverse().join('/')}. ${nova.motivo.trim()}`)
+    return { ok: true }
   }
 
   /** Edição de insumo (lead time, quantidade, preço, fornecedor, tarefa vinculada). */
@@ -1356,7 +1377,7 @@ export const useProjectStore = defineStore('project', () => {
     if (nova.modelo === 'branco') {
       const erros = validarDadosObra(nova.dados)
       if (erros.length) return { ok: false, erro: erros[0], erros }
-      estado = estadoObraVazia(nova.dados, SEED_META.dailyIndirectCost)
+      estado = estadoObraVazia(nova.dados)
     } else {
       estado = buildSeedState()
       // Nome único na lista: "Edifício … (2)" quando o exemplo já existe
@@ -1534,8 +1555,10 @@ export const useProjectStore = defineStore('project', () => {
     recommendation,
     resetScenarioParams,
     supplies,
+    premissasVigentes,
+    versaoPremissasVigente,
+    criarVersaoPremissas,
     safetyMarginDays,
-    setSafetyMargin,
     updateMaterial,
     addMaterial,
     registerDelivery,

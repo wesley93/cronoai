@@ -634,7 +634,7 @@ describe('MSPDI de ida e volta: calendários, restrições, prazo final e lag (E
   /** Ida e volta: importa, calcula, exporta, valida com `strictOrder` e importa o arquivo exportado. */
   function idaEVolta(xml: string) {
     const r = parseMspdiXml(xml)
-    const meta = { name: r.meta.name ?? 'Obra', company: '', manager: '', startDate: r.meta.startDate!, statusDate: r.meta.statusDate!, dailyIndirectCost: 0, ...r.meta }
+    const meta = { name: r.meta.name ?? 'Obra', company: '', manager: '', startDate: r.meta.startDate!, statusDate: r.meta.statusDate!, ...r.meta }
     const cals = compilarCalendarios(meta.startDate, r.calendarios, r.calendarioPadraoUid)
     const schedule = computeSchedule(r.tasks, cals, optsDaObra(meta, 'forecast', meta.statusDate))
     const exportado = buildMspdiXml({ meta, tasks: r.tasks, calendarios: r.calendarios, calendarioPadraoUid: r.calendarioPadraoUid, schedule })
@@ -900,7 +900,7 @@ describe('parseMspdiXml: rodada 02 (faixas de Duration e MinutesPerDay, calendá
     })
     const exportar = (alterar: boolean) => {
       const r = parseMspdiXml(xml)
-      const meta = { name: 'Obra', company: '', manager: '', startDate: r.meta.startDate!, statusDate: r.meta.statusDate!, dailyIndirectCost: 0, ...r.meta }
+      const meta = { name: 'Obra', company: '', manager: '', startDate: r.meta.startDate!, statusDate: r.meta.statusDate!, ...r.meta }
       const tasks = alterar ? r.tasks.map((t) => (t.uid === 2 ? { ...t, duracaoMin: 2400 + 480 } : t)) : r.tasks
       const cs = compilarCalendarios(meta.startDate, r.calendarios, r.calendarioPadraoUid)
       const schedule = computeSchedule(tasks, cs, optsDaObra(meta, 'forecast', meta.statusDate))
@@ -927,7 +927,7 @@ describe('parseMspdiXml: rodada 02 (faixas de Duration e MinutesPerDay, calendá
     const dia = (n: number) => `<WeekDay><DayType>${n}</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>00:00:00</FromTime><ToTime>00:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>`
     const cal24 = `<Calendar><UID>4</UID><Name>24 Horas</Name><IsBaseCalendar>1</IsBaseCalendar><WeekDays>${[1, 2, 3, 4, 5, 6, 7].map(dia).join('')}</WeekDays></Calendar>`
     const r = parseMspdiXml(xml.replace('<Tasks>', `<Calendars>${cal24}</Calendars><Tasks>`))
-    const meta = { name: 'Obra', company: '', manager: '', startDate: r.meta.startDate!, statusDate: r.meta.statusDate!, dailyIndirectCost: 0, ...r.meta }
+    const meta = { name: 'Obra', company: '', manager: '', startDate: r.meta.startDate!, statusDate: r.meta.statusDate!, ...r.meta }
     const sch = computeSchedule(r.tasks, compilarCalendarios(meta.startDate, r.calendarios, r.calendarioPadraoUid), optsDaObra(meta, 'forecast', meta.statusDate))
     expect([sch.byUid.get(2)!.start, sch.byUid.get(2)!.inicioHora]).toEqual(['2026-08-03', '24:00'])
     const exportado = buildMspdiXml({ meta, tasks: r.tasks, calendarios: r.calendarios, calendarioPadraoUid: r.calendarioPadraoUid, schedule: sch })

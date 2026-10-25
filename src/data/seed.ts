@@ -1,25 +1,13 @@
 // Dados iniciais: Edifício Residencial Aurora - 12 Pavimentos.
 // Códigos SINAPI, custos e coeficientes são ILUSTRATIVOS — validar na tabela SINAPI vigente da UF da obra.
-import type { FieldReport, Lag, MaterialItem, ProjectMeta, ResourceKind, Task } from '@/types/domain'
+import type { FieldReport, Lag, MaterialItem, ProjectMeta, Task, VersaoPremissas } from '@/types/domain'
 import { defaultHolidays } from '@/lib/calendar'
 import { diasParaMinutos } from '@/lib/calendarioTrabalho'
+import { premissasPadrao } from '@/lib/premissas'
 
 /** Durações e lags do exemplo estão escritos em dias úteis; o estado guarda minutos (ADR 00003). */
 const dias = (n: number): number => diasParaMinutos(n)
 const lagUtil = (n: number): Lag => ({ tipo: 'util', minutos: dias(n) })
-
-export const HOURLY_RATES: Record<ResourceKind, number> = {
-  Pedreiro: 31.4,
-  Servente: 23.9,
-  Carpinteiro: 31.4,
-  Armador: 31.4,
-  Eletricista: 33.1,
-  Encanador: 33.1,
-  Gesseiro: 31.9,
-  Azulejista: 32.2,
-  Pintor: 30.8,
-  'Operador de equipamento': 36.5,
-}
 
 export const SEED_META: ProjectMeta = {
   name: 'Edifício Residencial Aurora - 12 Pavimentos',
@@ -27,8 +15,12 @@ export const SEED_META: ProjectMeta = {
   manager: 'Eng. de Planejamento',
   startDate: '2026-05-04',
   statusDate: '2026-10-23',
-  dailyIndirectCost: 9850,
 }
+
+/** Premissas do exemplo (versão 1, vigente desde o início da obra): todas ilustrativas (Inviolável 7). */
+export const SEED_PREMISSAS: VersaoPremissas[] = [
+  { versao: 1, vigencia: SEED_META.startDate, motivo: 'Premissas iniciais da obra de exemplo (ilustrativas)', valores: premissasPadrao() },
+]
 
 export const SEED_HOLIDAYS = defaultHolidays(2026, 2029)
 

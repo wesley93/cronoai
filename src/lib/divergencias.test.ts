@@ -11,7 +11,7 @@ import { parseMspdiXml } from './msProjectXmlParser'
 function divergenciasDe(xml: string, alterar?: (tasks: Task[]) => Task[]) {
   const r = parseMspdiXml(xml)
   const tasks = alterar ? alterar(r.tasks) : r.tasks
-  const meta = { name: 'Obra', company: '', manager: '', startDate: r.meta.startDate!, statusDate: r.meta.statusDate!, dailyIndirectCost: 0, ...r.meta } as ProjectMeta
+  const meta = { name: 'Obra', company: '', manager: '', startDate: r.meta.startDate!, statusDate: r.meta.statusDate!, ...r.meta } as ProjectMeta
   const cals = compilarCalendarios(meta.startDate, r.calendarios, r.calendarioPadraoUid)
   const schedule = computeSchedule(tasks, cals, optsDaObra(meta, 'forecast', meta.statusDate))
   return calcularDivergencias(tasks, schedule, cals, meta)
@@ -66,7 +66,7 @@ describe('causas da divergência por precedência', () => {
     uid, wbs: String(uid), name: `T${uid}`, outlineLevel: 1, isSummary: false, duracaoMin: dias(duracaoDias), predecessors: [],
     percentComplete: 0, bac: 0, actualCost: 0, resources: [], ...over,
   })
-  const meta = (statusDate: string, extra: Partial<ProjectMeta> = {}): ProjectMeta => ({ name: 'O', company: '', manager: '', startDate: '2026-08-03', statusDate, dailyIndirectCost: 0, ...extra })
+  const meta = (statusDate: string, extra: Partial<ProjectMeta> = {}): ProjectMeta => ({ name: 'O', company: '', manager: '', startDate: '2026-08-03', statusDate, ...extra })
   const calcular = (tasks: Task[], m: ProjectMeta) => {
     const cals = compilarCalendarios(m.startDate, [padrao], 1)
     return calcularDivergencias(tasks, computeSchedule(tasks, cals, optsDaObra(m, 'forecast', m.statusDate)), cals, m)

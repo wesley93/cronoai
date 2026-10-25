@@ -109,7 +109,7 @@ describe('UFS', () => {
 
 describe('estadoObraVazia', () => {
   it('monta obra sem tarefas, com UF só se informada (C-4)', () => {
-    const e = estadoObraVazia(valido, 9850)
+    const e = estadoObraVazia(valido)
     expect(e.tasks).toEqual([])
     expect(e.meta).toEqual({
       name: 'Residencial Teste',
@@ -117,7 +117,6 @@ describe('estadoObraVazia', () => {
       manager: 'Eng. Fulana',
       startDate: '2026-11-03',
       statusDate: '2026-11-03',
-      dailyIndirectCost: 9850,
       uf: 'PE',
       municipio: 'Recife',
       regimeSinapi: 'desonerado',
@@ -130,13 +129,13 @@ describe('estadoObraVazia', () => {
   })
 
   it('sem UF, município, regime e data-base, esses campos não existem', () => {
-    const e = estadoObraVazia({ nome: ' Obra ', dataInicio: '2026-11-03', dataStatus: '2026-11-03' }, 1)
-    expect(Object.keys(e.meta).sort()).toEqual(['company', 'dailyIndirectCost', 'manager', 'name', 'startDate', 'statusDate'])
+    const e = estadoObraVazia({ nome: ' Obra ', dataInicio: '2026-11-03', dataStatus: '2026-11-03' })
+    expect(Object.keys(e.meta).sort()).toEqual(['company', 'manager', 'name', 'startDate', 'statusDate'])
     expect(e.meta.name).toBe('Obra')
   })
 
   it('o cronograma da obra em branco termina no início (0 tarefas)', () => {
-    const e = estadoObraVazia(valido, 9850)
+    const e = estadoObraVazia(valido)
     const s = computeSchedule(e.tasks, compilarCalendarios(e.meta.startDate, e.calendarios, e.calendarioPadraoUid), { mode: 'forecast', statusDate: e.meta.statusDate })
     expect(s.projectFinish).toBe('2026-11-03')
   })
@@ -150,7 +149,7 @@ describe('nomeDaCopia e resumirObra', () => {
   })
 
   it('resume com os campos opcionais só quando existem', () => {
-    const e = estadoObraVazia(valido, 1)
+    const e = estadoObraVazia(valido)
     expect(resumirObra('o1', e, '2026-10-25T10:00:00.000Z')).toEqual({
       id: 'o1',
       nome: 'Residencial Teste',
@@ -159,7 +158,7 @@ describe('nomeDaCopia e resumirObra', () => {
       responsavel: 'Eng. Fulana',
       atualizadoEm: '2026-10-25T10:00:00.000Z',
     })
-    const nu = estadoObraVazia({ nome: 'Sem', dataInicio: '2026-11-03', dataStatus: '2026-11-03' }, 1)
+    const nu = estadoObraVazia({ nome: 'Sem', dataInicio: '2026-11-03', dataStatus: '2026-11-03' })
     expect(resumirObra('o2', nu, 'x')).toEqual({ id: 'o2', nome: 'Sem', atualizadoEm: 'x' })
   })
 })

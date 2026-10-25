@@ -383,7 +383,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       const inicio = r.meta.startDate ?? '2026-01-05'
       const meta: ProjectMeta = {
         name: r.meta.name || 'Obra', company: r.meta.company ?? '', manager: r.meta.manager ?? '',
-        startDate: inicio, statusDate: r.meta.statusDate ?? inicio, dailyIndirectCost: 0,
+        startDate: inicio, statusDate: r.meta.statusDate ?? inicio,
         minutosPorDia: r.meta.minutosPorDia, honorConstraintsArquivo: r.meta.honorConstraintsArquivo,
         opcoesCronograma: r.meta.opcoesCronograma, moveArquivo: r.meta.moveArquivo,
       }

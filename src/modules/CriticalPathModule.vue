@@ -135,7 +135,7 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
     <!-- Simulador -->
     <SectionCard
       title="Simulador de Recuperação com IA"
-      :subtitle="`Cada cenário recalcula o CPM completo. Custo indireto da obra: ${fmtBRL(project.state.meta.dailyIndirectCost)}/dia útil.`"
+      :subtitle="`Cada cenário recalcula o CPM completo. Custo indireto da obra: ${fmtBRL(project.premissasVigentes.custoIndiretoDiario)}/dia útil.`"
       :icon="Sparkles"
     >
       <template #actions>

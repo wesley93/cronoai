@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import fixtureDivergencias from '@/lib/__fixtures__/mspdi-divergencias.xml?raw'
+import type { PremissasObra } from '@/types/domain'
+import { rotuloVersao } from '@/lib/premissas'
 import { useProjectStore } from './useProjectStore'
 
 describe('useProjectStore · visão MS Project', () => {
@@ -184,5 +186,88 @@ describe('useProjectStore · visão MS Project', () => {
     expect(store.state.meta.opcoesCronograma).toEqual({ logica: 'retida', moverRestante: false })
     expect(store.schedule.projectFinish).toBe('2027-06-09')
     expect(store.atualizarDadosObra({ ...dados, logicaProgresso: 'x' as 'retida' })).toEqual({ ok: false, erros: ['Selecione uma lógica de progresso válida.'] })
+  })
+})
+
+describe('useProjectStore · premissas versionadas (ciclo 00005, E1)', () => {
+  beforeEach(() => {
+    globalThis.localStorage?.clear?.() // Node 26 pode expor localStorage indefinido
+    setActivePinia(createPinia())
+  })
+
+  const valores = (store: ReturnType<typeof useProjectStore>, parcial: Partial<PremissasObra>): PremissasObra => ({ ...JSON.parse(JSON.stringify(store.premissasVigentes)), ...parcial })
+
+  it('o Aurora abre na v1 padrão (ilustrativa), vigente desde o início da obra, com os mesmos números (CF-1, N-1)', () => {
+    const store = useProjectStore()
+    expect(store.state.premissas).toHaveLength(1)
+    expect(rotuloVersao(store.versaoPremissasVigente)).toBe('Premissas v1 — vigência 04/05/2026')
+    expect(store.premissasVigentes.custoIndiretoDiario).toBe(9850)
+    expect(store.safetyMarginDays).toBe(3)
+    expect(store.schedule.projectFinish).toBe('2027-06-23')
+    expect(store.delay.delayDays).toBe(16)
+    expect(store.evm.spi).toBeCloseTo(0.8883, 4)
+    expect(store.evm.cpi).toBeCloseTo(0.9349, 4)
+    expect(store.scenarios.crashing.extraCost).toBeCloseTo(12616.8, 2)
+    expect(store.scenarios.crashing.premissas).toEqual({ versao: 1, vigencia: '2026-05-04' })
+  })
+
+  it('PR-2: criar a v2 com indireto de R$ 12.000 recalcula os cenários na hora (economia da HE R$ 24.000, risco Baixo)', () => {
+    const store = useProjectStore()
+    expect(store.scenarios.overtime.risk).toBe('Médio')
+    expect(store.criarVersaoPremissas({ vigencia: '2026-10-23', motivo: 'Orçamento revisado', valores: valores(store, { custoIndiretoDiario: 12000 }) })).toEqual({ ok: true })
+    expect(rotuloVersao(store.versaoPremissasVigente)).toBe('Premissas v2 — vigência 23/10/2026')
+    expect(store.scenarios.crashing.indirectSavings).toBe(36000)
+    expect(store.scenarios['fast-tracking'].indirectSavings).toBe(156000)
+    expect(store.scenarios.overtime.indirectSavings).toBe(24000)
+    expect(store.scenarios.overtime.netImpact).toBeCloseTo(-1684.8, 2)
+    expect(store.scenarios.overtime.risk).toBe('Baixo')
+    expect(store.scenarios.overtime.premissas).toEqual({ versao: 2, vigencia: '2026-10-23' })
+    expect(store.recommendation.kind).toBe('crashing')
+    // O cronograma, o EVM e a v1 não mudam
+    expect(store.schedule.projectFinish).toBe('2027-06-23')
+    expect(store.state.premissas[0].valores.custoIndiretoDiario).toBe(9850)
+    expect(store.state.log[0].title).toBe('Premissas v2 criada')
+  })
+
+  it('PR-4: a versão vigente acompanha a data de status; a vigência retroativa é recusada', () => {
+    const store = useProjectStore()
+    store.criarVersaoPremissas({ vigencia: '2026-10-23', motivo: 'v2', valores: valores(store, { custoIndiretoDiario: 12000 }) })
+    store.criarVersaoPremissas({ vigencia: '2026-11-01', motivo: 'v3', valores: valores(store, { custoIndiretoDiario: 15000 }) })
+    expect(rotuloVersao(store.versaoPremissasVigente)).toBe('Premissas v2 — vigência 23/10/2026') // a v3 está "agendada"
+    expect(store.scenarios.overtime.indirectSavings).toBe(24000)
+    expect(store.setStatusDate('2026-11-01')).toEqual({ ok: true })
+    expect(rotuloVersao(store.versaoPremissasVigente)).toBe('Premissas v3 — vigência 01/11/2026')
+    const he = store.scenarios.overtime
+    expect(he.indirectSavings).toBe(Math.max(0, he.daysRecovered) * 15000)
+    expect(he.premissas).toEqual({ versao: 3, vigencia: '2026-11-01' })
+    expect(store.criarVersaoPremissas({ vigencia: '2026-10-01', motivo: 'retroativa', valores: valores(store, {}) })).toEqual({
+      ok: false,
+      erro: 'A vigência deve ser igual ou posterior à da versão 3 (01/11/2026).',
+    })
+    expect(store.state.premissas).toHaveLength(3)
+  })
+
+  it('valores inválidos são recusados sem criar versão', () => {
+    const store = useProjectStore()
+    const r = store.criarVersaoPremissas({ vigencia: '2026-10-23', motivo: 'x', valores: valores(store, { adicionalHoraExtraPct: 500 }) })
+    expect(r.ok).toBe(false)
+    expect(store.state.premissas).toHaveLength(1)
+  })
+
+  it('a margem da DLP vem das premissas: v2 com margem 10 desloca a DLP do concreto em 7 dias', () => {
+    const store = useProjectStore()
+    const dlp = () => store.supplies.find((x) => x.material.id === 'm-concreto')!.dlp
+    expect(dlp()).toBe('2026-10-30')
+    store.criarVersaoPremissas({ vigencia: '2026-10-23', motivo: 'margem maior', valores: valores(store, { margemDlpDias: 10 }) })
+    expect(store.safetyMarginDays).toBe(10)
+    expect(dlp()).toBe('2026-10-23')
+  })
+
+  it('a taxa da obra entra no custo: Pedreiro a R$ 40,00/h muda o custo da hora extra', () => {
+    const store = useProjectStore()
+    const taxas = store.premissasVigentes.taxas.map((t) => (t.funcao === 'Pedreiro' ? { ...t, valorHora: 40 } : { ...t }))
+    store.criarVersaoPremissas({ vigencia: '2026-10-23', motivo: 'taxa', valores: valores(store, { taxas }) })
+    // 302: 8 carpinteiros, 6 armadores e 4 pedreiros; 104: 4 pedreiros → só os 8 pedreiros-dia de cada sábado mudam (+8,60/h)
+    expect(store.scenarios.overtime.extraCost).toBeCloseTo(22315.2 + 8.6 * 8 * 1.5 * 8 * 2, 2) // + R$ 8,60/h × 8 h × 1,5 × 8 pedreiros × 2 sábados = R$ 1.651,20
   })
 })

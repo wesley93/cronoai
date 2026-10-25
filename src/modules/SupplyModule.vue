@@ -87,11 +87,6 @@ function editNumber(r: SupplyAnalysis, field: 'leadTimeDays' | 'quantity' | 'uni
   if (value !== r.material[field]) project.updateMaterial(r.material.id, { [field]: value })
 }
 
-function setMargin(raw: string) {
-  const v = Number(raw)
-  if (Number.isFinite(v)) project.setSafetyMargin(v)
-}
-
 // Cadastro de novo insumo
 const showForm = ref(false)
 const blank = () => ({ name: '', spec: '', unit: 'un', quantity: 1, unitPrice: 0, supplier: '', taskUid: project.leaves.find((t) => t.percentComplete < 100)?.uid ?? 0, leadTimeDays: 10 })
@@ -136,16 +131,8 @@ const cellInput =
     >
       <label class="flex items-center gap-2 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-[11px] dark:border-zinc-800">
         <span class="font-mono text-zinc-500">DLP = Necessária − Lead time −</span>
-        <input
-          :value="project.safetyMarginDays"
-          type="number"
-          min="0"
-          max="30"
-          class="w-12 rounded border border-zinc-300 bg-transparent px-1 text-center font-mono tabular-nums focus:border-amber-400 focus:outline-none dark:border-zinc-700"
-          aria-label="Margem de segurança em dias"
-          @change="setMargin(($event.target as HTMLInputElement).value)"
-        />
-        <span class="font-mono text-zinc-500">dias</span>
+        <span class="font-mono tabular-nums" aria-label="Margem de segurança em dias">{{ project.safetyMarginDays }}</span>
+        <span class="font-mono text-zinc-500">dias (definida nas premissas da obra)</span>
       </label>
       <button class="btn-primary" @click="showForm = !showForm"><PackagePlus class="h-3.5 w-3.5" /> Novo insumo</button>
     </ModuleHeader>

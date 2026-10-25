@@ -77,8 +77,8 @@ describe('useProjectStore · multiobra', () => {
       expect(store.migracaoV1?.resultado).toBe('migrado')
       expect(store.avisosCarga).toEqual([])
       expect(store.estadoGravacao).toBe('salvo')
-      // gravada no esquema 3 e com a v1 intocada
-      expect(adaptador.obras.get(store.obraAtivaId)?.versaoEsquema).toBe(3)
+      // gravada no esquema 4 e com a v1 intocada
+      expect(adaptador.obras.get(store.obraAtivaId)?.versaoEsquema).toBe(4)
       expect(JSON.parse(adaptador.obras.get(store.obraAtivaId)!.json)).toEqual(JSON.parse(JSON.stringify(migrado.estado)))
       expect(adaptador.v1).toBe(aurora)
       expect(adaptador.indice?.migracaoV1?.resultado).toBe('migrado')
@@ -100,9 +100,9 @@ describe('useProjectStore · multiobra', () => {
       expect(store.state.calendarios[0].excecoes.filter((x) => x.intervalos.length > 0)).toEqual([]) // sem 24/10 e 31/10
       expect(store.schedule.projectFinish).toBe('2027-06-23')
       expect(store.state.undo).toEqual([])
-      // A próxima gravação já é no esquema 3
+      // A próxima gravação já é no esquema 4
       expect(await store.salvarAgora()).toBe(true)
-      expect(adaptador.obras.get('o2')?.versaoEsquema).toBe(3)
+      expect(adaptador.obras.get('o2')?.versaoEsquema).toBe(4)
     })
 
     it('hora extra aplicada e desfeita deixa o calendário padrão exatamente como estava', async () => {
@@ -114,6 +114,32 @@ describe('useProjectStore · multiobra', () => {
       expect(extras[0].intervalos).toEqual([{ de: 480, ate: 720 }, { de: 780, ate: 1020 }])
       store.undoScenario('overtime')
       expect(JSON.parse(JSON.stringify(store.state.calendarios))).toEqual(antes)
+    })
+
+    it('P-6: hora extra aplicada no esquema 3 (ciclo 00004) abre no esquema 4 e é desfeita com a entrega de 2027-06-23', async () => {
+      const { store: origem } = await carregarCom(aurora)
+      origem.applyScenario(origem.scenarios.overtime)
+      expect(origem.schedule.projectFinish).toBe('2027-06-21')
+      // Formato do esquema 3: indireto no meta, sem premissas nem feriados, sem a versão das premissas no resultado do cenário
+      const e3 = JSON.parse(JSON.stringify(origem.state))
+      e3.meta.dailyIndirectCost = 9850
+      delete e3.premissas
+      delete e3.feriados
+      for (const u of e3.undo) delete u.result.premissas
+      const adaptador = criarArmazenamentoMemoria(null)
+      const em = '2026-10-25T10:00:00.000Z'
+      adaptador.obras.set('o3', { id: 'o3', versaoEsquema: 3, json: JSON.stringify(e3), atualizadoEm: em })
+      adaptador.indice = { versaoIndice: 1, obraAtivaId: 'o3', obras: [{ id: 'o3', nome: NOME_AURORA, atualizadoEm: em }] }
+      const store = await recarregar(adaptador)
+      expect(store.avisosCarga).toEqual([])
+      expect(store.state.premissas).toHaveLength(1)
+      expect(store.schedule.projectFinish).toBe('2027-06-21')
+      expect(store.appliedResult('overtime')?.premissas).toBeUndefined() // "versão não registrada (anterior ao ciclo 00005)"
+      store.undoScenario('overtime')
+      expect(store.schedule.projectFinish).toBe('2027-06-23')
+      expect(store.state.calendarios[0].excecoes.filter((x) => x.intervalos.length > 0)).toEqual([])
+      expect(await store.salvarAgora()).toBe(true)
+      expect(adaptador.obras.get('o3')?.versaoEsquema).toBe(4)
     })
 
     it('N-5: migra a v1 com apontamento aprovado (16/06/27, +11 d.u., UID 104 em 75%)', async () => {
@@ -419,7 +445,7 @@ describe('useProjectStore · multiobra', () => {
       expect(store.evm.cpi).toBe(1)
       expect(store.state.meta.uf).toBe('PE')
       expect(store.state.meta.municipio).toBe('Recife')
-      expect(store.state.meta.dailyIndirectCost).toBe(9850)
+      expect(store.premissasVigentes.custoIndiretoDiario).toBe(9850) // premissa ilustrativa, agora nas premissas da obra (ciclo 00005)
 
       expect(await store.trocarObra(idA)).toEqual({ ok: true })
       expect(store.schedule.projectFinish).toBe('2027-06-16')

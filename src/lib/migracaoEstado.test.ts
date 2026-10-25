@@ -14,6 +14,8 @@ import { defaultHolidays } from './calendar'
 import { compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
 import type { PersistedState, RegistroObra } from '@/types/obra'
+import { buildSeedState } from '@/stores/useProjectStore'
+import { premissasPadrao } from './premissas'
 
 // Ano usado quando a obra não informa a data de início (os testes fixam 2026 para os feriados serem previsíveis)
 const ANO = 2026
@@ -25,15 +27,18 @@ const entrega = (e: PersistedState) =>
   computeSchedule(e.tasks, compilarCalendarios(e.meta.startDate, e.calendarios, e.calendarioPadraoUid), { mode: 'forecast', statusDate: e.meta.statusDate }).projectFinish
 
 describe('lerEstadoV1', () => {
-  it('lê a fixture completa da v1 sem avisos e a leva ao esquema 3 com os mesmos números (AC-1, M-1)', () => {
+  it('lê a fixture completa da v1 sem avisos e a leva ao esquema 4 com os mesmos números (AC-1, M-1)', () => {
     const r = lerEstadoV1(aurora)
     expect(r.tipo).toBe('ok')
     if (r.tipo !== 'ok') return
     expect(r.avisos).toEqual([])
     expect(r.estado.tasks).toHaveLength(29)
     const antigo = JSON.parse(aurora)
-    // Tudo que não é tempo ou calendário fica igual
-    expect(r.estado.meta).toEqual(antigo.meta)
+    // Tudo que não é tempo ou calendário fica igual; o indireto do meta virou a versão 1 das premissas (esquema 4, ciclo 00005)
+    const { dailyIndirectCost: indiretoAntigo, ...metaAntigo } = antigo.meta
+    expect(r.estado.meta).toEqual(metaAntigo)
+    expect(r.estado.premissas).toHaveLength(1)
+    expect(r.estado.premissas[0]).toMatchObject({ versao: 1, vigencia: '2026-05-04', valores: { custoIndiretoDiario: indiretoAntigo, margemDlpDias: 3 } })
     expect(r.estado.reports).toEqual(antigo.reports)
     expect(r.estado.materials).toEqual(antigo.materials)
     expect(r.estado.budget).toEqual(antigo.budget)
@@ -189,7 +194,7 @@ describe('migrarRegistro', () => {
   it('o registro criado volta igual ao estado gravado', () => {
     const estado = estadoV1()
     const reg = criarRegistro('o1', estado, '2026-10-25T10:00:00.000Z')
-    expect(reg.versaoEsquema).toBe(3)
+    expect(reg.versaoEsquema).toBe(4)
     expect(migrarRegistro(reg)).toEqual({ tipo: 'ok', estado: JSON.parse(JSON.stringify(estado)), avisos: [] })
   })
 
@@ -233,7 +238,7 @@ describe('migrarRegistro', () => {
   })
 
   it('a cadeia cobre todos os esquemas até o atual, sem buracos', () => {
-    expect(MIGRACOES.map((p) => [p.de, p.para])).toEqual([[1, 2], [2, 3]])
+    expect(MIGRACOES.map((p) => [p.de, p.para])).toEqual([[1, 2], [2, 3], [3, 4]])
     expect(MIGRACOES.at(-1)?.para).toBe(ESQUEMA_ATUAL)
   })
 
@@ -242,9 +247,9 @@ describe('migrarRegistro', () => {
       tipo: 'erro',
       mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 99).',
     })
-    expect(migrarRegistro(registro(aurora, 4))).toEqual({
+    expect(migrarRegistro(registro(aurora, 5))).toEqual({
       tipo: 'erro',
-      mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 4).',
+      mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 5).',
     })
   })
 
@@ -360,5 +365,103 @@ describe('migrarRegistro', () => {
     } finally {
       MIGRACOES.push(...passos)
     }
+  })
+})
+
+describe('esquema 3 → 4: premissas versionadas e feriados da obra (ciclo 00005, P-1 a P-5)', () => {
+  const registro = (json: string, versaoEsquema: number): RegistroObra => ({ id: 'o1', versaoEsquema, json, atualizadoEm: '2026-10-25T10:00:00.000Z' })
+  /** Aurora no formato do esquema 3 (antes do ciclo 00005): indireto e margem no meta, sem premissas nem feriados. */
+  const esquema3 = (meta: Record<string, unknown> = {}) => {
+    const e = buildSeedState()
+    const { premissas: _p, feriados: _f, ...resto } = e
+    return { ...resto, meta: { ...resto.meta, dailyIndirectCost: 9850, ...meta } }
+  }
+
+  it('P-1: esquema 3 vira esquema 4 com a v1 padrão, calendários intactos e o mesmo cronograma', () => {
+    const base = esquema3()
+    const m = migrarRegistro(registro(JSON.stringify(base), 3))
+    expect(m.tipo).toBe('ok')
+    if (m.tipo !== 'ok') return
+    expect(m.avisos).toEqual([])
+    expect(m.estado.premissas).toHaveLength(1)
+    expect(m.estado.premissas[0]).toMatchObject({
+      versao: 1,
+      vigencia: '2026-05-04',
+      motivo: 'Premissas anteriores ao ciclo 00005 (migradas)',
+      valores: premissasPadrao(),
+    })
+    expect(Object.keys(m.estado.meta)).not.toContain('dailyIndirectCost')
+    expect(Object.keys(m.estado.meta)).not.toContain('safetyMarginDays')
+    expect(m.estado.feriados).toEqual({ nacionais: true, carnaval: true, corpusChristi: true, manuais: [] })
+    expect(m.estado.calendarios).toEqual(JSON.parse(JSON.stringify(base.calendarios)))
+    expect(entrega(m.estado)).toBe('2027-06-23')
+  })
+
+  it('P-2: indireto 11.000 e margem 7 viram a v1 com origem "nao-documentada"; valores iguais ao padrão ficam "ilustrativa"', () => {
+    const m = migrarRegistro(registro(JSON.stringify(esquema3({ dailyIndirectCost: 11000, safetyMarginDays: 7 })), 3))
+    expect(m.tipo).toBe('ok')
+    if (m.tipo !== 'ok') return
+    const v = m.estado.premissas[0].valores
+    expect([v.custoIndiretoDiario, v.margemDlpDias]).toEqual([11000, 7])
+    expect(v.origens.custoIndiretoDiario).toEqual({ origem: 'nao-documentada' })
+    expect(v.origens.margemDlpDias).toEqual({ origem: 'nao-documentada' })
+    expect(v.origens.adicionalHoraExtraPct).toEqual({ origem: 'ilustrativa' })
+    const igual = migrarRegistro(registro(JSON.stringify(esquema3({ safetyMarginDays: 3 })), 3))
+    if (igual.tipo !== 'ok') throw new Error('esperava ok')
+    expect(igual.estado.premissas[0].valores.origens.custoIndiretoDiario).toEqual({ origem: 'ilustrativa' })
+    expect(igual.estado.premissas[0].valores.origens.margemDlpDias).toEqual({ origem: 'ilustrativa' })
+  })
+
+  it('indireto ou margem inválidos voltam ao padrão, com aviso', () => {
+    for (const meta of [{ dailyIndirectCost: -5 }, { dailyIndirectCost: 'x' }, { safetyMarginDays: 99 }, { safetyMarginDays: 2.5 }]) {
+      const m = migrarRegistro(registro(JSON.stringify(esquema3(meta)), 3))
+      expect(m.tipo, JSON.stringify(meta)).toBe('ok')
+      if (m.tipo !== 'ok') return
+      expect(m.avisos).toEqual(['O custo indireto ou a margem da DLP do estado salvo estavam ausentes ou inválidos: valem os valores padrão (ilustrativos) nas premissas da obra.'])
+      expect([m.estado.premissas[0].valores.custoIndiretoDiario, m.estado.premissas[0].valores.margemDlpDias]).toEqual([9850, 3])
+    }
+  })
+
+  it('P-3: a v1 (cronoai-state-v1) chega ao esquema 4 pela cadeia, com as premissas do indireto antigo', () => {
+    const r = lerEstadoV1(aurora)
+    expect(r.tipo).toBe('ok')
+    if (r.tipo !== 'ok') return
+    expect(r.estado.premissas[0].valores.custoIndiretoDiario).toBe(9850)
+    expect(r.estado.premissas[0].valores.origens.custoIndiretoDiario).toEqual({ origem: 'ilustrativa' })
+    expect(entrega(r.estado)).toBe('2027-06-23')
+  })
+
+  it('P-4: esquema 5 é recusado (e nunca sobrescrito)', () => {
+    expect(migrarRegistro(registro(JSON.stringify(esquema3()), 5))).toEqual({ tipo: 'erro', mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 5).' })
+  })
+
+  it('P-5: esquema 4 sem premissas ou feriados (ou inválidos) volta ao padrão, com aviso', () => {
+    const base = JSON.parse(JSON.stringify(buildSeedState()))
+    for (const quebra of [
+      (e: Record<string, unknown>) => {
+        delete e.premissas
+      },
+      (e: Record<string, unknown>) => {
+        e.premissas = []
+      },
+      (e: Record<string, unknown>) => {
+        e.premissas = [{ versao: 1, vigencia: '2026-05-04', motivo: 'x', valores: { custoIndiretoDiario: -1 } }]
+      },
+    ]) {
+      const e = JSON.parse(JSON.stringify(base))
+      quebra(e)
+      const m = migrarRegistro(registro(JSON.stringify(e), 4))
+      expect(m.tipo).toBe('ok')
+      if (m.tipo !== 'ok') return
+      expect(m.avisos).toEqual(['Campos ausentes ou inválidos no estado salvo foram preenchidos como vazios: premissas.'])
+      expect(m.estado.premissas).toHaveLength(1)
+      expect(m.estado.premissas[0]).toMatchObject({ versao: 1, vigencia: '2026-05-04', valores: premissasPadrao() })
+    }
+    const semFeriados = JSON.parse(JSON.stringify(base))
+    semFeriados.feriados = { nacionais: 'sim' }
+    const f = migrarRegistro(registro(JSON.stringify(semFeriados), 4))
+    if (f.tipo !== 'ok') throw new Error('esperava ok')
+    expect(f.avisos[0]).toContain('feriados')
+    expect(f.estado.feriados).toEqual({ nacionais: true, carnaval: true, corpusChristi: true, manuais: [] })
   })
 })
