@@ -249,6 +249,52 @@ public sealed class OidcTestes
         Assert.Equal("/obras?pagina=2", resposta.Headers.Location!.OriginalString);
     }
 
+    [Theory]
+    [InlineData("/signout-oidc")]
+    [InlineData("/signout-callback-oidc")]
+    public async Task Rotas_de_logout_do_handler_ficam_desligadas(string caminho)
+    {
+        // Sem logout no provedor por ora: as rotas do handler respondem 404 e não tocam na sessão.
+        using var idp = new IdpEmMemoria();
+        await using var fabrica = new ApiFactory(_banco.StringConexaoApp) { Idp = idp };
+        using var navegador = fabrica.CriarNavegador();
+        (await ClienteAutenticado.LoginOidcAsync(navegador, idp)).Dispose();
+
+        using var resposta = await navegador.GetAsync(caminho + "?sid=x&iss=" + Uri.EscapeDataString(idp.Emissor), TestContext.Current.CancellationToken);
+        using var eu = await navegador.GetAsync("/api/v1/eu", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.NotFound, resposta.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, eu.StatusCode);
+    }
+
+    [Fact]
+    public async Task Novo_login_no_mesmo_navegador_encerra_a_sessao_anterior()
+    {
+        using var idp = new IdpEmMemoria();
+        var sujeito = "sub-" + Guid.NewGuid().ToString("N");
+        await using var fabrica = new ApiFactory(_banco.StringConexaoApp) { Idp = idp };
+        using var navegador = fabrica.CriarNavegador();
+
+        idp.ProximoToken = new DefinicaoToken { Sujeito = sujeito };
+        using var primeiro = await ClienteAutenticado.LoginOidcAsync(navegador, idp);
+        var cookieAntigo = CookieDeSessao(primeiro).Split(';')[0];
+        var usuario = (await ConsultaBanco.ObterUsuarioIdAsync(_banco, idp.Emissor, sujeito))!.Value;
+        Assert.Equal(1, await ConsultaBanco.ContarSessoesAbertasAsync(_banco, usuario));
+
+        // 2º login NO MESMO navegador (cookie ainda válido): a sessão anterior é encerrada no servidor.
+        idp.ProximoToken = new DefinicaoToken { Sujeito = sujeito };
+        (await ClienteAutenticado.LoginOidcAsync(navegador, idp)).Dispose();
+
+        Assert.Equal(1, await ConsultaBanco.ContarSessoesAbertasAsync(_banco, usuario));
+        Assert.Equal(2, await ConsultaBanco.ContarSessoesAsync(_banco, usuario));
+        using var requisicao = new HttpRequestMessage(HttpMethod.Get, "/api/v1/eu");
+        requisicao.Headers.Add("Cookie", cookieAntigo);
+        using var reuso = await fabrica.CriarNavegador().SendAsync(requisicao, TestContext.Current.CancellationToken);
+        using var atual = await navegador.GetAsync("/api/v1/eu", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, reuso.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, atual.StatusCode);
+    }
+
     #endregion
 
     #region Métodos privados

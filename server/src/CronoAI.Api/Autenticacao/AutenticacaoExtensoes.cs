@@ -1,4 +1,3 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using CronoAI.Api.Sessao;
 using CronoAI.Dados;
@@ -9,7 +8,6 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
 
 namespace CronoAI.Api.Autenticacao;
 
@@ -20,17 +18,6 @@ namespace CronoAI.Api.Autenticacao;
 /// </summary>
 public static class AutenticacaoExtensoes
 {
-    #region Campos
-
-    private static readonly string[] AlgoritmosAssimetricos =
-    [
-        SecurityAlgorithms.RsaSha256, SecurityAlgorithms.RsaSha384, SecurityAlgorithms.RsaSha512,
-        SecurityAlgorithms.RsaSsaPssSha256, SecurityAlgorithms.RsaSsaPssSha384, SecurityAlgorithms.RsaSsaPssSha512,
-        SecurityAlgorithms.EcdsaSha256, SecurityAlgorithms.EcdsaSha384, SecurityAlgorithms.EcdsaSha512,
-    ];
-
-    #endregion
-
     #region Métodos públicos
 
     public static WebApplicationBuilder AdicionarAutenticacao(this WebApplicationBuilder builder)
@@ -40,7 +27,6 @@ public static class AutenticacaoExtensoes
 
         servicos.TryAddSingleton(TimeProvider.System);
         servicos.Configure<OpcoesSessao>(builder.Configuration.GetSection(OpcoesSessao.Secao));
-        servicos.Configure<OpcoesOidc>(builder.Configuration.GetSection(OpcoesOidc.Secao));
 
         // Fábrica singleton; consultas e login são singletons (sem estado de requisição). O contexto da requisição
         // e o CronoDbContext dos endpoints são scoped: o contexto de banco é fixado na criação do DbContext.
@@ -143,12 +129,39 @@ public static class AutenticacaoExtensoes
             opcoes.Scope.Add(escopo);
         }
 
+        // Assinatura obrigatória e algoritmos assimétricos conhecidos já na validação do id_token (defesa em profundidade;
+        // a checagem de OnTokenValidated continua valendo).
+        opcoes.TokenHandler = new ValidadorTokenAssinado();
+
         opcoes.Events = new OpenIdConnectEvents
         {
+            OnMessageReceived = ExigirFluxoDeCodigoAsync,
             OnTokenValidated = ExigirTokenAssinadoAsync,
             OnTicketReceived = EntrarComTokenValidadoAsync,
             OnRemoteFailure = FalhaRemotaAsync,
+
+            // Sem logout no provedor por ora (pendente com a Segurança): as rotas do handler ficam desligadas (404).
+            OnRemoteSignOut = contexto => NaoDisponivelAsync(contexto.HttpContext, contexto.HandleResponse),
+            OnSignedOutCallbackRedirect = contexto => NaoDisponivelAsync(contexto.HttpContext, contexto.HandleResponse),
         };
+    }
+
+    // Só o fluxo de CÓDIGO é aceito. O handler processa um retorno de autorização (form_post) com `id_token` e sem
+    // `code`: o login passaria sem PKCE e sem autenticação do cliente (achado da Segurança). Recusa-se qualquer
+    // retorno com id_token ou access_token no canal do navegador, ou sem code. 401 genérico, sem cookie nem usuário.
+    private static async Task ExigirFluxoDeCodigoAsync(MessageReceivedContext contexto)
+    {
+        var mensagem = contexto.ProtocolMessage;
+        if (mensagem is null
+            || !string.IsNullOrEmpty(mensagem.IdToken)
+            || !string.IsNullOrEmpty(mensagem.AccessToken)
+            || string.IsNullOrEmpty(mensagem.Code))
+        {
+            var logger = contexto.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("CronoAI.Api.Autenticacao");
+            logger.FalhaNoRetornoOidc("fluxo_de_codigo_exigido");
+            contexto.HandleResponse();
+            await ResponderAsync(contexto.HttpContext, StatusCodes.Status401Unauthorized, "Não foi possível autenticar.");
+        }
     }
 
     // O handler aceitou, em teste, um id_token SEM assinatura (alg=none) recebido do endpoint de token (OIDC Core
@@ -159,7 +172,7 @@ public static class AutenticacaoExtensoes
         var algoritmo = contexto.SecurityToken?.Header?.Alg;
         var assinatura = contexto.SecurityToken?.RawSignature;
 
-        if (string.IsNullOrEmpty(assinatura) || algoritmo is null || !AlgoritmosAssimetricos.Contains(algoritmo))
+        if (string.IsNullOrEmpty(assinatura) || algoritmo is null || !AlgoritmosAssinatura.Assimetricos.Contains(algoritmo))
         {
             contexto.Fail("id_token sem assinatura válida.");
         }
@@ -183,7 +196,8 @@ public static class AutenticacaoExtensoes
         }
 
         var login = contexto.HttpContext.RequestServices.GetRequiredService<ServicoLogin>();
-        var resultado = await login.EntrarAsync(emissor, sujeito, nome, desenvolvimento: false, contexto.HttpContext.RequestAborted);
+        var anterior = await SessaoAnteriorAsync(contexto.HttpContext);
+        var resultado = await login.EntrarAsync(emissor, sujeito, nome, desenvolvimento: false, anterior, contexto.HttpContext.RequestAborted);
         if (resultado is null)
         {
             await RecusarAsync(contexto);
@@ -193,6 +207,19 @@ public static class AutenticacaoExtensoes
         contexto.Principal = PrincipalDeSessao.Criar(resultado.SessaoId, resultado.UsuarioId);
         contexto.Properties ??= new AuthenticationProperties();
         contexto.Properties.IsPersistent = false;
+    }
+
+    /// <summary>
+    /// Sessão válida que o navegador já traz no cookie (se houver). O handler OIDC trata o retorno ANTES da autenticação
+    /// padrão, então ela é feita aqui (o validador preenche o <see cref="ContextoSessao"/>). Um novo login encerra essa sessão.
+    /// </summary>
+    public static async Task<SessaoAnterior?> SessaoAnteriorAsync(HttpContext http)
+    {
+        var resultado = await http.AuthenticateAsync(EsquemasAutenticacao.Cookie);
+        var contexto = http.RequestServices.GetRequiredService<ContextoSessao>();
+        return resultado.Succeeded && contexto.SessaoId is { } sessaoId && contexto.UsuarioId is { } usuarioId
+            ? new SessaoAnterior(sessaoId, usuarioId)
+            : null;
     }
 
     // Fail() em OnTicketReceived é IGNORADO pelo handler (o login seguiria com o principal do provedor): a recusa
@@ -210,6 +237,13 @@ public static class AutenticacaoExtensoes
         logger.FalhaNoRetornoOidc(contexto.Failure?.GetType().Name ?? "desconhecido");
         contexto.HandleResponse();
         await ResponderAsync(contexto.HttpContext, StatusCodes.Status401Unauthorized, "Não foi possível autenticar.");
+    }
+
+    // Rota do handler desligada: 404 genérico (sem redirecionar nem tocar na sessão).
+    private static Task NaoDisponivelAsync(HttpContext http, Action tratada)
+    {
+        tratada();
+        return ResponderAsync(http, StatusCodes.Status404NotFound, "Recurso não encontrado.");
     }
 
     private static Task ResponderAsync(HttpContext http, int status, string titulo)

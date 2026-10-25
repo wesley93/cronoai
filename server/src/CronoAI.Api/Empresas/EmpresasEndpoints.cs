@@ -1,6 +1,7 @@
 using CronoAI.Api.Sessao;
 using CronoAI.Dados;
 using CronoAI.Dados.Identidade;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 
 namespace CronoAI.Api.Empresas;
@@ -19,23 +20,24 @@ public static class EmpresasEndpoints
         var grupo = api.MapGroup("/empresas");
 
         // Política EmpresaAtiva: sem empresa ativa → 403 (empresa-ativa-necessaria).
-        grupo.MapGet("/atual", async (ContextoSessao contexto, CronoDbContext db, CancellationToken cancelamento) =>
+        grupo.MapGet("/atual", async Task<Results<Ok<EmpresaResumo>, ProblemHttpResult>> (ContextoSessao contexto, CronoDbContext db, CancellationToken cancelamento) =>
             {
                 var empresaId = contexto.EmpresaId;
                 var empresa = await db.Empresas
                     .Where(e => e.Id == empresaId)
                     .Select(e => new EmpresaResumo(e.Id, e.Nome))
                     .SingleOrDefaultAsync(cancelamento);
-                return empresa is null ? NaoEncontrada() : Results.Ok(empresa);
+                return empresa is null ? NaoEncontrada() : TypedResults.Ok(empresa);
             })
             .RequireAuthorization(RequisitoEmpresaAtiva.PoliticaEmpresaAtiva)
-            .Produces<EmpresaResumo>();
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
 
-        grupo.MapPut("/atual", async (TrocarEmpresaAtivaRequisicao requisicao, ContextoSessao contexto, ConsultasIdentidade consultas, CancellationToken cancelamento) =>
+        grupo.MapPut("/atual", async Task<Results<Ok<EmpresaResumo>, ProblemHttpResult>> (TrocarEmpresaAtivaRequisicao requisicao, ContextoSessao contexto, ConsultasIdentidade consultas, CancellationToken cancelamento) =>
             {
                 if (contexto.SessaoId is not { } sessaoId || contexto.UsuarioId is not { } usuarioId)
                 {
-                    return Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Autenticação necessária.");
+                    return TypedResults.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Autenticação necessária.");
                 }
 
                 // Empresa alheia ou inexistente: o mesmo 404 (o 403 revelaria que ela existe).
@@ -46,9 +48,11 @@ public static class EmpresasEndpoints
                     return NaoEncontrada();
                 }
 
-                return Results.Ok(new EmpresaResumo(escolhida.Id, escolhida.Nome));
+                return TypedResults.Ok(new EmpresaResumo(escolhida.Id, escolhida.Nome));
             })
-            .Produces<EmpresaResumo>();
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         return api;
     }
@@ -57,8 +61,8 @@ public static class EmpresasEndpoints
 
     #region Métodos privados
 
-    private static IResult NaoEncontrada() =>
-        Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Recurso não encontrado.");
+    private static ProblemHttpResult NaoEncontrada() =>
+        TypedResults.Problem(statusCode: StatusCodes.Status404NotFound, title: "Recurso não encontrado.");
 
     #endregion
 }

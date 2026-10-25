@@ -54,6 +54,23 @@ public sealed class SessaoTestes
     }
 
     [Fact]
+    public async Task Definir_empresa_ativa_de_quem_nao_e_membro_devolve_false_sem_lancar()
+    {
+        var usuario = await _dados.CriarUsuarioAsync();
+        var outroUsuario = await _dados.CriarUsuarioAsync();
+        var propria = await _dados.CriarEmpresaComMembrosAsync(usuario);
+        var alheia = await _dados.CriarEmpresaComMembrosAsync(outroUsuario);
+        var sessao = await _dados.CriarSessaoAsync(usuario);
+
+        // FK composta violada (23503): o método devolve false (o endpoint responde 404), sem exceção.
+        var recusada = await _dados.Consultas.DefinirEmpresaAtivaAsync(sessao.Id, usuario, alheia, TestContext.Current.CancellationToken);
+        var aceita = await _dados.Consultas.DefinirEmpresaAtivaAsync(sessao.Id, usuario, propria, TestContext.Current.CancellationToken);
+
+        Assert.False(recusada);
+        Assert.True(aceita);
+    }
+
+    [Fact]
     public void Id_da_sessao_e_uuid_v4_aleatorio()
     {
         var id = CronoAI.Dominio.Sessao.GerarId();

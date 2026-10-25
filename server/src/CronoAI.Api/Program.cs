@@ -71,6 +71,9 @@ app.UseRouting();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+// ATENÇÃO: nada de middleware terminal (Run/Map de ramo) depois daqui. O tratador de resultado da autorização deixa
+// passar a requisição SEM endpoint (rota inexistente) para o 404; um terminal depois de UseAuthorization a serviria
+// sem autenticação (ADR 00006). Rota nova = endpoint, com cenário no catálogo de isolamento.
 
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false })
     .AllowAnonymous()

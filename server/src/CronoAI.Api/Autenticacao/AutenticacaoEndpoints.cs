@@ -3,6 +3,7 @@ using CronoAI.Api.Sessao;
 using CronoAI.Dados.Identidade;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace CronoAI.Api.Autenticacao;
 
@@ -17,21 +18,24 @@ public static class AutenticacaoEndpoints
         var grupo = api.MapGroup("/autenticacao");
 
         // Só este GET desafia o OIDC. Sem Autoridade configurada o esquema não existe: 503 (a API sobe e ninguém entra).
-        grupo.MapGet("/entrar", async (HttpContext http, string? retorno, IAuthenticationSchemeProvider esquemas) =>
+        grupo.MapGet("/entrar", async Task<Results<ChallengeHttpResult, ProblemHttpResult>> (HttpContext http, string? retorno, IAuthenticationSchemeProvider esquemas) =>
             {
                 if (await esquemas.GetSchemeAsync(EsquemasAutenticacao.Oidc) is null)
                 {
-                    return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Login corporativo não configurado.");
+                    return TypedResults.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Login corporativo não configurado.");
                 }
 
                 var propriedades = new AuthenticationProperties { RedirectUri = RetornoLocal.Sanitizar(retorno) };
-                return Results.Challenge(propriedades, [EsquemasAutenticacao.Oidc]);
+                return TypedResults.Challenge(propriedades, [EsquemasAutenticacao.Oidc]);
             })
             .AllowAnonymous()
-            .RequireRateLimiting(BordaExtensoes.PoliticaAutenticacao);
+            .RequireRateLimiting(BordaExtensoes.PoliticaAutenticacao)
+            .Produces(StatusCodes.Status302Found)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         // Logout local: encerra a sessão NO SERVIDOR e apaga o cookie. Logout no provedor fica pendente (Segurança).
-        grupo.MapPost("/sair", async (HttpContext http, ContextoSessao contexto, ConsultasIdentidade consultas, TimeProvider relogio) =>
+        grupo.MapPost("/sair", async Task<NoContent> (HttpContext http, ContextoSessao contexto, ConsultasIdentidade consultas, TimeProvider relogio) =>
             {
                 if (contexto.SessaoId is { } sessaoId && contexto.UsuarioId is { } usuarioId)
                 {
@@ -39,16 +43,20 @@ public static class AutenticacaoEndpoints
                 }
 
                 await http.SignOutAsync(EsquemasAutenticacao.Cookie);
-                return Results.NoContent();
+                return TypedResults.NoContent();
             })
-            .RequireRateLimiting(BordaExtensoes.PoliticaAutenticacao);
+            .RequireRateLimiting(BordaExtensoes.PoliticaAutenticacao)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         // Token de antiforgery para as escritas (cabeçalho X-XSRF-TOKEN). Exige sessão: o token é ligado ao usuário.
-        grupo.MapGet("/antiforgery", (HttpContext http, IAntiforgery antiforgery) =>
-        {
-            var tokens = antiforgery.GetAndStoreTokens(http);
-            return TypedResults.Ok(new AntiforgeryResposta(tokens.RequestToken ?? ""));
-        });
+        grupo.MapGet("/antiforgery", Ok<AntiforgeryResposta> (HttpContext http, IAntiforgery antiforgery) =>
+            {
+                var tokens = antiforgery.GetAndStoreTokens(http);
+                return TypedResults.Ok(new AntiforgeryResposta(tokens.RequestToken ?? ""));
+            })
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         return api;
     }

@@ -84,9 +84,53 @@ public sealed class OidcNegativosTestes
         using var eu = await navegador.GetAsync("/api/v1/eu", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, eu.StatusCode);
 
-        // O log da falha não traz o sujeito nem o token.
+        // O log da falha não traz o sujeito, o token nem o código de autorização.
         Assert.DoesNotContain(sujeito, logs.Tudo, StringComparison.Ordinal);
+        Assert.NotNull(idp.UltimoCodigo);
+        Assert.DoesNotContain(idp.UltimoCodigo!, logs.Tudo, StringComparison.Ordinal);
+        if (idp.UltimoIdToken is not null)
+        {
+            Assert.DoesNotContain(idp.UltimoIdToken, logs.Tudo, StringComparison.Ordinal);
+        }
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Id_token_no_retorno_de_autorizacao_nao_cria_sessao(bool comCode)
+    {
+        // O canal do navegador (form_post/query) NÃO pode entregar id_token: só o fluxo de código vale. Mesmo um
+        // token válido (assinado, nonce correto) é recusado, com ou sem code: sem PKCE nem autenticação do cliente.
+        using var idp = new IdpEmMemoria();
+        var sujeito = "sub-" + Guid.NewGuid().ToString("N");
+        idp.ProximoToken = new DefinicaoToken { Sujeito = sujeito };
+        var logs = new LogsEmMemoria();
+        await using var fabrica = new ApiFactory(_banco.StringConexaoApp) { Idp = idp, Logs = logs };
+        using var navegador = fabrica.CriarNavegador();
+        string? idTokenInjetado = null;
+
+        using var resposta = await ClienteAutenticado.LoginOidcAsync(navegador, idp, adulterar: retorno =>
+        {
+            var campos = new Dictionary<string, string>(retorno.Campos);
+            idTokenInjetado = idp.EmitirFrontChannel(retorno.Nonce, sujeito);
+            campos["id_token"] = idTokenInjetado;
+            if (!comCode)
+            {
+                campos.Remove("code");
+            }
+
+            return retorno with { Campos = campos };
+        });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, resposta.StatusCode);
+        var cookies = resposta.Headers.TryGetValues("Set-Cookie", out var valores) ? valores : [];
+        Assert.DoesNotContain(cookies, c => c.StartsWith("__Host-cronoai-sessao=", StringComparison.Ordinal) && !c.Contains("1970", StringComparison.Ordinal));
+        Assert.Equal(0, await ConsultaBanco.ContarUsuariosAsync(_banco, idp.Emissor, sujeito));
+        using var eu = await navegador.GetAsync("/api/v1/eu", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, eu.StatusCode);
+        Assert.DoesNotContain(idTokenInjetado!, logs.Tudo, StringComparison.Ordinal);
+    }
+
 
     #endregion
 }

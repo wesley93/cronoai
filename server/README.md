@@ -77,17 +77,20 @@ A API só entende quem chama pelo **cookie de sessão** (`__Host-cronoai-sessao`
 `localhost`. Rotas: `GET /api/v1/eu`, `GET`/`PUT /api/v1/empresas/atual`, `GET /api/v1/autenticacao/entrar`, `POST
 /api/v1/autenticacao/sair` e `GET /api/v1/autenticacao/antiforgery` (as escritas exigem o cabeçalho `X-XSRF-TOKEN`).
 
-**Usuário de desenvolvimento** (só local, nunca em produção). Exige DOIS interruptores: ambiente `Development` (o
-`launchSettings.json` já define) **e** a flag abaixo, que **não** fica em nenhum `appsettings*.json`:
+**Semente de desenvolvimento**: exige só o ambiente `Development` (o `launchSettings.json` já define), recusa em qualquer outro e
+conecta como `cronoai_app`. Cria dev-a, dev-b e 3 empresas fictícias (ids fixos; idempotente).
+
+**Login do usuário de desenvolvimento** (só local, nunca em produção). A rota só existe com DOIS interruptores: ambiente
+`Development` **e** a flag abaixo, que **não** fica em nenhum `appsettings*.json`:
 
 ```bash
 cd server/src/CronoAI.Api
+dotnet run -- semear-desenvolvimento      # só Development
 dotnet user-secrets set "Autenticacao:UsuarioDesenvolvimento:Habilitado" "true"
-dotnet run -- semear-desenvolvimento      # cria dev-a, dev-b e 3 empresas fictícias (ids fixos; idempotente; como cronoai_app)
 dotnet run                                # POST /api/v1/autenticacao/desenvolvimento/entrar com {"usuario":"dev-a"} ou "dev-b"
 ```
 
-Com a flag ligada fora de `Development`, a API **não sobe** (`OptionsValidationException`). A semente recusa fora de `Development`.
+Com a flag ligada fora de `Development`, a API **não sobe** (`OptionsValidationException`).
 
 **Login OIDC genérico** (sem provedor fixo no código). Sem `Autoridade`, o esquema não é registrado e `/entrar` responde 503.
 O segredo do cliente só por user-secrets ou variável de ambiente (nunca em `appsettings`):
@@ -97,6 +100,10 @@ dotnet user-secrets set "Autenticacao:Oidc:Autoridade" "<url do emissor>"
 dotnet user-secrets set "Autenticacao:Oidc:IdCliente" "<id do cliente>"
 dotnet user-secrets set "Autenticacao:Oidc:SegredoCliente" "<segredo>"      # opcional: Escopos (padrão "openid profile") e CaminhoRetorno
 ```
+
+**Contrato OpenAPI no build**: o gerador (`GetDocument.Insider`) sobe o host em `Production`, sem anel de chaves; por isso só ele
+pula o `ValidateOnStart` do anel (padrão da [documentação](https://learn.microsoft.com/aspnet/core/fundamentals/openapi/aspnetcore-openapi#customizing-run-time-behavior-during-build-time-document-generation)).
+A execução real e os testes validam normalmente.
 
 **Data Protection**: em `Development` o anel de chaves fica em `%LOCALAPPDATA%/CronoAI/chaves` (fora do repositório; mude com
 `DataProtection:CaminhoAnel`). Fora de `Development` o caminho é obrigatório, senão a API não sobe. Perder o anel derruba as sessões
@@ -109,7 +116,7 @@ cd server
 dotnet tool restore                                           # dotnet-ef fixado em .config/dotnet-tools.json
 dotnet ef database update --project src/CronoAI.Dados         # aplica migrações (string do migrador)
 dotnet run --project src/CronoAI.Api                          # http://127.0.0.1:5280 (/health/live, /health/ready)
-dotnet run --project src/CronoAI.Api -- semear-desenvolvimento # semente fictícia (só Development, com a flag do usuário dev)
+dotnet run --project src/CronoAI.Api -- semear-desenvolvimento # semente fictícia (só Development)
 dotnet build CronoAI.slnx -c Release                          # avisos são erros; regera openapi/CronoAI.Api.json
 dotnet test --solution CronoAI.slnx                           # inclui testes de integração (exige Docker); só de dentro de server/
 dotnet format CronoAI.slnx --verify-no-changes

@@ -1,6 +1,8 @@
 using CronoAI.Api.Autenticacao;
 using CronoAI.Api.Borda;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.Options;
 
 namespace CronoAI.Api.Desenvolvimento;
 
@@ -16,39 +18,40 @@ public static class DesenvolvimentoEndpoints
     public static void MapearDesenvolvimento(this WebApplication app)
     {
         ArgumentNullException.ThrowIfNull(app);
-        var habilitado = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<OpcoesUsuarioDesenvolvimento>>().Value.Habilitado;
+        var habilitado = app.Services.GetRequiredService<IOptions<OpcoesUsuarioDesenvolvimento>>().Value.Habilitado;
         if (!(app.Environment.IsDevelopment() && habilitado))
         {
             return;
         }
 
-        app.MapPost("/api/v1/autenticacao/desenvolvimento/entrar", async (
+        app.MapPost("/api/v1/autenticacao/desenvolvimento/entrar", async Task<Results<NoContent, ProblemHttpResult>> (
                 DesenvolvimentoEntrarRequisicao requisicao,
                 HttpContext http,
                 ServicoLogin login) =>
             {
-                var (sujeito, nome) = requisicao.Usuario switch
+                (string? Sujeito, string? Nome) escolhido = requisicao.Usuario switch
                 {
                     IdsDesenvolvimento.SujeitoDevA => (IdsDesenvolvimento.SujeitoDevA, IdsDesenvolvimento.NomeDevA),
                     IdsDesenvolvimento.SujeitoDevB => (IdsDesenvolvimento.SujeitoDevB, IdsDesenvolvimento.NomeDevB),
                     _ => (null, null),
                 };
-                if (sujeito is null)
+                if (escolhido.Sujeito is null)
                 {
-                    return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Usuário de desenvolvimento desconhecido.");
+                    return TypedResults.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Usuário de desenvolvimento desconhecido.");
                 }
 
-                var resultado = await login.EntrarAsync(EsquemasAutenticacao.EmissorDesenvolvimento, sujeito, nome, desenvolvimento: true, http.RequestAborted);
+                var anterior = await AutenticacaoExtensoes.SessaoAnteriorAsync(http);
+                var resultado = await login.EntrarAsync(EsquemasAutenticacao.EmissorDesenvolvimento, escolhido.Sujeito, escolhido.Nome, desenvolvimento: true, anterior, http.RequestAborted);
                 if (resultado is null)
                 {
-                    return Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Não foi possível autenticar.");
+                    return TypedResults.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Não foi possível autenticar.");
                 }
 
                 await http.SignInAsync(
                     EsquemasAutenticacao.Cookie,
                     PrincipalDeSessao.Criar(resultado.SessaoId, resultado.UsuarioId),
                     new AuthenticationProperties { IsPersistent = false });
-                return Results.NoContent();
+                return TypedResults.NoContent();
             })
             .AllowAnonymous()
             .RequireRateLimiting(BordaExtensoes.PoliticaAutenticacao)

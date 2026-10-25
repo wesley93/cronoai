@@ -42,13 +42,12 @@ public sealed class UsuarioDesenvolvimentoTestes
     [InlineData("Homologacao")]
     public void Api_nao_sobe_fora_de_Development_com_usuario_dev_ligado(string ambiente)
     {
-        using var fabrica = new ApiFactory(ApiFactory.ConexaoSemBanco, ambiente) { Configuracoes = { [Flag] = "true" } };
+        using var fabrica = new ApiFactory(ApiFactory.ConexaoSemBanco, ambiente) { Logs = new LogsEmMemoria(), Configuracoes = { [Flag] = "true" } };
 
-        var erro = Record.Exception(() => fabrica.CreateClient());
+        var texto = PartidaDoHost.ExigirFalha(fabrica, "usuário de desenvolvimento");
 
-        var validacao = Excecoes.Procurar<OptionsValidationException>(erro);
-        Assert.NotNull(validacao);
-        Assert.Contains("usuário de desenvolvimento", string.Join(' ', validacao.Failures), StringComparison.Ordinal);
+        Assert.Contains("OptionsValidationException", texto, StringComparison.Ordinal);
+        Assert.Contains("usuário de desenvolvimento", texto, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -63,9 +62,8 @@ public sealed class UsuarioDesenvolvimentoTestes
         using var resposta = await navegador.PostAsJsonAsync(RotaDesenvolvimento, new { usuario = "dev-a" }, TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain(RotaDesenvolvimento, rotas);
-        // Sem a rota, a requisição anônima cai no 404 (nem chega a pedir login).
-        Assert.True(resposta.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized);
-        Assert.NotEqual(HttpStatusCode.NoContent, resposta.StatusCode);
+        // Sem a rota, a requisição anônima cai no 404 (requisição sem endpoint não é desafiada).
+        Assert.Equal(HttpStatusCode.NotFound, resposta.StatusCode);
     }
 
     [Fact]

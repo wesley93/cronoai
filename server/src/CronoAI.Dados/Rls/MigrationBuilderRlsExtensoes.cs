@@ -46,13 +46,6 @@ public static class MigrationBuilderRlsExtensoes
     public static void PoliticaDelete(this MigrationBuilder migrationBuilder, string tabela, string nome, string usando) =>
         Criar(migrationBuilder, tabela, nome, "DELETE", $"USING ({usando})");
 
-    /// <summary>Remove a política (usado no <c>Down()</c>).</summary>
-    public static void RemoverPolitica(this MigrationBuilder migrationBuilder, string tabela, string nome)
-    {
-        ArgumentNullException.ThrowIfNull(migrationBuilder);
-        migrationBuilder.Sql($"DROP POLICY IF EXISTS {nome} ON {Qualificada(tabela)};");
-    }
-
     #endregion
 
     #region Métodos privados

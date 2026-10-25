@@ -40,7 +40,7 @@ public static class BordaExtensoes
 
         AdicionarGuardas(builder);
         AdicionarDataProtection(builder);
-        AdicionarLimitesDeTaxa(builder, configuracao.GetValue<string>("Autenticacao:Oidc:CaminhoRetorno") ?? OpcoesOidc.CaminhoRetornoPadrao);
+        AdicionarLimitesDeTaxa(builder, configuracao.GetValue<string>($"{OpcoesOidc.Secao}:CaminhoRetorno") ?? OpcoesOidc.CaminhoRetornoPadrao);
         return builder;
     }
 
@@ -60,7 +60,9 @@ public static class BordaExtensoes
             .Bind(builder.Configuration.GetSection(OpcoesDataProtection.Secao));
 
         // O gerador do contrato OpenAPI (build) sobe o host em Production, sem anel de chaves: só ele pula a falha
-        // fechada (padrão documentado da Microsoft). Execução real e testes continuam validando na partida.
+        // fechada (padrão documentado da Microsoft para código que não deve rodar na geração do documento:
+        // https://learn.microsoft.com/aspnet/core/fundamentals/openapi/aspnetcore-openapi#customizing-run-time-behavior-during-build-time-document-generation).
+        // Execução real e testes continuam validando na partida.
         if (Assembly.GetEntryAssembly()?.GetName().Name != "GetDocument.Insider")
         {
             opcoesProtecao.ValidateOnStart();

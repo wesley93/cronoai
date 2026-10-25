@@ -20,6 +20,9 @@ public static partial class LogsAutenticacao
     [LoggerMessage(EventId = 4, Level = LogLevel.Information, Message = "Login concluído usuario_id={UsuarioId}")]
     public static partial void LoginConcluido(this ILogger logger, Guid usuarioId);
 
+    [LoggerMessage(EventId = 6, Level = LogLevel.Warning, Message = "Nome de exibição do provedor descartado (valor recusado pelo banco)")]
+    public static partial void NomeDeExibicaoDescartado(this ILogger logger);
+
     [LoggerMessage(EventId = 5, Level = LogLevel.Warning, Message = "Falha no retorno do provedor OIDC ({Tipo})")]
     public static partial void FalhaNoRetornoOidc(this ILogger logger, string tipo);
 

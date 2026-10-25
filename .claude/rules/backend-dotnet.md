@@ -26,6 +26,9 @@ Fonte da verdade: `CLAUDE.md` e o [ADR 00004](../adrs/00004-estrutura-convencoes
 - **Migração de dados** em tabela com RLS só por `ExecutarDmlComRls` (NO FORCE → DML → FORCE na transação), com a chamada e o SQL na mesma linha (R15); DML solto afeta zero linhas sem erro.
 - **Carregar antes de atualizar**: recurso de outra empresa → 404 (nunca 403 nem 409). Um `UPDATE` cross-empresa sob RLS vira `DbUpdateConcurrencyException`.
 - **Rota nova**: entrada em `tests/.../Isolamento/CatalogoRotas.cs` com o cenário (rota com `{id}` ganha `ComIdDeOutraEmpresa`). Fallback de autorização = autenticado; rota anônima só com `AllowAnonymous()` e na lista `AnonimasPermitidas`; escrita exige antiforgery.
+- **Nada de middleware terminal (`Run`/`Map` de ramo) depois de `UseAuthorization`**: o tratador de resultado deixa passar a requisição sem endpoint para o 404, e um terminal ali a serviria sem autenticação.
+- Handlers de endpoint devolvem `TypedResults` (uniões `Results<…>`), e o status que vem do pipeline (401, 403, 400 do antiforgery, 429) é declarado com `.ProducesProblem(...)`.
+- Retorno do OIDC: só o fluxo de **código** (id_token ou access_token no retorno do navegador, ou retorno sem `code`, são recusados em `OnMessageReceived`); logout do provedor desligado até a Segurança decidir.
 - Sessão: cookie `__Host-` revogável no servidor (tabela `sessao`, uuid v4 por CSPRNG); nenhum token do provedor guardado; o login acontece em `OnTicketReceived` e exige `id_token` assinado. O usuário de desenvolvimento só existe com `Development` + flag fora de `appsettings` versionado, e a API não sobe com a flag em outro ambiente.
 - Regras automáticas **R14 a R17** em `.claude/scripts/lib/regras-cronoai.mjs` (SQL bruto, DDL fora de migração/`Rls/`, DML de migração fora do helper, `IgnoreQueryFilters`, conexão crua), com casos em `regras-cronoai.test.mjs` (`node --test`).
 

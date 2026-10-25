@@ -1,5 +1,6 @@
 using CronoAI.Dominio;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace CronoAI.Dados.Identidade;
 
@@ -33,7 +34,8 @@ public sealed class ConsultasIdentidade
 
     /// <summary>
     /// Passo 1: upsert do usuário por (emissor, sujeito), sem contexto de banco (<c>usuario</c> não tem RLS).
-    /// Devolve o id EXISTENTE em caso de conflito. NUNCA toca em <c>desativado_em</c>: o login não reativa conta.
+    /// Devolve o id EXISTENTE em caso de conflito. Grava o nome vindo do token (nulo se o provedor não mandou: sem manter
+    /// valor antigo, minimização). NUNCA toca em <c>desativado_em</c>: o login não reativa conta.
     /// </summary>
     public async Task<Guid> UpsertUsuarioAsync(string emissor, string sujeito, string? nomeExibicao, DateTime agoraUtc, CancellationToken cancelamento = default)
     {
@@ -48,7 +50,7 @@ public sealed class ConsultasIdentidade
                 VALUES ({candidato.Id}, {candidato.Emissor}, {candidato.Sujeito}, {candidato.NomeExibicao}, {agoraUtc}, {agoraUtc})
                 ON CONFLICT (emissor, sujeito) DO UPDATE
                    SET ultimo_acesso_em = EXCLUDED.ultimo_acesso_em,
-                       nome_exibicao = COALESCE(EXCLUDED.nome_exibicao, cronoai.usuario.nome_exibicao)
+                       nome_exibicao = EXCLUDED.nome_exibicao
                 RETURNING id AS "Value"
                 """)
             .ToListAsync(cancelamento);
@@ -106,15 +108,23 @@ public sealed class ConsultasIdentidade
 
     /// <summary>
     /// Passo 5: grava a empresa ativa da sessão. A FK composta garante o vínculo (e ignora o RLS). Devolve se
-    /// alguma linha foi atualizada.
+    /// alguma linha foi atualizada; se o usuário NÃO é membro da empresa, a FK é violada (23503) e o método devolve
+    /// <c>false</c> (o endpoint responde 404), sem lançar.
     /// </summary>
     public async Task<bool> DefinirEmpresaAtivaAsync(Guid sessaoId, Guid usuarioId, Guid empresaId, CancellationToken cancelamento = default)
     {
         await using var contexto = _fabrica.Criar(ContextoSessaoBanco.DoUsuario(usuarioId));
-        var linhas = await contexto.Sessoes
-            .Where(s => s.Id == sessaoId && s.UsuarioId == usuarioId && s.EncerradaEm == null)
-            .ExecuteUpdateAsync(set => set.SetProperty(s => s.EmpresaAtivaId, empresaId), cancelamento);
-        return linhas == 1;
+        try
+        {
+            var linhas = await contexto.Sessoes
+                .Where(s => s.Id == sessaoId && s.UsuarioId == usuarioId && s.EncerradaEm == null)
+                .ExecuteUpdateAsync(set => set.SetProperty(s => s.EmpresaAtivaId, empresaId), cancelamento);
+            return linhas == 1;
+        }
+        catch (Exception erro) when (EhViolacaoDeChaveEstrangeira(erro))
+        {
+            return false;
+        }
     }
 
     /// <summary>Encerra a sessão no servidor (logout). Só a do próprio usuário (política de UPDATE).</summary>
@@ -146,6 +156,24 @@ public sealed class ConsultasIdentidade
             where vinculoVigente
             select new SessaoValidada(s.EmpresaAtivaId, s.ExpiraEm, u.Emissor))
             .SingleOrDefaultAsync(cancelamento);
+    }
+
+    #endregion
+
+    #region Métodos privados
+
+    // O ExecuteUpdate pode entregar a exceção do Npgsql direto ou embrulhada: procura na cadeia.
+    private static bool EhViolacaoDeChaveEstrangeira(Exception erro)
+    {
+        for (var atual = erro; atual is not null; atual = atual.InnerException)
+        {
+            if (atual is PostgresException { SqlState: PostgresErrorCodes.ForeignKeyViolation })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     #endregion

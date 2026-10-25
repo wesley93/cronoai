@@ -52,6 +52,12 @@ public sealed class IdpEmMemoria : HttpMessageHandler
     /// <summary>Como emitir o PRÓXIMO token. Cada <see cref="Autorizar"/> captura a definição vigente e a renova.</summary>
     public DefinicaoToken ProximoToken { get; set; } = new();
 
+    /// <summary>Último código de autorização emitido (para os testes provarem que não aparece em log).</summary>
+    public string? UltimoCodigo { get; private set; }
+
+    /// <summary>Último <c>id_token</c> emitido no endpoint de token (idem).</summary>
+    public string? UltimoIdToken { get; private set; }
+
     #endregion
 
     #region Métodos públicos
@@ -77,11 +83,32 @@ public sealed class IdpEmMemoria : HttpMessageHandler
 
         var desafio = definicao.AdulterarCodeChallenge ? Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32)) : consulta["code_challenge"];
         var codigo = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
+        UltimoCodigo = codigo;
         _codigos[codigo] = new PedidoAutorizacao(IdCliente, redirectUri, consulta["nonce"], desafio, definicao);
 
         var campos = new Dictionary<string, string> { ["code"] = codigo, ["state"] = consulta["state"] };
         var formPost = consulta.GetValueOrDefault("response_mode") == "form_post";
-        return new RetornoAutorizacao(new Uri(redirectUri), campos, formPost);
+        return new RetornoAutorizacao(new Uri(redirectUri), campos, formPost, consulta["nonce"]);
+    }
+
+    /// <summary>
+    /// <c>id_token</c> VÁLIDO (assinado, nonce correto) para ser injetado pelo navegador no retorno de autorização
+    /// (canal frontal), como faria um atacante que o obtivesse: o aplicativo deve recusar mesmo assim.
+    /// </summary>
+    public string EmitirFrontChannel(string nonce, string sujeito)
+    {
+        var agora = DateTime.UtcNow;
+        var descritor = new SecurityTokenDescriptor
+        {
+            Issuer = Emissor,
+            Audience = IdCliente,
+            Claims = new Dictionary<string, object> { ["sub"] = sujeito, ["nonce"] = nonce },
+            IssuedAt = agora,
+            NotBefore = agora,
+            Expires = agora.AddMinutes(5),
+            SigningCredentials = new SigningCredentials(new RsaSecurityKey(_chave) { KeyId = _kid }, SecurityAlgorithms.RsaSha256),
+        };
+        return new JsonWebTokenHandler().CreateToken(descritor);
     }
 
     #endregion
@@ -179,6 +206,7 @@ public sealed class IdpEmMemoria : HttpMessageHandler
         }
 
         var idToken = EmitirToken(pedido);
+        UltimoIdToken = idToken;
         return Json(new Dictionary<string, object>
         {
             ["id_token"] = idToken,

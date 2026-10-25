@@ -50,7 +50,7 @@ docker compose --profile backend up -d --wait db                 # PostgreSQL lo
 dotnet build server/CronoAI.slnx -c Release                      # avisos são erros; regera server/openapi/CronoAI.Api.json
 (cd server && dotnet test --solution CronoAI.slnx)              # inclui integração (exige Docker); rodar de dentro de server/
 dotnet format server/CronoAI.slnx --verify-no-changes
-(cd server/src/CronoAI.Api && dotnet run -- semear-desenvolvimento)   # semente fictícia (só Development, flag do usuário dev; veja server/README.md)
+(cd server/src/CronoAI.Api && dotnet run -- semear-desenvolvimento)   # semente fictícia (só Development; veja server/README.md)
 node --test .claude/scripts/lib/regras-cronoai.test.mjs   # testes das regras do validar-regras (R08, R14 a R17)
 dotnet list server/CronoAI.slnx package --vulnerable --include-transitive
 ```

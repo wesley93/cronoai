@@ -1,6 +1,9 @@
+using System.Globalization;
+using System.Text;
 using CronoAI.Dados.Identidade;
 using CronoAI.Dominio;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using SessaoDominio = CronoAI.Dominio.Sessao;
 
 namespace CronoAI.Api.Autenticacao;
@@ -40,7 +43,7 @@ public sealed class ServicoLogin
     /// se o emissor reservado de desenvolvimento vier fora do fluxo de desenvolvimento ou se os dados forem
     /// inválidos (tamanhos).
     /// </summary>
-    public async Task<ResultadoLogin?> EntrarAsync(string emissor, string sujeito, string? nomeExibicao, bool desenvolvimento, CancellationToken cancelamento = default)
+    public async Task<ResultadoLogin?> EntrarAsync(string emissor, string sujeito, string? nomeExibicao, bool desenvolvimento, SessaoAnterior? anterior = null, CancellationToken cancelamento = default)
     {
         if (emissor == EsquemasAutenticacao.EmissorDesenvolvimento && !desenvolvimento)
         {
@@ -50,13 +53,13 @@ public sealed class ServicoLogin
 
         var opcoes = _opcoesSessao.Value;
         var agora = _relogio.GetUtcNow().UtcDateTime;
-        var nome = nomeExibicao is { Length: > Usuario.TamanhoMaximoNome } ? nomeExibicao[..Usuario.TamanhoMaximoNome] : nomeExibicao;
+        var nome = NomeSeguro(nomeExibicao);
 
         Guid usuarioId;
         try
         {
             // 1. upsert do usuário (sem contexto de banco; nunca reativa conta desativada)
-            usuarioId = await _consultas.UpsertUsuarioAsync(emissor, sujeito, nome, agora, cancelamento);
+            usuarioId = await UpsertAsync(emissor, sujeito, nome, agora, cancelamento);
         }
         catch (ArgumentException)
         {
@@ -84,8 +87,66 @@ public sealed class ServicoLogin
             await _consultas.DefinirEmpresaAtivaAsync(sessao.Id, usuarioId, empresas[0].Id, cancelamento);
         }
 
+        // Novo login no mesmo navegador encerra a sessão anterior (se o cookie dele ainda era válido).
+        if (anterior is not null)
+        {
+            await _consultas.EncerrarSessaoAsync(anterior.SessaoId, anterior.UsuarioId, agora, cancelamento);
+        }
+
         _logger.LoginConcluido(usuarioId);
         return new ResultadoLogin(usuarioId, sessao.Id);
+    }
+
+    /// <summary>
+    /// Nome de exibição do provedor, sem caracteres de controle (inclui U+0000, que o PostgreSQL não grava) e cortado
+    /// por elemento de texto (nunca parte um par substituto nem um grafema) em até o limite do domínio. Vazio vira nulo.
+    /// </summary>
+    public static string? NomeSeguro(string? nome)
+    {
+        if (string.IsNullOrWhiteSpace(nome))
+        {
+            return null;
+        }
+
+        var limpo = new StringBuilder(nome.Length);
+        foreach (var caractere in nome.Where(c => !char.IsControl(c)))
+        {
+            limpo.Append(caractere);
+        }
+
+        var texto = limpo.ToString().Trim();
+        var resultado = new StringBuilder(texto.Length);
+        var elementos = StringInfo.GetTextElementEnumerator(texto);
+        while (elementos.MoveNext())
+        {
+            var elemento = (string)elementos.Current;
+            if (resultado.Length + elemento.Length > Usuario.TamanhoMaximoNome)
+            {
+                break;
+            }
+
+            resultado.Append(elemento);
+        }
+
+        return resultado.Length == 0 ? null : resultado.ToString();
+    }
+
+    #endregion
+
+    #region Métodos privados
+
+    // Se mesmo o nome saneado falhar (valor que o banco recusa), grava nome nulo em vez de recusar o login.
+    private async Task<Guid> UpsertAsync(string emissor, string sujeito, string? nome, DateTime agora, CancellationToken cancelamento)
+    {
+        try
+        {
+            return await _consultas.UpsertUsuarioAsync(emissor, sujeito, nome, agora, cancelamento);
+        }
+        catch (Exception erro) when (nome is not null && (erro is ArgumentException || erro is PostgresException))
+        {
+            _logger.NomeDeExibicaoDescartado();
+            return await _consultas.UpsertUsuarioAsync(emissor, sujeito, null, agora, cancelamento);
+        }
     }
 
     #endregion

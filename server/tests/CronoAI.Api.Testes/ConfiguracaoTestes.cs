@@ -61,13 +61,12 @@ public sealed partial class ConfiguracaoTestes
     public void No_reset_on_close_impede_a_partida()
     {
         // A guarda protege a segunda rede contra vazamento de variável de sessão no pool (ADR 00006).
-        using var fabrica = new ApiFactory(ApiFactory.ConexaoSemBanco + ";No Reset On Close=true");
+        using var fabrica = new ApiFactory(ApiFactory.ConexaoSemBanco + ";No Reset On Close=true") { Logs = new LogsEmMemoria() };
 
-        var erro = Record.Exception(() => fabrica.CreateClient());
+        var texto = PartidaDoHost.ExigirFalha(fabrica, "No Reset On Close");
 
-        var validacao = Excecoes.Procurar<OptionsValidationException>(erro);
-        Assert.NotNull(validacao);
-        Assert.Contains("No Reset On Close", string.Join(' ', validacao.Failures), StringComparison.Ordinal);
+        Assert.Contains("OptionsValidationException", texto, StringComparison.Ordinal);
+        Assert.Contains("No Reset On Close", texto, StringComparison.Ordinal);
     }
 
     #endregion

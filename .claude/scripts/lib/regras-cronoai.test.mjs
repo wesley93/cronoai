@@ -91,3 +91,25 @@ for (const [nome, arquivo, linha] of NAO_ACUSA) {
     assert.deepEqual(ids(arquivo, linha), [])
   })
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// R15 confere LINHA a LINHA (não o arquivo): uma migração com um ExecutarDmlComRls NÃO libera um UPDATE solto em outra linha.
+// ---------------------------------------------------------------------------------------------------------------
+import { aplicarRegras } from './regras-cronoai.mjs'
+
+test('backend R15: UPDATE solto em outra linha da mesma migração é acusado (só ela)', () => {
+  const novas = new Map([
+    [
+      MIGRACAO,
+      [
+        { n: 10, texto: 'migrationBuilder.ExecutarDmlComRls("empresa", "UPDATE cronoai.empresa SET nome = nome WHERE id = 1");' },
+        { n: 11, texto: 'migrationBuilder.Sql("UPDATE cronoai.empresa SET nome = \'x\' WHERE id = 2");' },
+      ],
+    ],
+  ])
+
+  const achados = aplicarRegras({ arquivos: [MIGRACAO], novas }).filter((x) => x.id === 'R15')
+
+  assert.equal(achados.length, 1)
+  assert.equal(achados[0].linha, 11)
+})

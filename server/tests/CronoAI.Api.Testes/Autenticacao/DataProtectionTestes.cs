@@ -32,13 +32,12 @@ public sealed class DataProtectionTestes
     [InlineData("Staging")]
     public void Fora_de_Development_sem_anel_configurado_api_nao_sobe(string ambiente)
     {
-        using var fabrica = new ApiFactory(ApiFactory.ConexaoSemBanco, ambiente) { SemAnelDeChaves = true };
+        using var fabrica = new ApiFactory(ApiFactory.ConexaoSemBanco, ambiente) { SemAnelDeChaves = true, Logs = new LogsEmMemoria() };
 
-        var erro = Record.Exception(() => fabrica.CreateClient());
+        var texto = PartidaDoHost.ExigirFalha(fabrica, "CaminhoAnel");
 
-        var validacao = Excecoes.Procurar<OptionsValidationException>(erro);
-        Assert.NotNull(validacao);
-        Assert.Contains("CaminhoAnel", string.Join(' ', validacao.Failures), StringComparison.Ordinal);
+        Assert.Contains("OptionsValidationException", texto, StringComparison.Ordinal);
+        Assert.Contains("CaminhoAnel", texto, StringComparison.Ordinal);
     }
 
     [Fact]

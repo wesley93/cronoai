@@ -4,4 +4,5 @@ namespace CronoAI.Api.Testes.Infra.IdpTeste;
 /// <param name="RedirectUri">Endereço do retorno (callback) do aplicativo.</param>
 /// <param name="Campos">Parâmetros devolvidos (<c>code</c> e <c>state</c>).</param>
 /// <param name="FormPost">Se verdadeiro, o retorno é um POST <c>application/x-www-form-urlencoded</c>.</param>
-public sealed record RetornoAutorizacao(Uri RedirectUri, IReadOnlyDictionary<string, string> Campos, bool FormPost);
+/// <param name="Nonce">Nonce do pedido de autorização (para testes que forjam um <c>id_token</c> coerente).</param>
+public sealed record RetornoAutorizacao(Uri RedirectUri, IReadOnlyDictionary<string, string> Campos, bool FormPost, string Nonce);
