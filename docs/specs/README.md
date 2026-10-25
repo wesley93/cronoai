@@ -6,6 +6,8 @@ Este diretório reúne as especificações para levar o CronoAI do protótipo at
 > Itens marcados **(recomendação)** são opinião técnica, não exigência. Itens com impacto jurídico, de segurança ou de RH trazem a área que **precisa validar** antes de seguir.
 
 > Spec de produto original (visão e stack sugerida): [SPEC-original.md](SPEC-original.md).
+>
+> **Público e abrangência:** construtoras, gestores de portfólio e engenheiros que tocam **várias obras e frentes**, em **qualquer UF do Brasil**. O sistema é multiempresa e multiobra; cada obra define UF, município, tabela SINAPI e regime de encargos.
 
 ## Estado atual (out/2026)
 
@@ -39,6 +41,7 @@ Este diretório reúne as especificações para levar o CronoAI do protótipo at
 | [SPEC-11](SPEC-11-relatorios-notificacoes.md) | Relatórios e notificações | 4 | Média |
 | [SPEC-12](SPEC-12-seguranca-lgpd-operacao.md) | Segurança, LGPD e operação | 0–4 | Alta |
 | [SPEC-13](SPEC-13-piloto-validacao.md) | Piloto e validação em obra | 4 | Alta |
+| [SPEC-14](SPEC-14-portfolio-multiobra.md) | Portfólio multiobra (gestores e construtoras) | 1 (front local) e 2 (backend) | Alta |
 
 ## Roadmap por fases (recomendação)
 
@@ -48,6 +51,7 @@ Fase 1  Números confiáveis .. SPEC-03, 04, 05 (parte 1), 06 (.xml), 07, 10 (pa
 Fase 2  Multiusuário ........ SPEC-01, 02, 12 (parte 2)            ← exige backend e aval da Infra/Segurança
 Fase 3  Integrações ......... SPEC-06 (.mpp), 08, 09, 10 (parte 2) ← exige aval de Segurança/Jurídico
 Fase 4  Operação ............ SPEC-11, 13                          ← piloto em 1 obra antes de escalar
+(SPEC-14 portfólio: parte local na Fase 1, consolidado por empresa na Fase 2)
 ```
 
 A Fase 1 entra antes do backend de propósito: ela torna os números corretos (premissas, histórico, paridade com o MS Project) e funciona no protótipo atual. A Fase 2 move para o servidor o que já foi validado.
@@ -78,7 +82,7 @@ O CronoAI só substitui planilhas e conferências manuais quando cumprir, no pil
 
 | # | Decisão | Opções | Recomendação |
 |---|---|---|---|
-| D1 | Stack do backend | .NET 8 ou Python/FastAPI (ambos citados no `SPEC.md`) | .NET 8: MPXJ.Net nativo para `.mpp` e alinhamento com a stack aprovada da Sophia (confirmar com Infra) |
+| D1 | Stack do backend | .NET ou Python/FastAPI (ambos citados no `SPEC.md`) | **Decidido: .NET 10 + PostgreSQL** ([ADR 00001](../../.claude/adrs/00001-stack-backend-dotnet-10.md)); hospedagem/banco com a Infra |
 | D2 | Front | Manter Vue 3 ou migrar | Manter Vue 3 (já validado); revisar se a Infra exigir React |
 | D3 | Repositório | GitHub (atual) ou Azure DevOps (padrão interno citado nos guias da Sophia) | Confirmar com Infra/Segurança; se ficar no GitHub, repositório **privado** |
 | D4 | Provedor de IA | Modelo de linguagem corporativo aprovado × modelo local | Só o que Segurança aprovar; manter o motor local como alternativa |

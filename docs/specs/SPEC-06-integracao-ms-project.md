@@ -32,6 +32,13 @@ Ida e volta sem perda entre CronoAI e MS Project, nas versões usadas pela empre
 - **RNF-06.1** Upload limitado (ex.: 20 MB), com antivírus/verificação de tipo no backend; sem processar entidades externas no XML (proteção XXE).
 - **RNF-06.2** Importar 3.000 tarefas em menos de 3 s.
 
+## 4a. Corpus de referência disponível (out/2026)
+134 arquivos MSPDI gerados pelo MS Project 2002, 2003, 2007, 2010, 2013, 2016 e 2019, dos dados de teste do MPXJ (LGPL-2.1, cópia local em `referencias/mpxj-mspdi/`, fora do git).
+- **Uso imediato:** robustez da importação. Todos devem abrir sem erro e sem perder UID, vínculos, calendários e linhas de base.
+- **Limite:** só 8 têm vínculos entre tarefas, então a paridade de datas do CPM (SPEC-05) continua exigindo cronogramas reais de obra anonimizados.
+- **Testes:** leem o caminho por variável de ambiente (`CRONOAI_REF_DIR`) e são pulados sem ela, para o CI não depender dos arquivos.
+- **XSD oficial:** só é distribuído dentro do instalador do Project SDK (`.exe`), que não é executado. A validação segue a referência publicada do esquema.
+
 ## 5. Critérios de aceite
 - [ ] Os 5 cronogramas de referência (SPEC-05) fazem ida e volta CronoAI → MS Project → CronoAI sem diferença em RF-06.3.
 - [ ] O CI falha se o export deixar de validar no XSD.

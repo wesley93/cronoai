@@ -2,7 +2,7 @@
 
 # Prompt — DBA, levantamento ou revisão (T8 com banco; a partir da SPEC-01)
 
-**Hoje o CronoAI não tem banco** (estado no `localStorage`): sem backend, esta etapa é `NA` no ciclo. O prompt vale a partir da SPEC-01 (alvo recomendado: PostgreSQL; stack do backend é a decisão D1, em aberto — siga o que estiver decidido em ADR).
+**Hoje o CronoAI não tem banco** (estado no `localStorage`): sem backend, esta etapa é `NA` no ciclo. O prompt vale a partir da SPEC-01 (stack decidida no ADR 00001: .NET 10 + PostgreSQL).
 
 ```
 FAIXA: 3

@@ -13,7 +13,9 @@ CronoAI é o copiloto de planejamento de obras integrado ao MS Project:
 - cronograma a partir do SINAPI;
 - EVM e Curva S.
 
-**Estado:** protótipo funcional, front-only, com estado no `localStorage`. O caminho para o uso em obra real está em [docs/specs](docs/specs/README.md): 14 specs, fases 0 a 4.
+**Público:** construtoras, gestores de portfólio e engenheiros com **várias obras e frentes**, em **qualquer UF do Brasil**. Multiempresa e multiobra; cada obra define UF, município, SINAPI e regime de encargos. Nunca assuma um estado, uma empresa ou uma obra fixa no código.
+
+**Estado:** protótipo funcional, front-only, com estado de **uma** obra no `localStorage`. O caminho para o uso real está em [docs/specs](docs/specs/README.md): 15 specs, fases 0 a 4.
 
 **O que mais importa aqui é a precisão dos números.** Uma data errada no cronograma, um SPI errado ou um XML que perde vínculo no MS Project custa dinheiro na obra. Por isso cálculo e integração com o MS Project têm o rigor mais alto do processo.
 
@@ -27,7 +29,7 @@ CronoAI é o copiloto de planejamento de obras integrado ao MS Project:
 | Node | 22 LTS ou superior (`.nvmrc`) |
 | Container | `Dockerfile` multi-stage → `nginxinc/nginx-unprivileged` |
 | CI | GitHub Actions: CI, Docker, CodeQL, Release; Dependabot ([docs/devops.md](docs/devops.md)) |
-| Backend | **Ainda não existe.** Alvo na SPEC-01 (recomendação: .NET 8 + PostgreSQL; decisão D1 em aberto) |
+| Backend | **Ainda não existe.** Stack decidida: **.NET 10 + PostgreSQL** ([ADR 00001](.claude/adrs/00001-stack-backend-dotnet-10.md)); hospedagem e banco pendentes com a Infraestrutura (SPEC-01) |
 
 ```bash
 npm ci                    # instalar

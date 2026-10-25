@@ -37,7 +37,7 @@ Cada obra tem a própria tela de premissas, versionada, com origem documentada. 
   - calendários alternativos (ex.: "Fachada — sem chuva", "Concretagem — sábado manhã");
   - exceções por data (feriado municipal, paralisação, sábado de 4 h);
   - jornada por dia da semana em horas.
-- **RF-03.5** Feriados municipais/estaduais importáveis por UF/município (lista mantida pelo administrador).
+- **RF-03.5** Feriados por obra a partir da UF e do município: nacionais (já calculados), estaduais das **27 UFs** e municipais (lista mantida pelo administrador, importável). Trocar a UF/município da obra recalcula o calendário com prévia do impacto nas datas.
 - **RF-03.6** Cenário Hora Extra passa a aceitar **meio período** e **frentes escolhidas** (calendário só das tarefas selecionadas), substituindo a convocação de todas as frentes ativas.
 
 ## 4. Requisitos não funcionais
