@@ -491,7 +491,7 @@ describe('Hora extra: o ponto fixo repete até estabilizar (E-14)', () => {
     expect(r.horaExtra!.atribuicoes).toEqual([{ uid: 4, calendarioUid: 2 }])
     expect(r.horaExtra!.naoConvocadas).toEqual([2, 3])
     expect(r.extraCost).toBeCloseTo(31.4 * 8 * 1.5, 2) // a frente 4 trabalha um sábado só
-    expect(r.memory.some((m) => m.includes('não estabilizou'))).toBe(false)
+    expect(r.memory.some((m) => m.includes('sem estabilizar'))).toBe(false)
   })
 })
 
