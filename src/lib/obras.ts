@@ -164,7 +164,8 @@ export function erroDoRegistroDeDesfazer(u: unknown): string | undefined {
     return 'calendários anteriores das tarefas inválidos'
   }
   if (u.addedDays !== undefined && !(Array.isArray(u.addedDays) && u.addedDays.every((d) => typeof d === 'string'))) return 'datas da hora extra inválidas'
-  const he = eObj(u.result) ? u.result.horaExtra : undefined
+  if (!eObj(u.result)) return 'resultado do cenário ausente ou inválido'
+  const he = u.result.horaExtra
   if (he !== undefined && !(eObj(he) && Array.isArray(he.atribuicoes) && he.atribuicoes.every((a) => eObj(a) && eInteiro(a.uid) && eInteiro(a.calendarioUid)))) {
     return 'atribuições da hora extra inválidas'
   }

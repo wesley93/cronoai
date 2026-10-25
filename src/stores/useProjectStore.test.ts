@@ -705,6 +705,7 @@ describe('useProjectStore · registro de desfazer inválido no estado salvo (rod
     ['calendariosAntes com item de tipo errado', (u) => Object.assign(u, { calendariosAntes: [{ uid: 'x' }] })],
     ['atribuicoes da hora extra que não é lista', (u) => Object.assign(u.result.horaExtra ?? {}, { atribuicoes: 5 })],
     ['atribuicoes com calendarioUid de tipo errado', (u) => Object.assign(u.result.horaExtra ?? {}, { atribuicoes: [{ uid: 104, calendarioUid: 'b' }] })],
+    ['resultado do cenário nulo (com calendariosAntes válido)', (u) => Object.assign(u, { result: null })],
     ['addedDays que não é lista de datas', (u) => Object.assign(u, { addedDays: [1, 2] })],
   ]
 

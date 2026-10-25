@@ -11,6 +11,7 @@ import ScenarioCard from './critical/ScenarioCard.vue'
 import DivergenciasPainel from './critical/DivergenciasPainel.vue'
 import { fmtBRL, fmtDate, fmtDateLong, fmtDiasUteis, fmtFolga } from '@/lib/format'
 import { describeLink, formatPredecessors } from '@/lib/wbs'
+import { MAX_FRENTES_HORA_EXTRA } from '@/lib/scenarios'
 import { descreverPremissasDeCenario, rotuloVersao } from '@/lib/premissas'
 
 const project = useProjectStore()
@@ -52,14 +53,25 @@ const frentesDisponiveis = computed(() =>
   project.scenarioOptions.overtime.map((o) => ({ ...o, uid: Number(o.value), wbs: project.taskByUid.get(Number(o.value))?.wbs ?? '' })),
 )
 const pacotesDasFrentes = computed(() => project.tasksByWbs.filter((t) => t.isSummary && frentesDisponiveis.value.some((f) => f.wbs.startsWith(t.wbs + '.'))))
-function alternarFrente(uid: number, marcada: boolean) {
+const avisoLimiteFrentes = () => ui.notify('warning', 'Limite de frentes', `Escolha no máximo ${MAX_FRENTES_HORA_EXTRA} frentes para a hora extra.`)
+function alternarFrente(uid: number, marcada: boolean, caixa?: HTMLInputElement) {
   const atuais = frentesEscolhidas.value.filter((u) => u !== uid)
+  if (marcada && atuais.length >= MAX_FRENTES_HORA_EXTRA) {
+    if (caixa) caixa.checked = false
+    return avisoLimiteFrentes()
+  }
   params.overtime.frentes = marcada ? [...atuais, uid] : atuais
 }
-function selecionarPacote(wbs: string) {
+function selecionarPacote(wbs: string, seletor?: HTMLSelectElement) {
+  if (seletor) seletor.value = ''
   if (!wbs) return
   const doPacote = frentesDisponiveis.value.filter((f) => f.wbs.startsWith(wbs + '.')).map((f) => f.uid)
-  params.overtime.frentes = [...new Set([...frentesEscolhidas.value, ...doPacote])]
+  const todas = [...new Set([...frentesEscolhidas.value, ...doPacote])]
+  if (todas.length > MAX_FRENTES_HORA_EXTRA) {
+    ui.notify('warning', 'O pacote passa do limite de frentes', `Com este pacote seriam ${todas.length} frentes; o máximo é ${MAX_FRENTES_HORA_EXTRA}. Nenhuma foi marcada: escolha as frentes uma a uma.`)
+    return
+  }
+  params.overtime.frentes = todas
 }
 const crashTrade = computed(() => {
   const uid = project.scenarios.crashing.targetUid
@@ -230,10 +242,11 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
               <label class="flex items-start gap-2"><input v-model="modoFrentes" type="radio" value="escolher" class="mt-0.5 accent-amber-500" /> Escolher as frentes</label>
             </fieldset>
             <div v-if="modoFrentes === 'escolher'" class="space-y-2" data-testid="he-frentes">
-              <p class="text-[11px] text-zinc-500">Só as frentes com trabalho nos sábados convocados aparecem (● = no caminho crítico). Sábado já útil no calendário da frente não é hora extra.</p>
+              <p class="label">Frentes que podem trabalhar nos sábados</p>
+              <p class="text-[11px] text-zinc-500">● = no caminho crítico. Sábado já útil no calendário da frente não é hora extra. Máximo de {{ MAX_FRENTES_HORA_EXTRA }} frentes.</p>
               <div v-if="pacotesDasFrentes.length">
                 <label class="label" for="he-pacote">Selecionar um pacote inteiro</label>
-                <select id="he-pacote" class="input py-1.5 text-xs" @change="selecionarPacote(($event.target as HTMLSelectElement).value)">
+                <select id="he-pacote" class="input py-1.5 text-xs" @change="selecionarPacote(($event.target as HTMLSelectElement).value, $event.target as HTMLSelectElement)">
                   <option value="">Escolha um pacote</option>
                   <option v-for="p in pacotesDasFrentes" :key="p.uid" :value="p.wbs">{{ p.wbs }} {{ p.name }}</option>
                 </select>
@@ -241,12 +254,13 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
               <ul class="max-h-40 space-y-1 overflow-auto">
                 <li v-for="f in frentesDisponiveis" :key="f.uid">
                   <label class="flex items-start gap-2 text-[12px]">
-                    <input type="checkbox" class="mt-0.5 accent-amber-500" :checked="frentesEscolhidas.includes(f.uid)" :aria-label="`Frente ${f.label}`" @change="alternarFrente(f.uid, ($event.target as HTMLInputElement).checked)" />
+                    <input type="checkbox" class="mt-0.5 accent-amber-500" :checked="frentesEscolhidas.includes(f.uid)" :aria-label="`Frente ${f.label}`" @change="alternarFrente(f.uid, ($event.target as HTMLInputElement).checked, $event.target as HTMLInputElement)" />
                     <span>{{ f.critical ? '● ' : '' }}{{ f.label }}</span>
                   </label>
                 </li>
                 <li v-if="!frentesDisponiveis.length" class="text-[11px] text-zinc-500">Nenhuma frente com trabalho nos sábados convocados.</li>
               </ul>
+              <p class="text-[11px] text-zinc-500">A lista é um limite superior: com os sábados no calendário, uma frente pode sair do cálculo quando escolhida sozinha, se não trabalhar de fato num sábado convocado.</p>
             </div>
           </template>
         </ScenarioCard>

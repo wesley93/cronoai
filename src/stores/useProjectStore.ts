@@ -611,7 +611,10 @@ export const useProjectStore = defineStore('project', () => {
   const premissasVigentes = computed(() => versaoPremissasVigente.value.valores)
   // toRaw: o simulador reprograma a obra inteira 3 vezes e não precisa de reatividade (ler 3.000 tarefas pelo proxy do Vue é ~4x mais
   // lento). A dependência continua registrada: `schedule` (e `calculo`) já leem tarefas, meta e calendários.
-  const scenarioCtx = computed(() => ({
+  // Agenda do simulador: só o que vem do cronograma (tarefas, calendários, feriados, previsão), SEM premissas. As listas de opções
+  // (`crashingTargets`, `fastTrackOptions`, `overtimeTargets`) não usam premissas e a da hora extra reprograma a obra inteira: mudar uma
+  // premissa não pode refazê-las (AC-6, RNF-03.1).
+  const scenarioAgenda = computed(() => ({
     // Com o cálculo da obra fora do horizonte o cronograma é vazio: o simulador não tem tarefa para comprimir
     tasks: calculo.value.erro ? [] : toRaw(state.tasks),
     calendarios: toRaw(state.calendarios),
@@ -619,8 +622,11 @@ export const useProjectStore = defineStore('project', () => {
     meta: toRaw(state.meta),
     forecast: schedule.value,
     origin: delay.value.origin,
-    premissas: premissasVigentes.value,
     feriados: toRaw(state.feriados),
+  }))
+  const scenarioCtx = computed(() => ({
+    ...scenarioAgenda.value,
+    premissas: premissasVigentes.value,
     versaoPremissas: { versao: versaoPremissasVigente.value.versao, vigencia: versaoPremissasVigente.value.vigencia },
   }))
   const scenarios = computed(() =>
@@ -631,7 +637,7 @@ export const useProjectStore = defineStore('project', () => {
   )
   const scenarioOptions = computed(() =>
     tentar(
-      () => ({ crashing: crashingTargets(scenarioCtx.value), fastTracking: fastTrackOptions(scenarioCtx.value), overtime: overtimeTargets(scenarioCtx.value, scenarioParams.overtime.saturdays) }),
+      () => ({ crashing: crashingTargets(scenarioAgenda.value), fastTracking: fastTrackOptions(scenarioAgenda.value), overtime: overtimeTargets(scenarioAgenda.value, scenarioParams.overtime.saturdays) }),
       () => ({ crashing: [], fastTracking: [], overtime: [] }),
     ),
   )

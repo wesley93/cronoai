@@ -418,6 +418,8 @@ const fmtDia = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`
 /** "24/10 e 31/10", "24/10, 31/10 e 07/11". */
 const listaDeDias = (ds: string[]) => (ds.length <= 1 ? ds.map(fmtDia).join('') : `${ds.slice(0, -1).map(fmtDia).join(', ')} e ${fmtDia(ds[ds.length - 1])}`)
 const PREDEFINICAO_MEIO_PERIODO = 'quatro-horas' as const
+/** Máximo de frentes escolhidas na hora extra (cada volta do ponto fixo reprograma a obra inteira). */
+export const MAX_FRENTES_HORA_EXTRA = 30
 const MAX_NOME_CALENDARIO_HE = 60
 
 /** Feriados efetivos da obra: sem configuração informada vale a padrão, o mesmo critério da compilação dos calendários. */
@@ -525,7 +527,8 @@ const totalDePares = (mapa: Map<number, string[]>) => [...mapa.values()].reduce(
  * Ponto fixo dos sábados por frente. Parte da hipótese máxima (todos os sábados candidatos já no calendário de cada frente) e tira, até
  * estabilizar, os sábados em que a frente não trabalha DEPOIS da hora extra (o lag que chega a ela só conta o sábado em que ela trabalha: sem
  * ganho de lag sem custo). Cada volta que muda tira ao menos um par (frente, sábado): o teto de voltas é o total de pares mais a volta de
- * conferência. `mapa` é alterado no lugar; `montado` corresponde ao `mapa` final.
+ * conferência (na prática a volta de conferência sempre estabiliza; o `estabilizou = false` é só proteção: o custo recalcula a atividade de cada
+ * frente no cronograma final, então nunca cobra sábado em que a frente não trabalha). `mapa` é alterado no lugar; `montado` corresponde ao `mapa` final.
  */
 function ajustarSabadosPorFrente(ctx: Ctx, padrao: CalendarioObra, alvos: Task[], mapa: Map<number, string[]>, expediente: IntervaloTrabalho[] | undefined) {
   const teto = totalDePares(mapa)
@@ -632,6 +635,7 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
     for (const t of folhas) if (t.calendarioUid !== undefined && t.calendarioUid !== padrao.uid && days.some((d) => ativaHoje(t, d))) foraPorCalendario.push(t)
   } else {
     const uids = new Set(frentes)
+    if (uids.size > MAX_FRENTES_HORA_EXTRA) return notApplicable('overtime', title, `Escolha no máximo ${MAX_FRENTES_HORA_EXTRA} frentes para a hora extra.`, ctx)
     const escolhidas = folhas.filter((t) => uids.has(t.uid))
     if (!escolhidas.length) return notApplicable('overtime', title, 'Escolha ao menos uma frente (tarefa) para a hora extra.', ctx)
     const semTrabalho = `Nenhuma frente escolhida trabalha nos sábados convocados (${days.map(fmtDia).join(', ')}).`
@@ -731,7 +735,7 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
           `Frentes convocadas: ${nomeFrentes(atribuicoes.map((a) => a.uid)) || '—'}${naoConvocadas.length ? `; não convocadas (sem trabalho nos sábados convocados, já trabalham neles ou o sábado é feriado no calendário delas): ${nomeFrentes(naoConvocadas)}` : ''}`,
           ...avisosFeriado,
           ...novos.map((c) => `Calendário derivado "${c.nome}" (UID ${c.uid}) atribuído a ${nomeFrentes(atribuicoes.filter((a) => a.calendarioUid === c.uid).map((a) => a.uid))}`),
-          ...(estabilizou ? [] : [`O ajuste dos sábados por frente não estabilizou em ${voltas} voltas (teto: um par frente × sábado por volta): o resultado foi conferido uma última vez; confira as datas e o custo.`]),
+          ...(estabilizou ? [] : [`O ajuste dos sábados por frente atingiu o teto de ${voltas} voltas sem estabilizar: o custo conta só os sábados em que cada frente trabalha no cronograma final; confira as datas.`]),
         ]
 
   return comVersao(ctx, {

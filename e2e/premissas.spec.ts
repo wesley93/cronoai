@@ -88,6 +88,8 @@ test('hora extra: com "Escolher as frentes" e nenhuma frente marcada o cartão n
   await expect(he).toContainText('Risco Médio') // todas as frentes: o risco de sempre
   await he.getByLabel('Escolher as frentes').check()
   await expect(he).toContainText('Escolha ao menos uma frente')
+  await expect(he).toContainText('Frentes que podem trabalhar nos sábados')
+  await expect(he).toContainText('A lista é um limite superior')
   await expect(he).not.toContainText('Risco Baixo')
   await expect(he).not.toContainText('Risco Médio')
   await expect(he).toContainText('Risco —')

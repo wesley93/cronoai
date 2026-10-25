@@ -4,7 +4,7 @@ import { buildSeedState, useProjectStore } from '@/stores/useProjectStore'
 import { addCalendarDays } from './calendar'
 import { calendarioDeDias, comDiasExtras, compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
-import { DEFAULT_SCENARIO_PARAMS, analyzeDelay, crashingTargets, fastTrackOptions, overtimeTargets, recommendScenario, simulateAll, simulateCrashing, simulateFastTracking, simulateOvertime, type ScenarioParams } from './scenarios'
+import { DEFAULT_SCENARIO_PARAMS, MAX_FRENTES_HORA_EXTRA, analyzeDelay, crashingTargets, fastTrackOptions, overtimeTargets, recommendScenario, simulateAll, simulateCrashing, simulateFastTracking, simulateOvertime, type ScenarioParams } from './scenarios'
 import { analyzeSupplies } from './supplies'
 import { premissasPadrao } from './premissas'
 import type { CalendarioObra, PremissasObra, Task } from '@/types/domain'
@@ -492,5 +492,19 @@ describe('Hora extra: o ponto fixo repete até estabilizar (E-14)', () => {
     expect(r.horaExtra!.naoConvocadas).toEqual([2, 3])
     expect(r.extraCost).toBeCloseTo(31.4 * 8 * 1.5, 2) // a frente 4 trabalha um sábado só
     expect(r.memory.some((m) => m.includes('não estabilizou'))).toBe(false)
+  })
+})
+
+describe('Hora extra: limite de frentes escolhidas (R-18)', () => {
+  it('até 30 frentes é aceito; 31 é recusado com mensagem em português', () => {
+    expect(MAX_FRENTES_HORA_EXTRA).toBe(30)
+    const trinta = [104, ...Array.from({ length: 29 }, (_, i) => 90000 + i)] // uids que não existem são ignorados: o que conta é o tamanho da escolha
+    expect(simulateOvertime(ctx, { saturdays: 2, frentes: trinta }).applicable).toBe(true)
+    const trintaEUma = [...trinta, 90029]
+    const r = simulateOvertime(ctx, { saturdays: 2, frentes: trintaEUma })
+    expect([r.applicable, r.reason]).toEqual([false, 'Escolha no máximo 30 frentes para a hora extra.'])
+  })
+  it('uids repetidos contam uma vez', () => {
+    expect(simulateOvertime(ctx, { saturdays: 2, frentes: Array.from({ length: 40 }, () => 104) }).applicable).toBe(true)
   })
 })
