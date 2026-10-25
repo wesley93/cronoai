@@ -88,7 +88,7 @@ function apply(kind: ScenarioKind) {
     ui.notify('error', `${res.title} não aplicado`, aplicado.erro)
     return
   }
-  ui.notify('success', `${res.title} aplicado`, `Entrega: ${fmtDate(before)} → ${fmtDate(project.schedule.projectFinish)} · custo comprometido ${fmtBRLCents(res.extraCost)}. Gantt, EVM e suprimentos recalculados.`)
+  ui.notify('success', `${res.title} aplicado`, `Entrega: ${fmtDate(before)} → ${fmtDate(project.schedule.projectFinish)} · custo do cenário ${fmtBRLCents(res.extraCost)}. Gantt, EVM e suprimentos recalculados.`)
 }
 function undo(kind: ScenarioKind) {
   const r = project.undoScenario(kind)

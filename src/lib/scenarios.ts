@@ -653,7 +653,7 @@ export type ResultadoAgendaHE = AgendaHoraExtra | { inaplicavel: string }
 export function agendaHoraExtra(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAULT_SCENARIO_PARAMS.overtime): ResultadoAgendaHE {
   const wanted = Math.max(1, Math.min(8, Math.round(p.saturdays)))
   const jornada = p.jornada ?? 'integral'
-  const frentes = p.frentes ?? 'todas'
+  const frentes = Array.isArray(p.frentes) ? [...p.frentes] : (p.frentes ?? 'todas')
   const padrao = ctx.calendarios.find((c) => c.uid === ctx.calendarioPadraoUid)
   if (!padrao) return { inaplicavel: 'O calendário padrão da obra não existe.' }
   const days = sabadosConvocados(ctx, padrao, wanted)
