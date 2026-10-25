@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Send, ImagePlus, X } from 'lucide-vue-next'
+import { Send, ImagePlus, X } from '@lucide/vue'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 

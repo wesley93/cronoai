@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { AlertTriangle, ChevronRight, GitBranch, KeyRound, ShieldCheck, Sparkles, Network, RotateCcw } from 'lucide-vue-next'
+import { AlertTriangle, ChevronRight, GitBranch, KeyRound, ShieldCheck, Sparkles, Network, RotateCcw } from '@lucide/vue'
 import type { ScenarioKind } from '@/types/domain'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'

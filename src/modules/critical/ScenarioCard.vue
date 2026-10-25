@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Users, GitMerge, CalendarPlus, CheckCircle2, Undo2, Play, Sparkles, Calculator } from 'lucide-vue-next'
+import { Users, GitMerge, CalendarPlus, CheckCircle2, Undo2, Play, Sparkles, Calculator } from '@lucide/vue'
 import type { ScenarioResult } from '@/lib/scenarios'
 import { fmtBRL, fmtDate } from '@/lib/format'
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { Truck, OctagonAlert, CalendarClock, PackageCheck, Info, Send, CalendarRange, PackagePlus, Trash2, PackageOpen, CalendarDays } from 'lucide-vue-next'
+import { Truck, OctagonAlert, CalendarClock, PackageCheck, Info, Send, CalendarRange, PackagePlus, Trash2, PackageOpen, CalendarDays } from '@lucide/vue'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import ModuleHeader from '@/components/common/ModuleHeader.vue'
