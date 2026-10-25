@@ -5,6 +5,7 @@ import { calendarioPadrao, compilarCalendarios } from './calendarioTrabalho'
 import { fmtBRLCents } from './format'
 import {
   custoIndiretoDiarioDeMensal,
+  descreverPremissasDeCenario,
   diasUteisNoAno,
   memoriaPremissas,
   premissasPadrao,
@@ -191,5 +192,21 @@ describe('memória de cálculo: versão e premissas ilustrativas (Inviolável 7)
       origens: { ...p.origens, adicionalHoraExtraPct: { origem: 'acordo-coletivo' }, custoIndiretoDiario: { origem: 'orcamento-obra' } },
     }
     expect(memoriaPremissas({ versao: 2, vigencia: '2026-10-23' }, doc, ['adicionalHoraExtraPct', 'custoIndiretoDiario'], ['Pedreiro'])).toBe('Premissas v2 — vigência 23/10/2026.')
+  })
+})
+
+describe('texto das premissas de cenário na tela', () => {
+  it('traz os números da obra e avisa que são ilustrativos enquanto a origem for ilustrativa', () => {
+    expect(descreverPremissasDeCenario(premissasPadrao()).replaceAll(String.fromCharCode(160), ' ')).toBe(
+      'Taxas por função, mobilização de R$ 1.200 por profissional, perda de 5% por congestionamento, contingência de 4% de retrabalho e adicional de 50% na hora extra são premissas ilustrativas, sem validação.',
+    )
+    const p = premissasPadrao()
+    const doc: PremissasObra = {
+      ...p,
+      adicionalHoraExtraPct: 60,
+      taxas: p.taxas.map((t) => ({ ...t, origem: 'sinapi' as const })),
+      origens: { ...p.origens, mobilizacaoPorProfissional: { origem: 'orcamento-obra' }, perdaCongestionamentoPct: { origem: 'outra' }, contingenciaRetrabalhoPct: { origem: 'outra' }, adicionalHoraExtraPct: { origem: 'acordo-coletivo' } },
+    }
+    expect(descreverPremissasDeCenario(doc)).toContain('adicional de 60% na hora extra vêm das premissas da obra.')
   })
 })

@@ -107,7 +107,7 @@ function migrar3Para4(estado: EstadoBruto): EstadoBruto {
   const v1: VersaoPremissas = {
     versao: 1,
     vigencia: typeof meta.startDate === 'string' ? meta.startDate : '',
-    motivo: 'Premissas anteriores ao ciclo 00005 (migradas)',
+    motivo: 'Premissas salvas antes do versionamento (migradas)',
     valores,
   }
   delete meta.dailyIndirectCost

@@ -403,3 +403,22 @@ export function semDiasExtras(cal: CalendarioObra, dias: string[]): CalendarioOb
   const remover = new Set(dias)
   return { ...cal, excecoes: cal.excecoes.filter((ex) => !(remover.has(ex.data) && ex.intervalos.length > 0)) }
 }
+
+const NOMES_DIA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'] as const
+const horasTexto = (minutos: number) => (minutos === 0 ? '—' : `${(minutos / 60).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h`)
+
+/**
+ * Resumo da jornada semanal para a tela: dias seguidos com a mesma carga viram uma faixa ("seg–sex 8 h; sáb–dom —").
+ * A semana começa na segunda-feira.
+ */
+export function resumoJornadaSemana(cal: CalendarioObra): string {
+  const ordem = [1, 2, 3, 4, 5, 6, 0]
+  const grupos: { de: number; ate: number; minutos: number }[] = []
+  for (const d of ordem) {
+    const minutos = somaIntervalos(cal.semana[d] ?? [])
+    const ultimo = grupos[grupos.length - 1]
+    if (ultimo && ultimo.minutos === minutos) ultimo.ate = d
+    else grupos.push({ de: d, ate: d, minutos })
+  }
+  return grupos.map((g) => `${g.de === g.ate ? NOMES_DIA[g.de] : `${NOMES_DIA[g.de]}–${NOMES_DIA[g.ate]}`} ${horasTexto(g.minutos)}`).join('; ')
+}

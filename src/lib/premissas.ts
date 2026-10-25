@@ -241,3 +241,13 @@ export function memoriaPremissas(
   const quem = versao ? rotuloVersao(versao) : 'Premissas padrão'
   return ilustrativas.length ? `${quem}. Ilustrativas, sem validação: ${ilustrativas.join(', ')}.` : `${quem}.`
 }
+
+const reais = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
+
+/** Texto das premissas de cenário para a tela, com os números da obra (e o aviso quando alguma é ilustrativa). */
+export function descreverPremissasDeCenario(p: PremissasObra): string {
+  const itens = `mobilização de ${reais(p.mobilizacaoPorProfissional)} por profissional, perda de ${p.perdaCongestionamentoPct}% por congestionamento, contingência de ${p.contingenciaRetrabalhoPct}% de retrabalho e adicional de ${p.adicionalHoraExtraPct}% na hora extra`
+  const chaves: ChavePremissa[] = ['mobilizacaoPorProfissional', 'perdaCongestionamentoPct', 'contingenciaRetrabalhoPct', 'adicionalHoraExtraPct']
+  const ilustrativa = chaves.some((c) => (p.origens[c]?.origem ?? 'ilustrativa') === 'ilustrativa') || p.taxas.some((t) => t.origem === 'ilustrativa')
+  return `Taxas por função, ${itens}${ilustrativa ? ' são premissas ilustrativas, sem validação' : ' vêm das premissas da obra'}.`
+}

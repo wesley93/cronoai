@@ -11,6 +11,7 @@ import ScenarioCard from './critical/ScenarioCard.vue'
 import DivergenciasPainel from './critical/DivergenciasPainel.vue'
 import { fmtBRL, fmtDate, fmtDateLong, fmtDiasUteis, fmtFolga } from '@/lib/format'
 import { describeLink, formatPredecessors } from '@/lib/wbs'
+import { descreverPremissasDeCenario, rotuloVersao } from '@/lib/premissas'
 
 const project = useProjectStore()
 const ui = useUiStore()
@@ -135,7 +136,7 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
     <!-- Simulador -->
     <SectionCard
       title="Simulador de Recuperação com IA"
-      :subtitle="`Cada cenário recalcula o CPM completo. Custo indireto da obra: ${fmtBRL(project.premissasVigentes.custoIndiretoDiario)}/dia útil.`"
+      :subtitle="`Cada cenário recalcula o CPM completo. Custo indireto da obra: ${fmtBRL(project.premissasVigentes.custoIndiretoDiario)}/dia útil (${rotuloVersao(project.versaoPremissasVigente)}).`"
       :icon="Sparkles"
     >
       <template #actions>
@@ -194,7 +195,7 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
           </template>
         </ScenarioCard>
       </div>
-      <p class="mt-2 text-[10.5px] text-zinc-500">● = no caminho crítico. Taxas horárias, mobilização (R$ 1.200/profissional), perda de 5% por congestionamento e contingência de 4% são premissas ilustrativas do projeto.</p>
+      <p class="mt-2 text-[10.5px] text-zinc-500">● = no caminho crítico. {{ descreverPremissasDeCenario(project.premissasVigentes) }} Altere na aba Premissas.</p>
 
       <!-- Comparativo -->
       <div class="mt-5 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">

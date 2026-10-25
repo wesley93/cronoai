@@ -19,6 +19,7 @@ import {
   minutosParaDias,
   minutosParaHora,
   momentoDe,
+  resumoJornadaSemana,
   semDiasExtras,
 } from './calendarioTrabalho'
 
@@ -278,5 +279,16 @@ describe('calendário padrão e dias extras', () => {
     expect(w.isWorkingDay('2026-09-07')).toBe(false)
     expect(w.indexOnOrAfter('2026-08-08')).toBe(5)
     expect(calendarioDeDias(std).dateAt(5)).toBe('2026-08-10')
+  })
+})
+
+describe('resumo da jornada semanal (tela de premissas)', () => {
+  it('agrupa dias seguidos com a mesma carga: "seg–sex 8 h; sáb–dom —"', () => {
+    expect(resumoJornadaSemana(calendarioPadrao([]))).toBe('seg–sex 8 h; sáb–dom —')
+  })
+  it('sábado de 4 h e sexta mais curta', () => {
+    const base = calendarioPadrao([])
+    const semana = base.semana.map((d, i) => (i === 6 ? [{ de: 480, ate: 720 }] : i === 5 ? [{ de: 450, ate: 690 }] : d))
+    expect(resumoJornadaSemana({ ...base, semana })).toBe('seg–qui 8 h; sex–sáb 4 h; dom —')
   })
 })

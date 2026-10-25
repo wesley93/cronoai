@@ -387,7 +387,7 @@ describe('esquema 3 → 4: premissas versionadas e feriados da obra (ciclo 00005
     expect(m.estado.premissas[0]).toMatchObject({
       versao: 1,
       vigencia: '2026-05-04',
-      motivo: 'Premissas anteriores ao ciclo 00005 (migradas)',
+      motivo: 'Premissas salvas antes do versionamento (migradas)',
       valores: premissasPadrao(),
     })
     expect(Object.keys(m.estado.meta)).not.toContain('dailyIndirectCost')

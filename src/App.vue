@@ -18,6 +18,7 @@ const views: Record<ModuleId, ReturnType<typeof defineAsyncComponent>> = {
   evm: defineAsyncComponent(() => import('@/modules/EvmModule.vue')),
   eap: defineAsyncComponent(() => import('@/modules/WbsModule.vue')),
   obras: defineAsyncComponent(() => import('@/modules/ObrasModule.vue')),
+  premissas: defineAsyncComponent(() => import('@/modules/PremissasModule.vue')),
 }
 </script>
 

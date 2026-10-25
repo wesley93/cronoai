@@ -12,6 +12,7 @@ import ProgressBar from '@/components/common/ProgressBar.vue'
 import SCurveChart from '@/components/charts/SCurveChart.vue'
 import { buildDiagnosis } from '@/lib/diagnosis'
 import { fmtBRL, fmtBRLCompact, fmtDate, fmtIndex, fmtPct } from '@/lib/format'
+import { rotuloVersao } from '@/lib/premissas'
 
 const project = useProjectStore()
 const ui = useUiStore()
@@ -94,6 +95,7 @@ async function copyReport() {
       description="Indicadores PMBOK calculados tarefa a tarefa a partir do BAC, do avanço físico e do custo real — atualizados a cada apontamento, cenário ou pacote SINAPI."
     >
       <span :class="statusStyle.chip">{{ statusStyle.label }}</span>
+      <span class="chip-neutral" title="Versão das premissas da obra vigente na data de status (não altera PV, EV nem AC)">{{ rotuloVersao(project.versaoPremissasVigente) }}</span>
     </ModuleHeader>
 
     <div class="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">

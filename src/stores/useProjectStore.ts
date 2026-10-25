@@ -1525,6 +1525,7 @@ export const useProjectStore = defineStore('project', () => {
     calendar,
     baseCalendar,
     calendarios,
+    calendariosPv,
     minutosPorDia,
     schedule,
     erroCronograma,

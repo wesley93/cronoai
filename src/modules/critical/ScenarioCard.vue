@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { Users, GitMerge, CalendarPlus, CheckCircle2, Undo2, Play, Sparkles, Calculator } from '@lucide/vue'
 import type { ScenarioResult } from '@/lib/scenarios'
 import { fmtBRL, fmtDate } from '@/lib/format'
+import { rotuloVersao } from '@/lib/premissas'
 
 const props = defineProps<{ result: ScenarioResult; applied: boolean; recommended?: boolean }>()
 defineEmits<{ apply: []; undo: [] }>()
@@ -10,6 +11,8 @@ defineEmits<{ apply: []; undo: [] }>()
 const icon = computed(() => ({ crashing: Users, 'fast-tracking': GitMerge, overtime: CalendarPlus })[props.result.kind])
 const riskClass = computed(() => ({ Baixo: 'chip-ok', Médio: 'chip-warn', Alto: 'chip-critical' })[props.result.risk])
 const net = computed(() => props.result.netImpact)
+/** Versão das premissas usada no cálculo; cenário aplicado antes das premissas versionadas não a registrou. */
+const versaoUsada = computed(() => (props.result.premissas ? rotuloVersao(props.result.premissas) : 'Premissas: versão não registrada (cenário aplicado antes das premissas versionadas)'))
 </script>
 
 <template>
@@ -33,6 +36,7 @@ const net = computed(() => props.result.netImpact)
 
     <template v-if="result.applicable || applied">
       <p class="mt-3 min-h-[36px] text-[12px] text-zinc-600 dark:text-zinc-300">{{ result.summary }}</p>
+      <p class="mt-1 text-[10.5px] text-zinc-500" data-testid="versao-premissas">{{ versaoUsada }}</p>
 
       <div class="mt-3 grid grid-cols-2 gap-2">
         <div class="rounded-lg bg-zinc-50 p-2.5 dark:bg-zinc-800/60">
