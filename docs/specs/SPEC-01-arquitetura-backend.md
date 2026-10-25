@@ -22,7 +22,7 @@ Um backend único, dono dos dados, com várias obras por empresa. O front passa 
 ## 3. Arquitetura (recomendação)
 
 ```text
-[Vue 3 SPA] ──HTTPS/JSON──> [API .NET 8]
+[Vue 3 SPA] ──HTTPS/JSON──> [API .NET 10]
                              ├─ Domínio: Cronograma (CPM), EVM, Suprimentos, SINAPI
                              ├─ MPXJ.Net (.mpp/.xml) ── SPEC-06
                              ├─ Jobs (Hangfire/Quartz): fechamento semanal, importações, notificações
@@ -30,11 +30,14 @@ Um backend único, dono dos dados, com várias obras por empresa. O front passa 
         PostgreSQL 16 (+ pgvector p/ busca semântica da EAP)   Redis (filas e cache)   Armazenamento de arquivos (fotos/áudios/XML)
 ```
 
-- **D1 (em aberto):** .NET 8 é a recomendação (MPXJ.Net nativo e alinhamento com a stack aprovada da Sophia). Python/FastAPI é a alternativa prevista no `SPEC.md`.
+- **D1 decidida:** .NET 10 (LTS) + PostgreSQL, conforme o [ADR 00001](../../.claude/adrs/00001-stack-backend-dotnet-10.md). Hospedagem e banco gerenciado continuam pendentes com a Infraestrutura.
 - O motor CPM/EVM atual (TypeScript) vira a **especificação executável**: os mesmos casos de teste ([src/lib/*.test.ts](../../src/lib)) são portados e precisam passar no backend com resultados idênticos.
 
 ## 4. Requisitos funcionais
 - **RF-01.1** Cadastro de **empresa → obras → usuários**; cada obra tem EAP, calendário, premissas, insumos, relatos e snapshots próprios.
+- **RF-01.1a Multiempresa (SaaS):** várias construtoras/gestoras usam o mesmo sistema com **isolamento total** de dados entre empresas. Um engenheiro autônomo é uma empresa de um usuário só. Um usuário pode pertencer a mais de uma empresa e escolhe a empresa ativa ao entrar.
+- **RF-01.1b Obra em qualquer UF:** toda obra tem UF e município (código IBGE). Eles definem os feriados (SPEC-03), a tabela SINAPI e o regime de encargos (SPEC-07). Nenhuma regra assume um estado fixo.
+- **RF-01.1c Frentes:** a obra pode ter frentes/subempreitadas com responsável próprio (agrupamento da EAP), usadas em permissões (SPEC-02) e no portfólio (SPEC-14).
 - **RF-01.2** API REST versionada (`/api/v1`), com contratos em OpenAPI publicados no repositório.
 - **RF-01.3** Recursos mínimos:
   - `GET/PUT /obras/{id}/tarefas`
@@ -56,7 +59,7 @@ Um backend único, dono dos dados, com várias obras por empresa. O front passa 
 | Tabela | Campos principais |
 |---|---|
 | `empresa` | id, nome, cnpj |
-| `obra` | id, empresa_id, nome, uf, data_inicio, data_status_atual, calendario_id, premissas (jsonb versionado) |
+| `obra` | id, empresa_id, nome, uf, municipio_ibge, responsavel_id, data_inicio, data_status_atual, calendario_id, sinapi_uf, sinapi_regime, sinapi_data_base, premissas (jsonb versionado) |
 | `tarefa` | id, obra_id, uid_msproject, wbs, nome, nivel, resumo, duracao_du, pct_concluido, inicio_real, termino_real, bac, custo_real, sinapi, lead_time, snet, versao |
 | `vinculo` | obra_id, pred_id, succ_id, tipo (FS/SS/FF/SF), lag_du |
 | `atribuicao` | tarefa_id, recurso_id, unidades |

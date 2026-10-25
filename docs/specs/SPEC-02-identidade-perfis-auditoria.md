@@ -24,12 +24,15 @@ Login corporativo, permissões por perfil e por obra, e uma trilha de auditoria 
 | Engenheiro de obra | Aprovar apontamentos, gerir restrições e insumos; não altera linha de base |
 | Suprimentos | Insumos, pedidos e entregas |
 | Encarregado / mestre | Enviar relatos (WhatsApp ou app); ver só as próprias frentes |
+| Gestor de portfólio | Ver e comparar todas as obras da empresa (ou de uma carteira), atribuir obras e frentes a engenheiros, aprovar linhas de base; não edita o avanço |
 | Diretoria (leitura) | Dashboards, EVM e relatórios |
 
 ## 4. Requisitos funcionais
 - **RF-02.1** Login via provedor corporativo (OIDC/SAML, ex.: Entra ID) com MFA, conforme política de Segurança.
 - **RF-02.2** Autorização no **backend** (o front apenas esconde botões; ocultar não substitui a checagem).
-- **RF-02.3** Permissão por obra: o usuário só enxerga as obras às quais está vinculado.
+- **RF-02.3** Permissão por obra: o usuário só enxerga as obras às quais está vinculado. Engenheiro pode ter várias obras; gestor de portfólio vê a carteira inteira da empresa (ou as carteiras que lhe forem atribuídas).
+- **RF-02.3a** Permissão por frente: encarregado e empreiteiro só veem e apontam as frentes atribuídas (SPEC-01 RF-01.1c).
+- **RF-02.3b** Isolamento entre empresas testado em toda rota da API: um usuário da empresa A nunca acessa dado da empresa B, nem por id adivinhado (teste automatizado obrigatório).
 - **RF-02.4** Auditoria de toda escrita: avanço, custo, vínculo, duração, linha de base, data de status, cenário, pedido, aprovação/rejeição de relato. Guarda `antes`/`depois`, usuário, IP, origem (UI, importação, WhatsApp, API) e motivo opcional.
 - **RF-02.5** A auditoria é *append-only*: sem edição nem exclusão pela aplicação; exportável em CSV.
 - **RF-02.6** "Quatro olhos" opcional para nova linha de base: propor → aprovar por outro engenheiro. **(recomendação)**
