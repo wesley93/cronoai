@@ -729,3 +729,52 @@ describe('useProjectStore · registro de desfazer inválido no estado salvo (rod
     expect(store.undoScenario('overtime')).toEqual({ ok: false, erro: 'Este cenário não está aplicado.' })
   })
 })
+
+describe('useProjectStore · agenda separada do custo (rodada 05, AC-6)', () => {
+  beforeEach(() => {
+    globalThis.localStorage?.clear?.() // Node 26 pode expor localStorage indefinido
+    setActivePinia(createPinia())
+  })
+  const novaVersao = (store: ReturnType<typeof useProjectStore>, indireto: number) =>
+    store.criarVersaoPremissas({ vigencia: '2026-10-23', motivo: 'teste', valores: { ...JSON.parse(JSON.stringify(store.premissasVigentes)), custoIndiretoDiario: indireto } })
+
+  it('com "frentes escolhidas" ativo, mudar uma premissa NÃO recalcula a agenda da hora extra nem a do fast tracking, mas recalcula o custo', () => {
+    const store = useProjectStore()
+    store.scenarioParams.overtime.frentes = [104]
+    const agendaHE = store.agendaHE
+    const agendaFT = store.agendaFT
+    const he = store.scenarios.overtime
+    expect(novaVersao(store, 12000)).toEqual({ ok: true })
+    expect(store.agendaHE).toBe(agendaHE) // mesma identidade: o cronograma da hora extra não foi refeito
+    expect(store.agendaFT).toBe(agendaFT)
+    expect(store.scenarios.overtime).not.toBe(he) // o custo foi refeito com a premissa nova
+    expect(store.scenarios.overtime.indirectSavings).toBe(24000)
+    expect(store.scenarios.overtime.extraCost).toBeCloseTo(4161.6, 2)
+    expect(store.scenarios['fast-tracking'].indirectSavings).toBe(156000)
+    // as frentes e as datas seguem as mesmas
+    expect(store.scenarios.overtime.horaExtra?.atribuicoes).toEqual(he.horaExtra?.atribuicoes)
+    expect(store.scenarios.overtime.newFinish).toBe(he.newFinish)
+  })
+
+  it('mudar o parâmetro da hora extra refaz só a agenda da hora extra; o do fast tracking, só a dele', () => {
+    const store = useProjectStore()
+    const agendaHE = store.agendaHE
+    const agendaFT = store.agendaFT
+    store.scenarioParams.overtime.saturdays = 1
+    expect(store.agendaHE).not.toBe(agendaHE)
+    expect(store.agendaFT).toBe(agendaFT)
+    const agendaHE2 = store.agendaHE
+    store.scenarioParams.fastTracking.lagDays = 5
+    expect(store.agendaFT).not.toBe(agendaFT)
+    expect(store.agendaHE).toBe(agendaHE2)
+  })
+
+  it('mudar uma tarefa refaz as duas agendas (a edição de equipe da 302 muda o custo da hora extra)', () => {
+    const store = useProjectStore()
+    const agendaHE = store.agendaHE
+    const antes = store.scenarios.overtime.extraCost
+    expect(store.updateTask(302, { resources: [{ resource: 'Pedreiro', units: 1 }] })).toEqual({ ok: true })
+    expect(store.agendaHE).not.toBe(agendaHE)
+    expect(store.scenarios.overtime.extraCost).not.toBeCloseTo(antes, 2)
+  })
+})

@@ -144,7 +144,7 @@ describe('desempenho: mudar uma premissa recalcula cenários e DLP (RNF-03.1, ob
     expect(r.ms).toBeLessThan(5000)
   })
 
-  it.skipIf(!process.env.CRONOAI_PERF)('local (CRONOAI_PERF=1): mediana de 5 mudanças de premissa com frentes escolhidas (informativo; meta 1.000 ms)', () => {
+  it.skipIf(!process.env.CRONOAI_PERF)('local (CRONOAI_PERF=1): mediana de 5 mudanças de premissa com frentes escolhidas abaixo de 1.000 ms', () => {
     mudarIndiretoComFrentes() // aquecimento
     const tempos: number[] = []
     for (let i = 0; i < 5; i++) tempos.push(mudarIndiretoComFrentes().ms)
@@ -153,7 +153,7 @@ describe('desempenho: mudar uma premissa recalcula cenários e DLP (RNF-03.1, ob
     console.info(
       `[CRONOAI_PERF] mudança de premissa com frentes escolhidas (ms): ${tempos.map((t) => t.toFixed(0)).join(', ')}; mediana ${tempos[2].toFixed(0)} ms; voltas do ajuste ${voltas}; ${tempos[2] > 1000 ? 'ACIMA' : 'dentro'} da meta de 1.000 ms`,
     )
-    expect(tempos[2]).toBeLessThan(5000) // informativo: o número medido vai para o relatório; acima de 1.000 ms é reportado, não otimizado
+    expect(tempos[2]).toBeLessThan(1000) // meta do AC-6, agora também no modo "frentes escolhidas" (agenda separada do custo, rodada 05)
   })
 })
 
@@ -230,7 +230,7 @@ describe('desempenho: hora extra com um pacote de 30 frentes escolhidas (obra de
     expect(r.ms).toBeLessThan(15000)
   })
 
-  it.skipIf(!process.env.CRONOAI_PERF).each([4, 8])('local (CRONOAI_PERF=1): mediana de 3 mudanças de premissa com 30 frentes e %i sábados (informativo; meta 1.000 ms)', (sabados) => {
+  it.skipIf(!process.env.CRONOAI_PERF).each([4, 8])('local (CRONOAI_PERF=1): mediana de 3 mudanças de premissa com 30 frentes e %i sábados abaixo de 1.000 ms', (sabados) => {
     medir(sabados) // aquecimento
     const tempos: number[] = []
     let he = medir(sabados).he
@@ -243,6 +243,6 @@ describe('desempenho: hora extra com um pacote de 30 frentes escolhidas (obra de
     console.info(
       `[CRONOAI_PERF] 30 frentes, ${sabados} sábados (ms): ${tempos.map((t) => t.toFixed(0)).join(', ')}; mediana ${tempos[1].toFixed(0)} ms; voltas ${he.horaExtra?.voltas}; convocadas ${he.horaExtra?.atribuicoes.length}; ${tempos[1] > 1000 ? 'ACIMA' : 'dentro'} da meta de 1.000 ms`,
     )
-    expect(tempos[1]).toBeLessThan(30000) // informativo
+    expect(tempos[1]).toBeLessThan(1000) // meta do AC-6 (agenda separada do custo, rodada 05)
   })
 })

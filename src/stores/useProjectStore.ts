@@ -62,12 +62,19 @@ import { MAX_CALENDAR_DAYS, buildMspdiXml, buildTaskXml, lagParaMspdi, parseMspd
 import {
   DEFAULT_SCENARIO_PARAMS,
   analyzeDelay,
+  agendaFastTracking,
+  agendaHoraExtra,
   crashingTargets,
+  custoFastTracking,
+  custoHoraExtra,
   fastTrackOptions,
   overtimeTargets,
   recommendScenario,
   simulateAll,
+  simulateCrashing,
   workingVariance,
+  type ResultadoAgendaFT,
+  type ResultadoAgendaHE,
   type ScenarioParams,
   type ScenarioResult,
 } from '@/lib/scenarios'
@@ -629,9 +636,28 @@ export const useProjectStore = defineStore('project', () => {
     premissas: premissasVigentes.value,
     versaoPremissas: { versao: versaoPremissasVigente.value.versao, vigencia: versaoPremissasVigente.value.vigencia },
   }))
+  // AGENDA do fast tracking e da hora extra (a parte cara: um CPM completo por volta), SEM premissas: cada uma só depende da agenda da obra e dos
+  // parâmetros do próprio cenário. Mudar uma premissa refaz só o CUSTO (rápido). O crashing não se separa: a duração nova usa o fator de
+  // congestionamento, que é premissa (ver `simulateCrashing`).
+  const agendaFT = computed<ResultadoAgendaFT>(() =>
+    tentar(
+      () => agendaFastTracking(scenarioAgenda.value, scenarioParams.fastTracking),
+      () => agendaFastTracking({ ...scenarioAgenda.value, tasks: [] }, scenarioParams.fastTracking),
+    ),
+  )
+  const agendaHE = computed<ResultadoAgendaHE>(() =>
+    tentar(
+      () => agendaHoraExtra(scenarioAgenda.value, scenarioParams.overtime),
+      () => agendaHoraExtra({ ...scenarioAgenda.value, tasks: [] }, scenarioParams.overtime),
+    ),
+  )
   const scenarios = computed(() =>
     tentar(
-      () => simulateAll(scenarioCtx.value, scenarioParams),
+      () => ({
+        crashing: simulateCrashing(scenarioCtx.value, scenarioParams.crashing),
+        'fast-tracking': custoFastTracking(scenarioCtx.value, agendaFT.value),
+        overtime: custoHoraExtra(scenarioCtx.value, agendaHE.value),
+      }),
       () => simulateAll({ ...scenarioCtx.value, tasks: [] }, scenarioParams),
     ),
   )
@@ -1900,6 +1926,8 @@ export const useProjectStore = defineStore('project', () => {
     primeiroInicioReal,
     obraComAvanco,
     scenarios,
+    agendaFT,
+    agendaHE,
     scenarioParams,
     scenarioOptions,
     recommendation,

@@ -24,7 +24,8 @@ test('C-3: aplicar crashing no cronograma', async ({ page }) => {
   await cartaoCenario(page, 'Crashing (Compressão)').getByRole('button', { name: 'Aplicar no cronograma' }).click()
   const aviso = toast(page, 'Crashing (Compressão) aplicado')
   await expect(aviso).toContainText('Entrega: 23/06/27 → 18/06/27')
-  await expect(aviso).toContainText(`R$${ESPACO}12.617`)
+  // RNF-03.2 (rodada 05): R$ dos cenários com 2 casas e arredondamento bancário. Antes: "R$ 12.617"; depois: "R$ 12.616,80"
+  await expect(aviso).toContainText(`R$${ESPACO}12.616,80`)
   await expect(kpi(page, 'Entrega das chaves')).toContainText('18/06/27')
   await expect(kpi(page, 'Entrega das chaves')).toContainText('+13 d.u.')
 })

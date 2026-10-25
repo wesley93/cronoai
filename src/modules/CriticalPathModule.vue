@@ -9,7 +9,7 @@ import SectionCard from '@/components/common/SectionCard.vue'
 import GanttChart from '@/components/gantt/GanttChart.vue'
 import ScenarioCard from './critical/ScenarioCard.vue'
 import DivergenciasPainel from './critical/DivergenciasPainel.vue'
-import { fmtBRL, fmtDate, fmtDateLong, fmtDiasUteis, fmtFolga } from '@/lib/format'
+import { fmtBRLCents, fmtDate, fmtDateLong, fmtDiasUteis, fmtFolga } from '@/lib/format'
 import { describeLink, formatPredecessors } from '@/lib/wbs'
 import { MAX_FRENTES_HORA_EXTRA } from '@/lib/scenarios'
 import { descreverPremissasDeCenario, rotuloVersao } from '@/lib/premissas'
@@ -88,7 +88,7 @@ function apply(kind: ScenarioKind) {
     ui.notify('error', `${res.title} não aplicado`, aplicado.erro)
     return
   }
-  ui.notify('success', `${res.title} aplicado`, `Entrega: ${fmtDate(before)} → ${fmtDate(project.schedule.projectFinish)} · custo comprometido ${fmtBRL(res.extraCost)}. Gantt, EVM e suprimentos recalculados.`)
+  ui.notify('success', `${res.title} aplicado`, `Entrega: ${fmtDate(before)} → ${fmtDate(project.schedule.projectFinish)} · custo comprometido ${fmtBRLCents(res.extraCost)}. Gantt, EVM e suprimentos recalculados.`)
 }
 function undo(kind: ScenarioKind) {
   const r = project.undoScenario(kind)
@@ -173,7 +173,7 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
     <!-- Simulador -->
     <SectionCard
       title="Simulador de Recuperação com IA"
-      :subtitle="`Cada cenário recalcula o CPM completo. Custo indireto da obra: ${fmtBRL(project.premissasVigentes.custoIndiretoDiario)}/dia útil (${rotuloVersao(project.versaoPremissasVigente)}).`"
+      :subtitle="`Cada cenário recalcula o CPM completo. Custo indireto da obra: ${fmtBRLCents(project.premissasVigentes.custoIndiretoDiario)}/dia útil (${rotuloVersao(project.versaoPremissasVigente)}).`"
       :icon="Sparkles"
     >
       <template #actions>
@@ -278,10 +278,10 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
               <td class="font-medium">{{ r.title }} <span v-if="project.state.appliedScenarios.includes(r.kind)" class="chip-ok ml-1">aplicado</span></td>
               <td class="text-right tabular-nums">{{ r.applicable ? r.daysRecovered : '—' }}</td>
               <td class="tabular-nums">{{ r.applicable ? fmtDate(r.newFinish) : '—' }}</td>
-              <td class="text-right tabular-nums">{{ fmtBRL(r.extraCost) }}</td>
-              <td class="text-right tabular-nums">{{ fmtBRL(r.indirectSavings) }}</td>
-              <td class="text-right font-semibold tabular-nums" :class="r.netImpact > 0 ? 'text-coral-600 dark:text-coral-400' : 'text-emerald-600 dark:text-emerald-400'">{{ fmtBRL(r.netImpact) }}</td>
-              <td class="text-right tabular-nums">{{ Number.isFinite(r.costPerDay) && r.applicable ? fmtBRL(r.costPerDay) : '—' }}</td>
+              <td class="text-right tabular-nums">{{ fmtBRLCents(r.extraCost) }}</td>
+              <td class="text-right tabular-nums">{{ fmtBRLCents(r.indirectSavings) }}</td>
+              <td class="text-right font-semibold tabular-nums" :class="r.netImpact > 0 ? 'text-coral-600 dark:text-coral-400' : 'text-emerald-600 dark:text-emerald-400'">{{ fmtBRLCents(r.netImpact) }}</td>
+              <td class="text-right tabular-nums">{{ Number.isFinite(r.costPerDay) && r.applicable ? fmtBRLCents(r.costPerDay) : '—' }}</td>
               <td><span :class="{ Baixo: 'chip-ok', Médio: 'chip-warn', Alto: 'chip-critical' }[r.risk]">{{ r.risk }}</span></td>
             </tr>
           </tbody>

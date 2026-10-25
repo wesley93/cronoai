@@ -207,6 +207,7 @@ describe('Premissas da obra nos cenários (ciclo 00005)', () => {
     const r = simulateOvertime({ ...ctx, calendarios: [c9], forecast: forecast9 })
     expect(r.summary).toContain('(9 h, adicional de 50%)')
     expect(r.addedWorkingDays).toEqual(['2026-10-24', '2026-10-31'])
+    // Antes (jornada de 8 h, minutosPorDia ÷ 60): R$ 25.436,40 com as mesmas equipes; depois (9 h do expediente do sábado): R$ 28.615,95.
     // 73 profissionais-dia (a frente ativa muda com a jornada de 9 h): custo = 9 h × Σ (unidades × taxa) × 1,5
     expect(r.details[0].value).toBe('73')
     expect(r.extraCost).toBeCloseTo(28615.95, 2)
@@ -434,6 +435,9 @@ describe('Hora extra: derivado só com os sábados em que a frente trabalha, fer
 // E-13 (rodada 03): a entrada e a lista de frentes são avaliadas com os sábados candidatos já no calendário (hipótese máxima), e o ponto
 // fixo poda. Com a data de status na sexta (23/10, o caso do Aurora) nenhuma frente "trabalha" no 1º sábado no cronograma de hoje, mas passa
 // a trabalhar nele por causa da própria hora extra.
+// Antes → depois de cada caso do E-13 (HEAD 833cb5f → rodada 03):
+//   {1 sábado, [104]}: não aplicável → aplicável, 1 d.u., R$ 2.080,80;  {1 sábado, [302]}: não aplicável → aplicável, 0 d.u., R$ 9.076,80;
+//   overtimeTargets(ctx, 1): [] → [104, 302];  frente que só começa na semana seguinte: não oferecida → oferecida e convocada (1 d.u., R$ 376,80).
 describe('Hora extra: frentes avaliadas com os sábados já no calendário (E-13) e ponto fixo (E-14)', () => {
   it('status na sexta, 1 sábado e frente {104}: aplicável, 1 d.u., 173,40 × 8 h × 1,5 = R$ 2.080,80', () => {
     // O especialista calculou "R$ 1.040,40" para esta conta, mas a própria fórmula (173,40 × 8 × 1,5) dá R$ 2.080,80: 1.040,40 é a de 4 h
@@ -506,5 +510,22 @@ describe('Hora extra: limite de frentes escolhidas (R-18)', () => {
   })
   it('uids repetidos contam uma vez', () => {
     expect(simulateOvertime(ctx, { saturdays: 2, frentes: Array.from({ length: 40 }, () => 104) }).applicable).toBe(true)
+  })
+})
+
+// RNF-03.2 (rodada 05): os R$ dos cenários (detalhes, memória e recomendação) saem com 2 casas e arredondamento bancário.
+describe('R$ dos cenários com 2 casas (RNF-03.2)', () => {
+  const nb = (v: string) => v.replaceAll(String.fromCharCode(160), ' ')
+  const r = simulateAll(ctx)
+  it('detalhes e memória: antes "R$ 9.017" / "R$ 3.600" / "R$ 25.350" / "R$ 22.315"; depois com centavos', () => {
+    expect(nb(r.crashing.details.find((d) => d.label === 'Mão de obra extra')!.value)).toBe('R$ 9.016,80') // antes: R$ 9.017
+    expect(nb(r.crashing.details.find((d) => d.label === 'Mobilização/EPI')!.value)).toBe('R$ 3.600,00') // antes: R$ 3.600
+    expect(nb(r['fast-tracking'].details.find((d) => d.label === 'Contingência de retrabalho')!.value)).toBe('R$ 25.350,00') // antes: R$ 25.350
+    expect(nb(r.overtime.details.find((d) => d.label === 'Custo HE (com adicional)')!.value)).toBe('R$ 22.315,20') // antes: R$ 22.315
+    expect(nb(r.overtime.memory[0])).toBe('Custo HE = Σ profissionais × 8 h × taxa × 1,5 = R$ 22.315,20')
+    expect(nb(r.crashing.memory.find((m) => m.startsWith('Economia de indireto'))!)).toBe('Economia de indireto = 3 d × R$ 9.850,00 = R$ 29.550,00')
+  })
+  it('recomendação: "economiza R$ 16.933" → "economiza R$ 16.933,20"', () => {
+    expect(nb(recommendScenario(r).reason)).toContain('economiza R$ 16.933,20 líquidos') // antes: R$ 16.933
   })
 })

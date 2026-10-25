@@ -20,6 +20,7 @@ import {
 import { computeSchedule, downstreamOf, optsDaObra } from './cpm'
 import { configFeriadosPadrao, criarFeriadosPorAno, ehFeriadoDaObra } from './feriadosObra'
 import { memoriaPremissas, premissasPadrao, taxaHora } from './premissas'
+import { fmtBRLCents } from './format'
 import { normalizeText, rotuloLag } from './wbs'
 
 /** Taxa horária da função nas premissas da obra (R$/h); função não cadastrada usa a taxa padrão das premissas. */
@@ -185,8 +186,9 @@ const premissasDe = (ctx: Ctx): PremissasObra => ctx.premissas ?? premissasPadra
 const comVersao = (ctx: Ctx, r: ScenarioResult): ScenarioResult =>
   ctx.versaoPremissas ? { ...r, premissas: { versao: ctx.versaoPremissas.versao, vigencia: ctx.versaoPremissas.vigencia } } : r
 
-const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
-const fmtRate = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 })
+// R$ dos cenários com 2 casas e arredondamento bancário (RNF-03.2): o mesmo `fmtBRLCents` da tela
+const fmt = fmtBRLCents
+const fmtRate = fmtBRLCents
 const num = (v: number, d = 2) => v.toLocaleString('pt-BR', { maximumFractionDigits: d })
 const br = (iso: string) => iso.split('-').reverse().join('/')
 const shortName = (name: string) =>
@@ -244,6 +246,8 @@ export function crashingTargets(ctx: Ctx): ScenarioOption[] {
     })
 }
 
+// Crashing NÃO separa agenda de custo: a duração nova usa o fator de congestionamento (`perdaCongestionamentoPct`, premissa) em
+// `⌈duração × equipe ÷ (equipe + n) × fator⌉`; a reprogramação depende de premissa e muda com ela. Fica inteiro aqui.
 export function simulateCrashing(ctx: Ctx, p: ScenarioParams['crashing'] = DEFAULT_SCENARIO_PARAMS.crashing): ScenarioResult {
   const title = 'Crashing (Compressão)'
   const options = crashingTargets(ctx)
@@ -345,14 +349,33 @@ export function fastTrackOptions(ctx: Ctx): ScenarioOption[] {
     }))
 }
 
-export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking'] = DEFAULT_SCENARIO_PARAMS.fastTracking): ScenarioResult {
-  const title = 'Fast Tracking (Paralelismo)'
+/** Resultado da AGENDA do fast tracking (sem premissas): vínculo escolhido, nova programação e dias recuperados. */
+export interface AgendaFastTracking {
+  pred: Task
+  succ: Task
+  lag: number
+  patch: Partial<Task>
+  schedule: ScheduleResult
+  days: number
+  predDur: number
+  overlap: number
+  oldLagResumo: string
+  oldLagMemoria: string
+}
+export type ResultadoAgendaFT = AgendaFastTracking | { inaplicavel: string }
+const TITULO_FAST_TRACKING = 'Fast Tracking (Paralelismo)'
+
+/**
+ * AGENDA do fast tracking: troca o FS por SS + lag e reprograma o cronograma (um CPM completo). Não lê premissas (a contingência é custo): a
+ * store a guarda num `computed` que não depende delas.
+ */
+export function agendaFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking'] = DEFAULT_SCENARIO_PARAMS.fastTracking): ResultadoAgendaFT {
   const chosen = p.predUid !== undefined && p.succUid !== undefined ? `${p.predUid}>${p.succUid}` : fastTrackOptions(ctx)[0]?.value
   const [predUid, succUid] = (chosen ?? '').split('>').map(Number)
   const pred = ctx.tasks.find((t) => t.uid === predUid)
   const succ = ctx.tasks.find((t) => t.uid === succUid)
   if (!pred || !succ || succ.percentComplete > 0 || !succ.predecessors.some((l) => l.uid === pred.uid && l.type === 'FS')) {
-    return notApplicable('fast-tracking', title, 'Não há vínculo Término-Início (FS) disponível para paralelizar.', ctx)
+    return { inaplicavel: 'Não há vínculo Término-Início (FS) disponível para paralelizar.' }
   }
 
   const mpd = minutosPorDiaDe(ctx)
@@ -374,6 +397,13 @@ export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking']
   const predSched = ctx.forecast.byUid.get(pred.uid)!
   const predDur = Math.max(1, minutosParaDias(predSched.duracaoMin, mpd))
   const overlap = Math.max(0, Math.min(1, (predDur - lag) / predDur))
+  return { pred, succ, lag, patch, schedule, days, predDur, overlap, oldLagResumo, oldLagMemoria }
+}
+
+/** CUSTO do fast tracking sobre a agenda pronta: contingência de retrabalho, economia de indireto, risco e memória (lê as premissas). */
+export function custoFastTracking(ctx: Ctx, ag: ResultadoAgendaFT): ScenarioResult {
+  if ('inaplicavel' in ag) return notApplicable('fast-tracking', TITULO_FAST_TRACKING, ag.inaplicavel, ctx)
+  const { pred, succ, lag, patch, schedule, days, predDur, overlap, oldLagResumo, oldLagMemoria } = ag
   const risk: RiskLevel = overlap > 0.6 ? 'Alto' : overlap > 0.3 ? 'Médio' : 'Baixo'
   const prem = premissasDe(ctx)
   const contingency = succ.bac * (prem.contingenciaRetrabalhoPct / 100) * overlap // 4/100 = 0,04
@@ -384,7 +414,7 @@ export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking']
     applicable: true,
     targetUid: succ.uid,
     predecessorUid: pred.uid,
-    title,
+    title: TITULO_FAST_TRACKING,
     summary: `Vínculo ${pred.wbs} → ${succ.wbs}: FS${oldLagResumo} → SS + ${lag} dias`,
     daysRecovered: days,
     newFinish: schedule.projectFinish,
@@ -410,6 +440,10 @@ export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking']
     ],
     taskPatch: { uid: succ.uid, patch },
   })
+}
+
+export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking'] = DEFAULT_SCENARIO_PARAMS.fastTracking): ScenarioResult {
+  return custoFastTracking(ctx, agendaFastTracking(ctx, p))
 }
 
 // ---------------------------------------------------------------- Hora extra
@@ -581,30 +615,51 @@ export function overtimeTargets(ctx: Ctx, saturdays = DEFAULT_SCENARIO_PARAMS.ov
     .map((t) => ({ value: String(t.uid), label: `${t.wbs} ${shortName(t.name)}`, critical: crit(t) }))
 }
 
+const TITULO_HORA_EXTRA = 'Hora Extra (Sábados)'
+
+/** Resultado da AGENDA da hora extra (sem premissas): sábados, calendários derivados, ponto fixo e a reprogramação final. */
+export interface AgendaHoraExtra {
+  days: string[]
+  jornada: 'integral' | 'meio'
+  frentes: 'todas' | number[]
+  /** Horas do expediente da jornada escolhida (o texto do cartão quando nenhuma frente é cobrada). */
+  horasDoExpediente: number
+  novos: CalendarioObra[]
+  atribuicoes: { uid: number; calendarioUid: number }[]
+  naoConvocadas: number[]
+  avisosFeriado: string[]
+  foraPorCalendario: Task[]
+  voltas: number
+  estabilizou: boolean
+  /** Tarefas cobradas e os sábados que são hora extra para cada uma. */
+  participantes: { t: Task; dias: string[] }[]
+  cals: Compilados
+  schedule: ScheduleResult
+  /** Dias úteis recuperados (entrega de hoje − entrega com a hora extra). */
+  gained: number
+}
+export type ResultadoAgendaHE = AgendaHoraExtra | { inaplicavel: string }
+
 /**
- * Hora extra nos sábados (RF-03.6). Dois modos:
+ * AGENDA da hora extra nos sábados (RF-03.6): quais sábados, quais frentes, os calendários derivados, o ponto fixo e a reprogramação do cronograma
+ * (as duas partes caras: um CPM completo por volta). Não lê premissas: a store a guarda num `computed` que só depende da agenda da obra e dos
+ * parâmetros da hora extra, e mudar uma premissa refaz só o custo (`custoHoraExtra`). Dois modos:
  * - `'todas'` (padrão): os sábados entram como exceção útil no calendário padrão (todas as tarefas do padrão); tarefas com calendário
  *   próprio não são convocadas (a memória lista as ativas que ficaram de fora);
- * - lista de frentes: cada frente recebe uma cópia ("derivada") do calendário base dela só com os sábados em que ela trabalha depois da hora
- *   extra (ponto fixo, ver `ajustarSabadosPorFrente`); sábado que o calendário base já trabalha não é hora extra, e sábado que é feriado nesse
- *   calendário não é convocado (trabalho em feriado tem regra própria: RH e Jurídico).
- * Custo = Σ por sábado e por frente convocada ativa no sábado: unidades × horas do sábado × taxa × (1 + adicional). As horas do sábado são os
- * minutos úteis da exceção do sábado no calendário da frente ÷ 60 (o mesmo que o cronograma usa): no dia inteiro, o expediente do dia útil do calendário da frente (8 h no padrão), 4 h no meio período. A
- * equipe é convocada para o expediente inteiro (regra do plano, a validar com RH); a memória mostra os minutos efetivamente trabalhados.
+ * - lista de frentes (até 30, `MAX_FRENTES_HORA_EXTRA`): cada frente recebe uma cópia ("derivada") do calendário base dela só com os sábados em que ela trabalha
+ *   depois da hora extra (ponto fixo, ver `ajustarSabadosPorFrente`); sábado que o calendário base já trabalha não é hora extra, e sábado que é
+ *   feriado nesse calendário não é convocado (trabalho em feriado tem regra própria: RH e Jurídico).
  */
-export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAULT_SCENARIO_PARAMS.overtime): ScenarioResult {
-  const title = 'Hora Extra (Sábados)'
+export function agendaHoraExtra(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAULT_SCENARIO_PARAMS.overtime): ResultadoAgendaHE {
   const wanted = Math.max(1, Math.min(8, Math.round(p.saturdays)))
   const jornada = p.jornada ?? 'integral'
   const frentes = p.frentes ?? 'todas'
   const padrao = ctx.calendarios.find((c) => c.uid === ctx.calendarioPadraoUid)
-  if (!padrao) return notApplicable('overtime', title, 'O calendário padrão da obra não existe.', ctx)
+  if (!padrao) return { inaplicavel: 'O calendário padrão da obra não existe.' }
   const days = sabadosConvocados(ctx, padrao, wanted)
-  if (!days.length) return notApplicable('overtime', title, 'Os próximos sábados já estão no calendário de trabalho.', ctx)
+  if (!days.length) return { inaplicavel: 'Os próximos sábados já estão no calendário de trabalho.' }
 
   const cals0 = compilar(ctx, ctx.calendarios)
-  const prem = premissasDe(ctx)
-  const adicional = prem.adicionalHoraExtraPct / 100 // 50/100 = 0,5
   const expediente = jornada === 'meio' ? intervalosDaPredefinicao(PREDEFINICAO_MEIO_PERIODO) : undefined // sem valor: o expediente do dia útil
   const diaStatus = diaRelativo(cals0.base, ctx.meta.statusDate)
   const inicioDe = (d: string) => diaRelativo(cals0.base, d) * MINUTOS_NO_DIA_CORRIDO
@@ -613,7 +668,6 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
     const s = ctx.forecast.byUid.get(t.uid)
     return !!s && t.percentComplete < 100 && agendadaNoDia(s, aposPre(t), inicioDe(d))
   }
-  const crit = (uid: number) => !!ctx.forecast.byUid.get(uid)?.critical
 
   let calendarios = ctx.calendarios
   let tarefas = ctx.tasks
@@ -635,25 +689,20 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
     for (const t of folhas) if (t.calendarioUid !== undefined && t.calendarioUid !== padrao.uid && days.some((d) => ativaHoje(t, d))) foraPorCalendario.push(t)
   } else {
     const uids = new Set(frentes)
-    if (uids.size > MAX_FRENTES_HORA_EXTRA) return notApplicable('overtime', title, `Escolha no máximo ${MAX_FRENTES_HORA_EXTRA} frentes para a hora extra.`, ctx)
+    if (uids.size > MAX_FRENTES_HORA_EXTRA) return { inaplicavel: `Escolha no máximo ${MAX_FRENTES_HORA_EXTRA} frentes para a hora extra.` }
     const escolhidas = folhas.filter((t) => uids.has(t.uid))
-    if (!escolhidas.length) return notApplicable('overtime', title, 'Escolha ao menos uma frente (tarefa) para a hora extra.', ctx)
+    if (!escolhidas.length) return { inaplicavel: 'Escolha ao menos uma frente (tarefa) para a hora extra.' }
     const semTrabalho = `Nenhuma frente escolhida trabalha nos sábados convocados (${days.map(fmtDia).join(', ')}).`
     const abertas = escolhidas.filter((t) => t.percentComplete < 100 && ctx.forecast.byUid.has(t.uid))
-    if (!abertas.length) return notApplicable('overtime', title, semTrabalho, ctx)
+    if (!abertas.length) return { inaplicavel: semTrabalho }
     // Candidatas: as frentes abertas com algum sábado que é hora extra para elas. Não se filtra pelo cronograma de hoje: a frente pode passar a
     // trabalhar no sábado por causa da própria hora extra (ex.: data de status na sexta); quem poda é o ponto fixo, depois.
     const candidatas = abertas.filter((t) => diasBaseDe(ctx, padrao, cals0, days, t).length > 0)
     if (!candidatas.length) {
       const jaUteis = abertas.some((t) => days.some((d) => cals0.de(baseUidDe(padrao, t)).dataUtil(d)))
-      return notApplicable(
-        'overtime',
-        title,
-        jaUteis
+      return { inaplicavel: jaUteis
           ? 'Os sábados convocados já são úteis no calendário das frentes escolhidas.'
-          : 'Os sábados convocados são feriado no calendário das frentes escolhidas; trabalho em feriado tem regra própria (validar com RH e Jurídico).',
-        ctx,
-      )
+          : 'Os sábados convocados são feriado no calendário das frentes escolhidas; trabalho em feriado tem regra própria (validar com RH e Jurídico).' }
     }
     for (const t of abertas) {
       const s = ctx.forecast.byUid.get(t.uid)!
@@ -669,12 +718,12 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
     const ajuste = ajustarSabadosPorFrente(ctx, padrao, candidatas, mapa, expediente)
     voltas = ajuste.voltas
     estabilizou = ajuste.estabilizou
-    if (!mapa.size) return notApplicable('overtime', title, semTrabalho, ctx)
+    if (!mapa.size) return { inaplicavel: semTrabalho }
     for (const t of escolhidas) if (!mapa.has(t.uid)) naoConvocadas.push(t.uid)
     novos.push(...ajuste.montado.criados)
     atribuicoes.push(...ajuste.montado.atribuidos)
     if (ctx.calendarios.length + novos.length > MAX_CALENDARIOS) {
-      return notApplicable('overtime', title, `Não há espaço para o calendário da hora extra: a obra já tem ${ctx.calendarios.length} calendários (máximo ${MAX_CALENDARIOS}).`, ctx)
+      return { inaplicavel: `Não há espaço para o calendário da hora extra: a obra já tem ${ctx.calendarios.length} calendários (máximo ${MAX_CALENDARIOS}).` }
     }
     calendarios = ajuste.montado.calendarios
     tarefas = ajuste.montado.tarefas
@@ -683,7 +732,22 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
 
   const { cals, schedule } = reschedule(ctx, tarefas, calendarios)
   const gained = recovered({ ...ctx, calendarios }, schedule.projectFinish)
+  const horasDoExpediente = (expediente ?? expedienteDoDiaUtil(padrao)).reduce((a, iv) => a + (iv.ate - iv.de), 0) / 60
+  return { days, jornada, frentes, horasDoExpediente, novos, atribuicoes, naoConvocadas, avisosFeriado, foraPorCalendario, voltas, estabilizou, participantes, cals, schedule, gained }
+}
 
+/**
+ * CUSTO da hora extra sobre a agenda pronta: horas × taxa × adicional, profissionais-dia, economia de indireto, risco e memória financeira
+ * (lê as premissas). Custo = Σ por sábado e por frente convocada ativa no sábado: unidades × horas do sábado × taxa × (1 + adicional). As horas
+ * do sábado são os minutos úteis da exceção do sábado no calendário da frente ÷ 60 (o mesmo que o cronograma usa): 8 h no dia inteiro, 4 h no
+ * meio período. A equipe é convocada para o expediente inteiro (regra do plano, a validar com RH); a memória mostra os minutos efetivamente trabalhados.
+ */
+export function custoHoraExtra(ctx: Ctx, ag: ResultadoAgendaHE): ScenarioResult {
+  if ('inaplicavel' in ag) return notApplicable('overtime', TITULO_HORA_EXTRA, ag.inaplicavel, ctx)
+  const { days, jornada, frentes, novos, atribuicoes, naoConvocadas, avisosFeriado, foraPorCalendario, voltas, estabilizou, participantes, cals, schedule, gained } = ag
+  const prem = premissasDe(ctx)
+  const adicional = prem.adicionalHoraExtraPct / 100 // 50/100 = 0,5
+  const crit = (uid: number) => !!ctx.forecast.byUid.get(uid)?.critical
   // Custo de HE: cada frente convocada ativa no sábado (o intervalo agendado cruza o expediente do sábado no calendário dela, nunca antes da
   // data de status); a equipe inteira é convocada para o expediente do sábado, e as horas são as dele (minutos úteis da exceção ÷ 60)
   let overtimeCost = 0
@@ -710,7 +774,7 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
     }
   }
   // Sem custo cobrado, as horas do texto são as do expediente da jornada escolhida
-  const horasTexto = [...(horasUsadas.size ? horasUsadas : new Set([(expediente ?? expedienteDoDiaUtil(padrao)).reduce((a, iv) => a + (iv.ate - iv.de), 0) / 60]))].sort((a, b) => a - b).map((h) => num(h)).join(' / ')
+  const horasTexto = [...(horasUsadas.size ? horasUsadas : new Set([ag.horasDoExpediente]))].sort((a, b) => a - b).map((h) => num(h)).join(' / ')
   const indirectSavings = Math.max(0, gained) * prem.custoIndiretoDiario
   const net = overtimeCost - indirectSavings
   const escolhidasNoCritico = frentes !== 'todas' && frentes.some((u) => crit(u))
@@ -741,7 +805,7 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
   return comVersao(ctx, {
     kind: 'overtime',
     applicable: true,
-    title,
+    title: TITULO_HORA_EXTRA,
     summary:
       `Trabalho em ${days.length} sábado(s): ${days.map(fmtDia).join(', ')} (${horasTexto} h, adicional de ${num(prem.adicionalHoraExtraPct)}%)` +
       (frentes === 'todas' ? '' : ` nas frentes ${nomeFrentes(atribuicoes.map((a) => a.uid))}`),
@@ -776,6 +840,12 @@ export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAU
     ...(frentes === 'todas' ? { addedWorkingDays: days } : {}),
     horaExtra: { jornada, dias: days, calendariosNovos: novos, atribuicoes, naoConvocadas, voltas },
   })
+}
+
+
+
+export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAULT_SCENARIO_PARAMS.overtime): ScenarioResult {
+  return custoHoraExtra(ctx, agendaHoraExtra(ctx, p))
 }
 
 export function simulateAll(ctx: Ctx, params: ScenarioParams = DEFAULT_SCENARIO_PARAMS): Record<ScenarioKind, ScenarioResult> {

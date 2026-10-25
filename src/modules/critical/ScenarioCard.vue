@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { Users, GitMerge, CalendarPlus, CheckCircle2, Undo2, Play, Sparkles, Calculator } from '@lucide/vue'
 import type { ScenarioResult } from '@/lib/scenarios'
-import { fmtBRL, fmtDate } from '@/lib/format'
+import { fmtBRLCents, fmtDate } from '@/lib/format'
 import { rotuloVersao } from '@/lib/premissas'
 
 const props = defineProps<{ result: ScenarioResult; applied: boolean; recommended?: boolean }>()
@@ -53,17 +53,17 @@ const versaoUsada = computed(() => (props.result.premissas ? rotuloVersao(props.
       </div>
 
       <dl class="mt-3 space-y-1.5 text-[12px]">
-        <div class="flex justify-between"><dt class="text-zinc-500">Custo extra</dt><dd class="font-medium tabular-nums text-coral-600 dark:text-coral-400">+ {{ fmtBRL(result.extraCost) }}</dd></div>
-        <div class="flex justify-between"><dt class="text-zinc-500">Economia de custo indireto</dt><dd class="font-medium tabular-nums text-emerald-600 dark:text-emerald-400">− {{ fmtBRL(result.indirectSavings) }}</dd></div>
+        <div class="flex justify-between"><dt class="text-zinc-500">Custo extra</dt><dd class="font-medium tabular-nums text-coral-600 dark:text-coral-400">+ {{ fmtBRLCents(result.extraCost) }}</dd></div>
+        <div class="flex justify-between"><dt class="text-zinc-500">Economia de custo indireto</dt><dd class="font-medium tabular-nums text-emerald-600 dark:text-emerald-400">− {{ fmtBRLCents(result.indirectSavings) }}</dd></div>
         <div class="flex justify-between border-t border-zinc-200 pt-1.5 dark:border-zinc-800">
           <dt class="font-medium">Saldo financeiro</dt>
           <dd class="font-semibold tabular-nums" :class="net > 0 ? 'text-coral-600 dark:text-coral-400' : 'text-emerald-600 dark:text-emerald-400'">
-            {{ net > 0 ? `custa ${fmtBRL(net)}` : `economiza ${fmtBRL(-net)}` }}
+            {{ net > 0 ? `custa ${fmtBRLCents(net)}` : `economiza ${fmtBRLCents(-net)}` }}
           </dd>
         </div>
         <div class="flex justify-between text-[11px]">
           <dt class="text-zinc-500">Custo extra por dia recuperado</dt>
-          <dd class="tabular-nums">{{ Number.isFinite(result.costPerDay) ? `${fmtBRL(result.costPerDay)}/dia` : '—' }}</dd>
+          <dd class="tabular-nums">{{ Number.isFinite(result.costPerDay) ? `${fmtBRLCents(result.costPerDay)}/dia` : '—' }}</dd>
         </div>
       </dl>
 
