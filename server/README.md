@@ -82,7 +82,7 @@ decisão da Infraestrutura (`dotnet ef migrations script --idempotent` ou *bundl
 
 O `dotnet test` usa o Microsoft.Testing.Platform (obrigatório no SDK 10 com xunit.v3; ver `global.json`). Os testes
 de integração sobem um PostgreSQL descartável (Testcontainers) com usuário e senhas **aleatórios por execução** e
-rodam o mesmo bootstrap do compose. Filtro por classe: `dotnet test --solution CronoAI.slnx -- --filter-class "*SaudeTestes"`.
+rodam o mesmo bootstrap do compose. Filtro por classe (de dentro de `server/`): `cd server && dotnet test --solution CronoAI.slnx -- --filter-class "*SaudeTestes"`.
 O `--solution` só existe com esse runner, configurado no `server/global.json`: na raiz do repositório o comando falha.
 
 **Ryuk (Testcontainers):** o contêiner de limpeza monta o socket do Docker. A CI fixa a imagem por versão + digest com

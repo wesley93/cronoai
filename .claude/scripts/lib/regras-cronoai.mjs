@@ -371,8 +371,14 @@ const SEGREDO_LITERAL = [
   { re: /\bxox[bp]-[A-Za-z0-9-]{10,}/, nome: 'token do Slack' },
 ]
 const SENHA_LITERAL = /\b(password|senha|passwd|pwd)\s*[:=]\s*['"][^'"\s]+['"]/i
-// String de conexao (Npgsql/ADO.NET): Password=valor / Pwd=valor, sem espaco antes do =. Placeholders (<...>, $VAR, %L, {x}) nao contam.
-const SENHA_CONEXAO = /\b(password|pwd)=(?![<$%{@])[^\s;'"<>$%{}]+/i
+// String de conexao (Npgsql/ADO.NET): Password=valor / Pwd = valor (espaco opcional em volta do =).
+// So conta quando a linha tem cara de string de conexao (';' antes da chave ou outra chave como Host=/Database=),
+// para nao acusar inicializador C# (`Password = senha,`). Placeholders reais (<...>, ${...}, $VAR em maiusculas, %L, {0}) nao contam.
+const SENHA_CONEXAO = /\b([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Ww][Dd])\s*=\s*(?!<[^>]*>|\$\{|\$[A-Z_][A-Z0-9_]*(?![a-z])|%[A-Za-z]\b|\{\d*\})[^\s;'"]+/
+const CONTEXTO_CONEXAO = /(;\s*(password|pwd)\s*=)|\b(host|server|database|username|user id|uid)\s*=/i
+// JSON com chave de senha: "Password": "valor"
+const SENHA_JSON = /"(password|pwd|senha|passwd)"\s*:\s*"(?!<[^>]*>|\$\{)[^"\s]+"/i
+const senhaEmConexao = (texto) => SENHA_CONEXAO.test(texto) && CONTEXTO_CONEXAO.test(texto)
 const VITE_SEGREDO = /\bVITE_\w*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|SENHA|PRIVATE|CREDENTIAL)\w*/i
 
 function achado(id, severidade, regra, arquivo, linha, mensagem, trecho) {
@@ -436,7 +442,7 @@ export function aplicarRegras({ arquivos, removidos = new Set(), novas }) {
       const seg = SEGREDO_LITERAL.find((s) => s.re.test(texto))
       if (seg) {
         achados.push(achado('R08', 'bloqueia', 'segredo no código', a, n, `${seg.nome} literal: remova, revogue a credencial e use variável de ambiente fora do bundle (CLAUDE.md › Invioláveis 5).`))
-      } else if ((SENHA_LITERAL.test(texto) || SENHA_CONEXAO.test(texto)) && !/(placeholder|exemplo|example|changeme|xxx|\*\*\*)/i.test(texto)) {
+      } else if ((SENHA_LITERAL.test(texto) || senhaEmConexao(texto) || SENHA_JSON.test(texto)) && !/(placeholder|exemplo|example|changeme|xxx|\*\*\*)/i.test(texto)) {
         achados.push(achado('R08', ehTeste ? 'alerta' : 'bloqueia', 'segredo no código', a, n, 'senha literal em código: nada de senha em código, fixture ou log (CLAUDE.md › Invioláveis 5).'))
       }
       // R09 VITE_ com nome de segredo: tudo que é VITE_* vai para o bundle público
