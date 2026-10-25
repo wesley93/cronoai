@@ -626,3 +626,45 @@ O gate Q1 a Q3 não muda.
 - **Orçamento/Custos** valida EO-1, EO-2, EO-4, D-21, D-22, D-23, D-24 e a 104094 antes do merge.
 - **Contabilidade/Tributário, Orçamento/Custos e Jurídico:** transição da desoneração.
 - Os custos e as demais funções do CR-13 e do CR-14 são lidos da planilha na tarefa 11.
+
+## Emenda 02 (rodadas 02 a 04: proporção da equipe, linha alterada, outro recorte e CSV)
+**Origem:**
+- `especialista-obra` r01 (item 3: a tolerância absoluta falha com equipe grande) e r02 (V-1: custo alterado troca a equipe; ponto 7: `custo_unitario` ignorado) e r03 (R3-1: modelo CSV com valores ilustrativos);
+- `arquiteto` r01 (R-1: recorte de outra obra; R-2: linha editada com a fonte SINAPI) e r02 (R-1b: lote de outro recorte);
+- `testes` r02 e r03 (EO-2 revisada sem emenda);
+- `seguranca` r03 (Info 3: `parseNumberBR` aceita "1e308").
+- Código: 80efda4 (rodada 02), 39391f8 (rodada 03) e rodada 04 (5972cbb) e a8c25dc (concordância da mensagem).
+
+**Decisão:** cada item abaixo foi **decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR.**
+
+O gate Q1 a Q3 não muda. A emenda 01 muda só no item 2 dela (EO-2).
+
+**Números conferidos à mão** (`node -e`, só aritmética; coeficientes da tabela 4.2):
+- **CR-2 com 32 pedreiros:** 1,279 ÷ 0,639 = 2,0015649. Com a tolerância: 32 × 2,0015649 = 64,0501 → ⌈64,0501 − 0,05⌉ = **65**. Com 2 casas: 32 × 2,00 = **64**. Com 2 pedreiros: 4 nas duas regras.
+- **CR-3:** 1,145 ÷ 1,428 = 0,8018 → 0,80; 4 × 0,80 = 3,2 → 4 serventes. 0,357 ÷ 1,428 = 0,25; 4 × 0,25 = 1 carpinteiro. Iguais.
+- **CR-7:** 0,376 ÷ 2,052 = 0,1832 → 0,18; 6 × 0,18 = 1,08 → 2 ajudantes. Igual.
+- **CR-4:** 0,3836 → 0,38 e 0,3575 → 0,36: mínimo de 1. Igual.
+- **CR-14 (101183, real):** 1,128 ÷ 0,276 = 4,087 → 4,09; 2 × 4,09 = 8,18 → 9 serventes. Igual.
+- **Linha alterada, CR-1 com RUP 0,9:** 640 × 0,9 = 576 HH; 576 ÷ 32 = **18 d.u.**; Servente 4 × 0,50 = 2.
+- **Linha alterada, CR-2 com custo alterado:** Servente 2 × 2,00 = 4; 4 × 4 d × 8 h = 128 h ≥ 100 × 1,279 = 127,9 HH.
+- **`custo_unitario`:** 640 × 98,50 = **63.040,00**; antes, 640 × 123,96 = 79.334,40.
+
+| # | Item | Onde | Antes | Depois |
+|---|---|---|---|---|
+| 1 | EO-2 substituída: proporção arredondada a 2 casas | D-6, 4.3 (fórmulas), AC-3, tarefa 2, teste "tolerância…", §16, item 2 da emenda 01; `sinapiRup.ts` (`CASAS_PROPORCAO_EQUIPE`, `arredondarProporcao`) | `max(1, ⌈n·cᶠ÷cᵖ − 0,05⌉)`, `TOLERANCIA_EQUIPE = 0.05`. Com equipe grande o ruído da publicação volta: CR-2 com 32 pedreiros → 65 serventes | `max(1, ⌈n × arredondar₂(cᶠ÷cᵖ) − 1e-9⌉)`, com `CASAS_PROPORCAO_EQUIPE = 2` (meio para cima). CR-2 com 32 → **64**. CR-1 a CR-8 e CR-14 iguais. **Medição na planilha 09/2026** (`especialista-obra` r02, composições COM CUSTO com mais de uma função, equipes de 1 a 40): difere do teto exato em **4 a 6% dos pares**, **nunca em mais de 1 profissional**; pior subalocação 2,3% (equipe até 10), 3,6% (até 20) e 13% (até 40, só em função com proporção menor que 0,1, ex.: 101104). **Opinião.** Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR. **Orçamento/Custos valida** |
+| 2 | Regra da linha alterada | D-23, §06 (`BudgetLine.fonte`), AC-11, AC-12, tarefas 4, 19 e 20; `sinapiBudget.ts` (`marcarFonteAlterada`, `fonteBase`, `profissionalTrocado`, `HELPER_RATIO_PADRAO`), `updateBudgetLine`, `notasDaTarefaSinapi` | Não previsto. Na 1ª entrega, a linha com RUP ou custo digitado continuava com a fonte e o chip verde "SINAPI", e as notas citavam a RUP publicada | RUP, custo ou profissional diferentes do recorte → fonte "· alterado", chip âmbar tracejado. **Custo e RUP alterados mantêm a equipe por função.** **Profissional trocado** → sem `equipe`, `helperRatio` 0,5 servente por oficial (padrão ilustrativo). Quantidade ou equipe editadas não alteram. Notas: só o campo mudado sai como "informado pelo usuário", com o publicado ao lado. Números: CR-1 com RUP 0,9 → 18 d.u.; CR-2 com custo → Pedreiro 2 + Servente 4; CR-3 → Pedreiro 4 + Servente 4 + Carpinteiro 1; CR-3 com Armador → Armador 4 + Servente 2. Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR. **Orçamento/Custos valida** a regra e o padrão de 0,5 |
+| 3 | Recusa de fonte de outro recorte | §01 (objetivo), AC-10, AC-11, tarefas 17, 19 e 20; `SinapiModule.vue` (`watch` da identidade do recorte), `erroDeFonte` (`addSinapiTask`, `previewSinapiTask`), `erroDeFontesDoLote` (`previewBudgetBatch`, `generateFromBudget`), `BudgetSheet.vue` | Não previsto. A calculadora mantinha a composição da obra anterior (módulo em `KeepAlive`); o lote gerava tarefas com o custo de um recorte que não é o da obra | A calculadora limpa a composição quando o recorte muda (troca de obra, substituição, remoção). A store recusa fonte de outro recorte na calculadora e no lote. O lote é recusado inteiro, com até 5 linhas citadas e nenhuma tarefa criada. Chip vermelho "· outro recorte". Não muda fórmula: impede um BAC de outra UF, regime ou data-base. Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR. Validação de área: nenhuma obrigatória (coerência com a §01) |
+| 4 | `custo_unitario` reconhecido no CSV | AC-12, tarefa 4; `sinapiBudget.ts` (cabeçalho com `_` = espaço) | A coluna `custo_unitario` do modelo baixável era ignorada. Com recorte: custo 123,96, BAC R$ 79.334,40, linha alterada só pela RUP | O custo digitado vale: BAC **R$ 63.040,00**, linha "· alterado" (RUP e custo). Sem recorte, igual (98,50). Antes → depois afirmado como BAC na rodada 04 (`toBeCloseTo(63040, 2)` e `toBeCloseTo(79334.4, 2)`). Mudança de número (Inviolável 1). Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR. **Orçamento/Custos valida** o custo digitado substituir o publicado |
+| 5 | Modelo CSV com colunas vazias (rodada 04) | AC-12, tarefa 19 (download do modelo); `BUDGET_CSV_TEMPLATE` (`sinapiBudget.ts`) | Linhas de exemplo com RUP 0,82 e custo 98,50 (catálogo ilustrativo). Numa obra com recorte, o modelo usado só trocando as quantidades dava 17 d.u. e R$ 63.040,00 no lugar de 33 d.u. e R$ 79.334,40 | Colunas `rup` e `custo_unitario` **vazias** nas linhas de exemplo: valem o recorte ou o catálogo. O texto do download diz que um valor preenchido substitui o publicado e sai "· alterado". Com recorte, o 103332 do modelo passa de 17 d.u. e R$ 63.040,00 (valores de exemplo) a 33 d.u. e R$ 79.334,40 (publicado); sem recorte, nada muda; "Linha N" passa a contar a linha do arquivo (rodada 04). Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR. **Orçamento/Custos valida** o conteúdo do modelo |
+| 6 | Teto de valores (rodada 04) | §05 e §08 (entrada externa), AC-12, tarefas 4, 19 e 20; `parseNumberBR`, CSV, célula da planilha e calculadora | `parseNumberBR` aceitava "1e308"; `bac = q × custo` podia virar `Infinity` | Quantidade, custo unitário e RUP não finitos ou acima do teto são recusados no CSV, na célula e na calculadora; nunca há BAC infinito. Tetos (`LIMITES_LINHA`): quantidade 1e9, custo unitário R$ 10.000.000, RUP 10.000 HH/un, equipe 1.000; verba global acima de R$ 10 milhões fica como dívida (T-1, contorno em reais; Orçamento valida subir para 1e9) (sugestão do orquestrador: quantidade ≤ 1e9, custo ≤ 1e9, RUP ≤ 1e4; valor final documentado pelo dev). Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR. **Segurança da Informação** recebe junto com o leitor (D-1) |
+| 7 | Outras áreas | §14 | Orçamento: EO-1, EO-2 (tolerância), EO-4, D-21 a D-24, 104094 | Mais: proporção a 2 casas (item 1), linha alterada e padrão de 0,5 (item 2), custo digitado e modelo CSV (itens 4 e 5). Segurança: mais o `MAX_ABERTURA` de 1.000 caracteres e o teto de valores (item 6) |
+
+**Números inalterados:**
+- tabelas 4.1 e 4.2;
+- CR-1 a CR-15 da seção 4.3 (o CR-2 continua com 4 serventes para 2 pedreiros);
+- CR-9 (linha sem `equipe`, ceil −1e-9 do `helperRatio`);
+- limites do leitor e do recorte da §05 e da §08, salvo o `MAX_ABERTURA` de 1.000 caracteres (rodada 03) e o teto de valores (item 6).
+
+**Pendências:**
+- **Orçamento/Custos** valida os itens 1, 2, 4 e 5 antes do merge, junto com os da emenda 01.
+- **Segurança da Informação** valida o item 6 junto com o leitor próprio (D-1).
