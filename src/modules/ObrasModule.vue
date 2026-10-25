@@ -27,6 +27,8 @@ const dadosAtivos = computed<DadosObra>(() => {
     dataStatus: m.statusDate,
     regimeSinapi: m.regimeSinapi ?? '',
     dataBaseSinapi: m.dataBaseSinapi ?? '',
+    logicaProgresso: m.opcoesCronograma?.logica ?? 'retida',
+    moverRestante: m.opcoesCronograma?.moverRestante ?? true,
   }
 })
 const contextoInicio = computed(() => ({

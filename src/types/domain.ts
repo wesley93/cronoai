@@ -173,6 +173,8 @@ export interface ProjectMeta {
   honorConstraintsArquivo?: number
   /** As 4 opções `Move*` do arquivo, preservadas na ida e volta sem entrar no cálculo. */
   moveArquivo?: MoveArquivo
+  /** O arquivo importado não trazia feriados e o CronoAI aplicou os nacionais ao calendário do projeto (causa de divergência de datas). */
+  feriadosNacionaisAplicados?: true
 }
 
 /** Opções "Mover ..." do MS Project (Project/Move*): só preservadas, o motor não as usa. */

@@ -53,8 +53,10 @@ docker compose --profile dev up dev  # desenvolvimento em container
 | `src/types/domain.ts` | Tipos de domínio (Task, ScheduleResult, FieldReport, MaterialItem…) |
 | `src/types/msProject.ts` | Visão da tarefa com nomes de campo do MS Project (`MSProjectTask`) |
 | `src/data/seed.ts`, `sinapiCatalog.ts` | Obra de exemplo (Edifício Aurora) e catálogo SINAPI **ilustrativo** |
-| `src/lib/calendar.ts` | Calendário de dias úteis, feriados BR, exceções |
-| `src/lib/cpm.ts` | **Motor CPM** (FS/SS/FF/SF, lag, reprogramação pela data de status, folgas) |
+| `src/lib/calendar.ts` | Datas ISO, feriados BR e `WorkCalendar` (contas por dia útil: "+16 d.u.", previsão pelo SPI) |
+| `src/lib/calendarioTrabalho.ts` | **Calendários em minutos** (semana por intervalo de horário, exceções, calendário por tarefa) e **todas** as conversões de unidade de tempo (dias ↔ minutos, data-hora sem fuso) |
+| `src/lib/cpm.ts` | **Motor CPM em minutos úteis** (FS/SS/FF/SF, lag útil, corrido e %, calendário por tarefa, 8 restrições, prazo final, lógica retida/substituir, reprogramação pela data de status, folgas) |
+| `src/lib/restricoes.ts`, `src/lib/divergencias.ts` | Validação das restrições/prazo/calendário da tela e painel "Divergências com o MS Project" (causa provável por tarefa) |
 | `src/lib/evm.ts` | **EVM**: PV/EV/AC/SPI/CPI/EAC, Curva S, séries e variantes de EAC |
 | `src/lib/scenarios.ts` | Efeito dominó e cenários Crashing / Fast Tracking / Hora Extra |
 | `src/lib/supplies.ts` | DLP e alertas de suprimentos |
@@ -76,7 +78,7 @@ docker compose --profile dev up dev  # desenvolvimento em container
 
 ### TypeScript / lógica (`src/lib`)
 - Funções **puras** e testáveis. Nada de acesso a store, DOM ou `localStorage` em `src/lib` (exceções: `download.ts`, `useMsProject.ts`).
-- Datas como string ISO `yyyy-mm-dd` (UTC). Durações e lags em **dias úteis** (inteiros) até a SPEC-05 migrar para minutos.
+- Datas como string ISO `yyyy-mm-dd` (UTC); restrição e prazo final também em `yyyy-mm-ddThh:mm`, hora local da obra **sem fuso**. Durações, lags e folgas em **minutos inteiros** (ADR [00003](.claude/adrs/00003-minutos-inteiros-persistidos.md)): `Task.duracaoMin`, `lag.minutos`, `folgaTotalMin`; lag % em percentual. Dia = minutos ÷ `minutosPorDia` (480). **Conversão de unidade só em `calendarioTrabalho.ts`** (e no passo de migração e no parser, décimos de minuto): nada de `× 480` solto.
 - Dinheiro em `number` (R$); arredonde só na exibição (`src/lib/format.ts`).
 - Nada de `any`, `@ts-ignore` ou `as unknown as` gratuitos. Constante tipo enum = `as const` + `typeof` (sem `enum` TS).
 - Comentários em português, curtos, explicando **por quê**. Fórmulas citadas no comentário (ex.: `// DLP = necessária − lead time − margem`).
@@ -138,6 +140,6 @@ Não substitua o parecer dessas áreas: registre a pendência no PR/ciclo.
 
 - O histórico da Curva S é reconstruído linearmente (SPEC-04).
 - Premissas fixas no código (SPEC-03).
-- CPM em dias inteiros, com calendário único (SPEC-05).
+- Cálculo (SPEC-05, parte 2 e 00005): sem calendário por **recurso**, sem nivelamento nem vários caminhos críticos (RF-05.2 por recurso, RF-05.6, RF-05.7); tarefa **agendada manualmente** no MS Project é calculada automaticamente (a marca é preservada e o painel explica a divergência); cadastro de calendários, meio período e hora extra por frente são do 00005; o PV ignora as exceções úteis do calendário (sábado de hora extra); exceção recorrente sem lista legada e `WorkWeeks` só avisam; datas reais sem hora. Regras sem fonte oficial (lag entre calendários = o da sucessora; `HonorConstraints`; folga de ALAP; `LinkLag` em %) aguardam a conferência no MS Project real (M-5/M-6).
 - Dependências de desenvolvimento com aviso: `vitest` 3 (críticas; correção exige o `vitest` 5) e `tailwindcss` 3 (moderadas; correção exige o Tailwind 4). O audit de produção está zerado.
 - Pontos de cálculo a tratar com teste e decisão explícita: `safeDiv` devolve 1 com divisor zero (SPI/CPI = 1,00 sem PV/AC); `progressPatch` arredonda o custo real no meio do cálculo e usa o fator 1,03 sem histórico; a DLP conta dias corridos e o CPM conta dias úteis; há testes antigos que só verificam direção (`toBeGreaterThan`). Detalhes em [.claude/rules/divida-conhecida.md](.claude/rules/divida-conhecida.md).

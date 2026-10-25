@@ -4,6 +4,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import type {
   CalendarioObra,
   DecisionLogEntry,
+  OpcoesCronograma,
   DetectedRestriction,
   FieldReport,
   LinkType,
@@ -58,6 +59,8 @@ import {
 } from '@/lib/scenarios'
 import { SAFETY_MARGIN_DAYS, analyzeSupplies } from '@/lib/supplies'
 import { fmtBRL, fmtMonth, uid } from '@/lib/format'
+import { calcularDivergencias } from '@/lib/divergencias'
+import { ROTULO_RESTRICAO, calendarioExiste, montarRestricao, validarPrazoFinal, validarRestricao, type TipoRestricaoTela } from '@/lib/restricoes'
 import { lagEmDias, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
 import { criarRegistro, lerEstadoV1, migrarRegistro } from '@/lib/migracaoEstado'
 import { avaliarCota, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, validarIndice, type DadosObra } from '@/lib/obras'
@@ -450,6 +453,8 @@ export const useProjectStore = defineStore('project', () => {
     return computeSchedule(tasks, calendarios.value, optsDaObra(state.meta, 'forecast', state.meta.statusDate))
   }
   const schedule = computed(() => agendar(state.tasks))
+  /** Tarefas cuja data difere da do arquivo importado, com a causa provável (RF-05.8). */
+  const divergencias = computed(() => calcularDivergencias(state.tasks, schedule.value, calendarios.value, state.meta))
   const rollups = computed(() => rollupSummaries(state.tasks, schedule.value))
   const tasksByWbs = computed(() => sortByWbs(state.tasks))
   const leaves = computed(() => tasksByWbs.value.filter((t) => !t.isSummary))
@@ -1052,7 +1057,7 @@ export const useProjectStore = defineStore('project', () => {
   function importXml(text: string): string[] {
     const result = parseMspdiXml(text)
     // Jornada, HonorConstraints e Move* são do arquivo: o que o arquivo novo não traz não fica do arquivo anterior
-    const { honorConstraintsArquivo: _honor, moveArquivo: _move, minutosPorDia: _jornada, ...daObra } = state.meta
+    const { honorConstraintsArquivo: _honor, moveArquivo: _move, minutosPorDia: _jornada, feriadosNacionaisAplicados: _feriados, ...daObra } = state.meta
     const meta = {
       ...daObra,
       ...Object.fromEntries(Object.entries(result.meta).filter(([, v]) => v !== undefined && v !== '')),
@@ -1071,6 +1076,80 @@ export const useProjectStore = defineStore('project', () => {
     state.undo = []
     log('importacao', 'Importado do MS Project (.xml)', `${tasks.length} tarefas carregadas de "${meta.name}".`)
     return result.warnings
+  }
+
+  // ---------------------------------------------------------------- Cronograma: restrições, prazo, calendário e opções (RF-05.3 a RF-05.5)
+  /** Opções de cronograma da obra: o padrão (lógica retida, mover o restante) fica ausente, como na obra de exemplo. */
+  function gravarOpcoesCronograma(opcoes: OpcoesCronograma) {
+    const padrao = opcoes.logica === 'retida' && opcoes.moverRestante
+    const atual = state.meta.opcoesCronograma
+    if (padrao ? atual === undefined : atual?.logica === opcoes.logica && atual.moverRestante === opcoes.moverRestante) return
+    if (padrao) delete state.meta.opcoesCronograma
+    else state.meta.opcoesCronograma = { ...opcoes }
+    log(
+      'sistema',
+      'Opções de cronograma alteradas',
+      `Lógica ${opcoes.logica === 'retida' ? 'retida' : 'substituir progresso'}; ${opcoes.moverRestante ? 'restante movido para depois da data de status' : 'restante não movido'}.`,
+    )
+  }
+
+  function tarefaFolha(taskUid: number): { ok: true; tarefa: Task } | { ok: false; erro: string } {
+    const t = taskByUid.value.get(taskUid)
+    if (!t) return { ok: false, erro: 'Tarefa não encontrada.' }
+    if (t.isSummary) return { ok: false, erro: 'Restrição, prazo e calendário só valem para tarefas folha.' }
+    return { ok: true, tarefa: t }
+  }
+
+  /** Define a restrição de data da tarefa (ASAP remove). Valida tipo e data antes de gravar. */
+  function definirRestricao(taskUid: number, tipo: TipoRestricaoTela, data?: string): ResultadoAcao {
+    const alvo = tarefaFolha(taskUid)
+    if (!alvo.ok) return alvo
+    const erros = validarRestricao(tipo, data, state.meta.startDate)
+    if (erros.length) return { ok: false, erro: erros[0] }
+    const restricao = montarRestricao(tipo, data)
+    const { restricao: _antiga, ...resto } = alvo.tarefa
+    const idx = state.tasks.findIndex((t) => t.uid === taskUid)
+    state.tasks[idx] = restricao ? { ...resto, restricao } : resto
+    log(
+      'sistema',
+      `Restrição alterada: [UID ${taskUid}] ${alvo.tarefa.wbs}`,
+      restricao && restricao.tipo !== 'ALAP' ? `${ROTULO_RESTRICAO[restricao.tipo]} em ${restricao.data.replace('T', ' ')}.` : `${ROTULO_RESTRICAO[tipo]}.`,
+    )
+    return { ok: true }
+  }
+
+  /** Define o prazo final da tarefa (vazio remove). O prazo não move a tarefa: entra na folga e no indicador. */
+  function definirPrazoFinal(taskUid: number, data?: string): ResultadoAcao {
+    const alvo = tarefaFolha(taskUid)
+    if (!alvo.ok) return alvo
+    const erros = validarPrazoFinal(data, state.meta.startDate)
+    if (erros.length) return { ok: false, erro: erros[0] }
+    const { prazoFinal: _antigo, ...resto } = alvo.tarefa
+    const idx = state.tasks.findIndex((t) => t.uid === taskUid)
+    state.tasks[idx] = data ? { ...resto, prazoFinal: data.length > 16 ? data.slice(0, 16) : data } : resto
+    log('sistema', `Prazo final alterado: [UID ${taskUid}] ${alvo.tarefa.wbs}`, data ? `Prazo final em ${data.replace('T', ' ')}.` : 'Prazo final removido.')
+    return { ok: true }
+  }
+
+  /** Escolhe um calendário existente para a tarefa (`undefined` = calendário padrão da obra). Criar calendário é do 00005. */
+  function definirCalendarioTarefa(taskUid: number, calendarioUid?: number): ResultadoAcao {
+    const alvo = tarefaFolha(taskUid)
+    if (!alvo.ok) return alvo
+    if (!calendarioExiste(state.calendarios, calendarioUid)) return { ok: false, erro: 'O calendário escolhido não existe nesta obra.' }
+    const { calendarioUid: _antigo, ...resto } = alvo.tarefa
+    const idx = state.tasks.findIndex((t) => t.uid === taskUid)
+    state.tasks[idx] = calendarioUid !== undefined && calendarioUid !== state.calendarioPadraoUid ? { ...resto, calendarioUid } : resto
+    const nome = state.calendarios.find((c) => c.uid === (calendarioUid ?? state.calendarioPadraoUid))?.nome ?? ''
+    log('sistema', `Calendário da tarefa alterado: [UID ${taskUid}] ${alvo.tarefa.wbs}`, `Calendário "${nome}".`)
+    return { ok: true }
+  }
+
+  /** Define as opções de cronograma da obra (lógica de progresso e mover o restante). */
+  function definirOpcoesCronograma(opcoes: OpcoesCronograma): ResultadoAcao {
+    if (opcoes.logica !== 'retida' && opcoes.logica !== 'substituir') return { ok: false, erro: 'Selecione uma lógica de progresso válida.' }
+    if (typeof opcoes.moverRestante !== 'boolean') return { ok: false, erro: 'Informe se o restante deve ser movido para depois da data de status.' }
+    gravarOpcoesCronograma(opcoes)
+    return { ok: true }
   }
 
   // ---------------------------------------------------------------- Obras (SPEC-14)
@@ -1244,6 +1323,10 @@ export const useProjectStore = defineStore('project', () => {
     if (dados.dataBaseSinapi) meta.dataBaseSinapi = dados.dataBaseSinapi
     else delete meta.dataBaseSinapi
     if (dados.dataStatus !== meta.statusDate) setStatusDate(dados.dataStatus)
+    if (dados.logicaProgresso !== undefined || dados.moverRestante !== undefined) {
+      const atual = meta.opcoesCronograma
+      gravarOpcoesCronograma({ logica: dados.logicaProgresso ?? atual?.logica ?? 'retida', moverRestante: dados.moverRestante ?? atual?.moverRestante ?? true })
+    }
     obras.value = obras.value.map((o) => (o.id === obraAtivaId.value ? resumirObra(o.id, state, o.atualizadoEm) : o))
     return { ok: true }
   }
@@ -1255,6 +1338,11 @@ export const useProjectStore = defineStore('project', () => {
     calendarios,
     minutosPorDia,
     schedule,
+    divergencias,
+    definirRestricao,
+    definirPrazoFinal,
+    definirCalendarioTarefa,
+    definirOpcoesCronograma,
     rollups,
     tasksByWbs,
     leaves,

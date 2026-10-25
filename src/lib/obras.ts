@@ -23,6 +23,10 @@ export interface DadosObra {
   regimeSinapi?: RegimeSinapi | ''
   /** Data-base da tabela SINAPI (AAAA-MM). */
   dataBaseSinapi?: string
+  /** Lógica de progresso da obra ativa (RF-05.5); ausente no cadastro de obra nova. */
+  logicaProgresso?: 'retida' | 'substituir'
+  /** Mover o restante para depois da data de status (política do CronoAI). */
+  moverRestante?: boolean
 }
 
 /**
@@ -79,6 +83,8 @@ export function validarDadosObra(d: DadosObra, contexto?: ContextoInicio): strin
   if (contexto?.comAvanco) erros.push(...validarDatasComAvanco(d, contexto))
   if (d.regimeSinapi && !REGIMES_SINAPI.includes(d.regimeSinapi)) erros.push('Selecione um regime SINAPI válido.')
   if (d.dataBaseSinapi && !/^\d{4}-(0[1-9]|1[0-2])$/.test(d.dataBaseSinapi)) erros.push('A data-base do SINAPI deve estar no formato AAAA-MM (ex.: 2026-09).')
+  if (d.logicaProgresso !== undefined && d.logicaProgresso !== 'retida' && d.logicaProgresso !== 'substituir') erros.push('Selecione uma lógica de progresso válida.')
+  if (d.moverRestante !== undefined && typeof d.moverRestante !== 'boolean') erros.push('Informe se o restante deve ser movido para depois da data de status.')
   return erros
 }
 

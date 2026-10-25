@@ -30,6 +30,11 @@ Fonte da verdade: `CLAUDE.md` › **Convenções › Testes** e › **Invioláve
 - XML de teste pequeno e fictício, montado no próprio teste ou em fixture versionada; arquivo real de obra nunca entra no repositório.
 - **Teste de corpus (só local):** `src/lib/msProjectXmlParser.corpus.test.ts` roda o import nos 134 MSPDI do MPXJ, que ficam fora do git. Rodar com `CRONOAI_REF_DIR=<pasta referencias>` (o corpus é lido de `${CRONOAI_REF_DIR}/mpxj-mspdi/`); sem a variável a suíte é pulada por `describe.skipIf` (é o motivo do pulo, não um `it.skip` esquecido) e o CI não depende do corpus. O relatório sai em `test-results/corpus-mspdi/` (ignorado pelo git). Os auxiliares moram dentro do `*.test.ts`: um `.ts` auxiliar em `src/lib` entraria na cobertura sem execução no CI. Como o CI não roda o corpus, **quem muda o parser roda o corpus localmente** e registra o antes e o depois do inventário. Detalhes em `msproject-mspdi.md`.
 
+## Cálculo em minutos e desempenho
+
+- Teste de motor com **calendário e horas**: monte a rede com `calendarioPadrao(...)` e `compilarCalendarios(...)` (`calendarioTrabalho.ts`) e afirme data **e hora** (`inicioHora`, `terminoHora`) e minutos de folga (`folgaTotalMin`), como `cpm.test.ts`. Os números do Aurora estão fixados em `cpm.caracterizacao.test.ts` (linha de base igual ao motor em dias; previsão com o antes → depois do restante exato). Teste de propriedade (RNF-05.2): 200 redes com semente fixa (gerador congruencial), nunca `Math.random`.
+- **Desempenho (RNF-05.1):** `cpm.desempenho.test.ts` gera 3.000 folhas e ~6.000 vínculos com 3 calendários. No CI roda uma execução com teto largo (2.000 ms); localmente, `CRONOAI_PERF=1 npx vitest run src/lib/cpm.desempenho.test.ts` mede a mediana de 5 execuções (meta < 500 ms; medido ~50 ms, contra 26 ms do motor em dias).
+
 ## Store
 
 - `beforeEach`: `globalThis.localStorage?.clear?.()` e `setActivePinia(createPinia())` — o Node 26 pode expor `localStorage` indefinido.

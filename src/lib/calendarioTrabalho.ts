@@ -14,6 +14,9 @@ export const MAX_INTERVALOS_POR_DIA = 5
 /** Teto do horizonte: 50 anos para cada lado da data-base. Acima disso, erro explícito (nunca extrapola em silêncio). */
 export const TETO_DIAS = 50 * 365
 
+/** Datas de restrição, prazo, datas reais e linha de base a mais de 45 anos do início da obra são recusadas (o motor trava em 50). */
+export const JANELA_ANOS_DATAS = 45
+
 export const UID_CALENDARIO_PADRAO = 1
 export const NOME_CALENDARIO_PADRAO = 'Padrão Obra (seg-sex, 8h)'
 /** Expediente do calendário padrão migrado: 08:00–12:00 e 13:00–17:00. */

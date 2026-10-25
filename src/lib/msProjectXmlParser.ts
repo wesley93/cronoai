@@ -5,6 +5,7 @@ import type { CalendarioObra, IntervaloTrabalho, Lag, LinkType, ProjectMeta, Res
 import { WorkCalendar, addCalendarDays, defaultHolidays, diffCalendarDays } from './calendar'
 import {
   EXPEDIENTE_PADRAO,
+  JANELA_ANOS_DATAS,
   MAX_INTERVALOS_POR_DIA,
   UID_CALENDARIO_PADRAO,
   calendarioDeDias,
@@ -576,8 +577,7 @@ export interface MspdiImportResult {
 
 /** Máximo de calendários-base importados (limite de CPU e memória, T5 do ciclo 00004). */
 export const MAX_CALENDARIOS_IMPORTADOS = 100
-/** Datas do arquivo (restrição, prazo, datas reais e linha de base) a mais de 45 anos do início do projeto são recusadas com aviso. */
-const JANELA_ANOS = 45
+const JANELA_ANOS = JANELA_ANOS_DATAS
 /** Lag acima de ±10 anos (em minutos de relógio) e lag % fora de ±1.000 são recusados com aviso. */
 const MAX_LAG_MINUTOS = 10 * 365 * 1440
 const MAX_LAG_PERCENTUAL = 1000
@@ -1098,7 +1098,10 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     warnings.push('O arquivo não traz custos (Cost/Baseline Cost): os indicadores EVM ficarão zerados até que o BAC seja informado.')
   }
   if (!meta.statusDate) warnings.push('Data de status ausente no XML; mantida a data de status atual do CronoAI.')
-  if (semFeriados) warnings.push('Calendário sem feriados no XML; aplicados os feriados nacionais brasileiros.')
+  if (semFeriados) {
+    warnings.push('Calendário sem feriados no XML; aplicados os feriados nacionais brasileiros.')
+    meta.feriadosNacionaisAplicados = true
+  }
 
   return {
     meta,

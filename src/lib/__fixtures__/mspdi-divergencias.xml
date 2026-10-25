@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Fictício (ciclo 00004, E4): calendário SEM feriados; o CronoAI aplica os nacionais (07/09/2026 é feriado). -->
+<Project xmlns="http://schemas.microsoft.com/project">
+  <SaveVersion>14</SaveVersion>
+  <Name>Fixture divergencias.xml</Name>
+  <Title>Fixture divergências</Title>
+  <Company>Construtora Fictícia</Company>
+  <Manager>Planejador Fictício</Manager>
+  <ScheduleFromStart>1</ScheduleFromStart>
+  <StartDate>2026-08-31T08:00:00</StartDate>
+  <FinishDate>2026-09-16T17:00:00</FinishDate>
+  <CalendarUID>1</CalendarUID>
+  <DefaultStartTime>08:00:00</DefaultStartTime>
+  <DefaultFinishTime>17:00:00</DefaultFinishTime>
+  <MinutesPerDay>480</MinutesPerDay>
+  <MinutesPerWeek>2400</MinutesPerWeek>
+  <DurationFormat>7</DurationFormat>
+  <HonorConstraints>0</HonorConstraints>
+  <SplitsInProgressTasks>1</SplitsInProgressTasks>
+  <StatusDate>2026-08-28T17:00:00</StatusDate>
+  <Calendars>
+    <Calendar>
+      <UID>1</UID>
+      <Name>Padrão</Name>
+      <IsBaseCalendar>1</IsBaseCalendar>
+      <BaseCalendarUID>-1</BaseCalendarUID>
+      <WeekDays>
+        <WeekDay><DayType>1</DayType><DayWorking>0</DayWorking></WeekDay>
+        <WeekDay><DayType>2</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime><WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>
+        <WeekDay><DayType>3</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime><WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>
+        <WeekDay><DayType>4</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime><WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>
+        <WeekDay><DayType>5</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime><WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>
+        <WeekDay><DayType>6</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime><WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>
+        <WeekDay><DayType>7</DayType><DayWorking>0</DayWorking></WeekDay>
+      </WeekDays>
+    </Calendar>
+  </Calendars>
+  <Tasks>
+    <Task><UID>0</UID><ID>0</ID><Name>Fixture divergências</Name><OutlineLevel>0</OutlineLevel><Summary>1</Summary></Task>
+    <!-- D-1: igual ao calculado (5 d, 31/08 a 04/09) -->
+    <Task><UID>1</UID><ID>1</ID><Name>T1 Fundação</Name><Type>1</Type><IsNull>0</IsNull><WBS>1</WBS><OutlineNumber>1</OutlineNumber><OutlineLevel>1</OutlineLevel><Start>2026-08-31T08:00:00</Start><Finish>2026-09-04T17:00:00</Finish><Duration>PT40H0M0S</Duration><DurationFormat>7</DurationFormat><Summary>0</Summary></Task>
+    <!-- D-2: o arquivo não conhece o feriado de 07/09 (arquivo 07/09 a 11/09; calculado 08/09 a 14/09) -->
+    <Task><UID>2</UID><ID>2</ID><Name>T2 Estrutura</Name><Type>1</Type><IsNull>0</IsNull><WBS>2</WBS><OutlineNumber>2</OutlineNumber><OutlineLevel>1</OutlineLevel><Start>2026-09-07T08:00:00</Start><Finish>2026-09-11T17:00:00</Finish><Duration>PT40H0M0S</Duration><DurationFormat>7</DurationFormat><Summary>0</Summary><PredecessorLink><PredecessorUID>1</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink></Task>
+    <!-- D-3: efeito da predecessora 2 (arquivo 14/09 a 15/09; calculado 15/09 a 16/09) -->
+    <Task><UID>3</UID><ID>3</ID><Name>T3 Alvenaria</Name><Type>1</Type><IsNull>0</IsNull><WBS>3</WBS><OutlineNumber>3</OutlineNumber><OutlineLevel>1</OutlineLevel><Start>2026-09-14T08:00:00</Start><Finish>2026-09-15T17:00:00</Finish><Duration>PT16H0M0S</Duration><DurationFormat>7</DurationFormat><Summary>0</Summary><PredecessorLink><PredecessorUID>2</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink></Task>
+    <!-- D-4: agendada manualmente (arquivo 14/09 a 15/09; calculado 08/09 a 09/09) -->
+    <Task><UID>4</UID><ID>4</ID><Name>T4 Instalações</Name><Active>1</Active><Manual>1</Manual><Type>1</Type><IsNull>0</IsNull><WBS>4</WBS><OutlineNumber>4</OutlineNumber><OutlineLevel>1</OutlineLevel><Start>2026-09-14T08:00:00</Start><Finish>2026-09-15T17:00:00</Finish><Duration>PT16H0M0S</Duration><DurationFormat>7</DurationFormat><Summary>0</Summary><PredecessorLink><PredecessorUID>1</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink></Task>
+    <!-- D-6: sucessora da manual (arquivo 16/09; calculado 10/09) -->
+    <Task><UID>5</UID><ID>5</ID><Name>T5 Revestimento</Name><Type>1</Type><IsNull>0</IsNull><WBS>5</WBS><OutlineNumber>5</OutlineNumber><OutlineLevel>1</OutlineLevel><Start>2026-09-16T08:00:00</Start><Finish>2026-09-16T17:00:00</Finish><Duration>PT8H0M0S</Duration><DurationFormat>7</DurationFormat><Summary>0</Summary><PredecessorLink><PredecessorUID>4</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink></Task>
+  </Tasks>
+</Project>

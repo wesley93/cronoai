@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { AlertTriangle, ChevronRight, GitBranch, KeyRound, ShieldCheck, Sparkles, Network, RotateCcw } from '@lucide/vue'
+import { AlarmClockOff, AlertTriangle, ChevronRight, GitBranch, KeyRound, Lock, ShieldCheck, Sparkles, Network, RotateCcw } from '@lucide/vue'
 import type { ScenarioKind } from '@/types/domain'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
@@ -8,6 +8,7 @@ import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import GanttChart from '@/components/gantt/GanttChart.vue'
 import ScenarioCard from './critical/ScenarioCard.vue'
+import DivergenciasPainel from './critical/DivergenciasPainel.vue'
 import { fmtBRL, fmtDate, fmtDateLong, fmtDiasUteis, fmtFolga } from '@/lib/format'
 import { describeLink, formatPredecessors } from '@/lib/wbs'
 
@@ -15,6 +16,8 @@ const project = useProjectStore()
 const ui = useUiStore()
 const delay = computed(() => project.delay)
 const onlyCritical = ref(false)
+/** Alguma tarefa folha tem as datas do arquivo MSPDI: só então há o que comparar no painel de divergências. */
+const temDatasDoArquivo = computed(() => project.leaves.some((t) => !!t.arquivo?.inicio))
 
 const affectedUids = computed(() => [delay.value.origin?.uid, ...delay.value.affected.map((a) => a.uid)].filter((x): x is number => x !== undefined))
 const ganttTasks = computed(() => (onlyCritical.value ? project.tasksByWbs.filter((t) => t.isSummary || project.schedule.byUid.get(t.uid)?.critical) : project.tasksByWbs))
@@ -249,10 +252,15 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
               <span v-if="row.t.percentComplete >= 100" class="chip-neutral">Concluída</span>
               <span v-else-if="row.s.critical" class="chip-critical">Crítica</span>
               <span v-else class="chip-ok">Folga {{ fmtFolga(row.s.folgaTotalMin, row.s.corrida, project.minutosPorDia) }}</span>
+              <span v-if="row.s.prazoFinalPerdido" class="chip-critical ml-1" title="O término calculado passa do prazo final"><AlarmClockOff class="h-3 w-3" aria-hidden="true" /> Prazo perdido</span>
+              <span v-if="row.s.restricaoConflito" class="chip-warn ml-1" title="A restrição prevalece sobre o vínculo com a predecessora"><Lock class="h-3 w-3" aria-hidden="true" /> Restrição em conflito</span>
             </td>
           </tr>
         </tbody>
       </table>
     </SectionCard>
+
+    <!-- Divergências com o arquivo do MS Project -->
+    <DivergenciasPainel :divergencias="project.divergencias" :tem-datas-do-arquivo="temDatasDoArquivo" />
   </div>
 </template>

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { TableProperties, Save, History, Download, Upload, Search } from '@lucide/vue'
+import { AlarmClockOff, Lock, TableProperties, Save, History, Download, Upload, Search } from '@lucide/vue'
 import type { Task } from '@/types/domain'
-import { useProjectStore } from '@/stores/useProjectStore'
+import { useProjectStore, type ResultadoAcao } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import { useMsProject } from '@/lib/useMsProject'
 import ModuleHeader from '@/components/common/ModuleHeader.vue'
@@ -11,6 +11,7 @@ import ProgressBar from '@/components/common/ProgressBar.vue'
 import { fmtBRL, fmtDate, fmtFolga } from '@/lib/format'
 import { diasParaMinutos, minutosParaDias } from '@/lib/calendarioTrabalho'
 import { formatPredecessors } from '@/lib/wbs'
+import { ROTULO_RESTRICAO, TIPOS_RESTRICAO, restricaoTemData, tipoDaRestricao, type TipoRestricaoTela } from '@/lib/restricoes'
 
 const project = useProjectStore()
 const ui = useUiStore()
@@ -42,6 +43,38 @@ function edit(t: Task, field: 'percentComplete' | 'durationDays' | 'bac' | 'actu
   if (v === t[field]) return
   project.updateTask(t.uid, { [field]: v })
 }
+
+/** Erro de uma edição recusada pela store (restrição, prazo ou calendário inválidos) vira aviso em português. */
+function responder(r: ResultadoAcao) {
+  if (!r.ok) ui.notify('error', 'Alteração não aplicada', r.erro)
+}
+
+/** Muda o tipo da restrição; os tipos com data usam a data atual da restrição ou, na falta, o início calculado da tarefa. */
+function mudarTipoRestricao(t: Task, tipo: string) {
+  if (!restricaoTemData(tipo)) return responder(project.definirRestricao(t.uid, tipo as TipoRestricaoTela))
+  const atual = t.restricao && 'data' in t.restricao ? t.restricao.data : undefined
+  responder(project.definirRestricao(t.uid, tipo as TipoRestricaoTela, atual ?? project.schedule.byUid.get(t.uid)?.start ?? project.state.meta.startDate))
+}
+
+/** Troca só a data (o campo de data não tem hora): preserva a hora de uma restrição ou prazo que veio do arquivo com hora. */
+const comHoraDe = (antigo: string | undefined, novaData: string) => (antigo && antigo.length > 10 ? novaData + antigo.slice(10) : novaData)
+
+function mudarDataRestricao(t: Task, valor: string) {
+  if (!valor) return
+  const atual = t.restricao && 'data' in t.restricao ? t.restricao.data : undefined
+  responder(project.definirRestricao(t.uid, tipoDaRestricao(t.restricao), comHoraDe(atual, valor)))
+}
+
+function mudarPrazoFinal(t: Task, valor: string) {
+  responder(project.definirPrazoFinal(t.uid, valor ? comHoraDe(t.prazoFinal, valor) : undefined))
+}
+
+function mudarCalendario(t: Task, valor: string) {
+  responder(project.definirCalendarioTarefa(t.uid, valor === '' ? undefined : Number(valor)))
+}
+
+const calendariosAlternativos = computed(() => project.state.calendarios.filter((c) => c.uid !== project.state.calendarioPadraoUid))
+const nomeCalendarioPadrao = computed(() => project.state.calendarios.find((c) => c.uid === project.state.calendarioPadraoUid)?.nome ?? '')
 
 function saveBaseline() {
   if (window.confirm('Substituir a linha de base pelo cronograma reprogramado atual? A variação passará a ser medida a partir dele.')) {
@@ -103,7 +136,7 @@ const ac = (t: Task) => (t.isSummary ? (project.rollups.get(t.uid)?.actualCost ?
           <tr>
             <th>UID</th><th>EAP</th><th class="min-w-[260px]">Nome</th><th class="text-right">Dur.</th><th>Início</th><th>Término</th><th>LB término</th>
             <th class="min-w-[130px]">% concl.</th><th>Início real</th><th class="text-right">BAC (R$)</th><th class="text-right">Custo real (R$)</th>
-            <th>Predec.</th><th>Recursos</th><th>SINAPI</th><th class="text-right">Folga</th>
+            <th>Predec.</th><th class="min-w-[230px]">Restrição</th><th class="min-w-[140px]">Prazo final</th><th class="min-w-[160px]">Calendário</th><th>Recursos</th><th>SINAPI</th><th class="text-right">Folga</th>
           </tr>
         </thead>
         <tbody>
@@ -112,6 +145,8 @@ const ac = (t: Task) => (t.isSummary ? (project.rollups.get(t.uid)?.actualCost ?
             <td class="mono">{{ t.wbs }}</td>
             <td :style="{ paddingLeft: `${12 + (t.outlineLevel - 1) * 14}px` }">
               <span :class="!t.isSummary && project.schedule.byUid.get(t.uid)?.critical ? 'text-coral-600 dark:text-coral-400' : ''">{{ t.name }}</span>
+              <span v-if="!t.isSummary && project.schedule.byUid.get(t.uid)?.prazoFinalPerdido" class="chip-critical ml-2" title="O término calculado passa do prazo final"><AlarmClockOff class="h-3 w-3" aria-hidden="true" /> Prazo perdido</span>
+              <span v-if="!t.isSummary && project.schedule.byUid.get(t.uid)?.restricaoConflito" class="chip-warn ml-1" title="A restrição prevalece sobre o vínculo com a predecessora"><Lock class="h-3 w-3" aria-hidden="true" /> Restrição em conflito</span>
             </td>
             <td class="text-right">
               <input v-if="!t.isSummary" :value="minutosParaDias(t.duracaoMin, project.minutosPorDia)" class="w-14 rounded border border-transparent bg-transparent px-1 text-right tabular-nums hover:border-zinc-300 focus:border-amber-400 focus:outline-none dark:hover:border-zinc-700" aria-label="Duração" @change="edit(t, 'durationDays', ($event.target as HTMLInputElement).value)" />
@@ -137,6 +172,23 @@ const ac = (t: Task) => (t.isSummary ? (project.rollups.get(t.uid)?.actualCost ?
               <span v-else class="tabular-nums">{{ fmtBRL(ac(t)) }}</span>
             </td>
             <td class="mono">{{ formatPredecessors(t, project.minutosPorDia) }}</td>
+            <td>
+              <div v-if="!t.isSummary" class="flex items-center gap-1">
+                <select :value="tipoDaRestricao(t.restricao)" class="rounded border border-transparent bg-transparent px-1 hover:border-zinc-300 focus:border-amber-400 focus:outline-none dark:hover:border-zinc-700 text-[11px]" aria-label="Tipo de restrição" @change="mudarTipoRestricao(t, ($event.target as HTMLSelectElement).value)">
+                  <option v-for="tipo in TIPOS_RESTRICAO" :key="tipo" :value="tipo">{{ ROTULO_RESTRICAO[tipo] }}</option>
+                </select>
+                <input v-if="t.restricao && 'data' in t.restricao" :value="t.restricao.data.slice(0, 10)" type="date" class="rounded border border-transparent bg-transparent px-1 hover:border-zinc-300 focus:border-amber-400 focus:outline-none dark:hover:border-zinc-700 text-[11px]" aria-label="Data da restrição" @change="mudarDataRestricao(t, ($event.target as HTMLInputElement).value)" />
+              </div>
+            </td>
+            <td>
+              <input v-if="!t.isSummary" :value="t.prazoFinal?.slice(0, 10) ?? ''" type="date" class="rounded border border-transparent bg-transparent px-1 hover:border-zinc-300 focus:border-amber-400 focus:outline-none dark:hover:border-zinc-700 text-[11px]" aria-label="Prazo final" @change="mudarPrazoFinal(t, ($event.target as HTMLInputElement).value)" />
+            </td>
+            <td>
+              <select v-if="!t.isSummary" :value="t.calendarioUid ?? ''" class="rounded border border-transparent bg-transparent px-1 hover:border-zinc-300 focus:border-amber-400 focus:outline-none dark:hover:border-zinc-700 text-[11px]" aria-label="Calendário da tarefa" @change="mudarCalendario(t, ($event.target as HTMLSelectElement).value)">
+                <option value="">Padrão da obra ({{ nomeCalendarioPadrao }})</option>
+                <option v-for="c in calendariosAlternativos" :key="c.uid" :value="c.uid">{{ c.nome }}</option>
+              </select>
+            </td>
             <td class="max-w-[180px] truncate text-[11px] text-zinc-500" :title="t.resources.map((r) => `${r.units} ${r.resource}`).join(', ')">{{ t.resources.map((r) => `${r.units} ${r.resource}`).join(', ') }}</td>
             <td class="mono">{{ t.sinapi }}</td>
             <td class="text-right tabular-nums">

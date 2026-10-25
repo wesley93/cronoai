@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import fixtureDivergencias from '@/lib/__fixtures__/mspdi-divergencias.xml?raw'
 import { useProjectStore } from './useProjectStore'
 
 describe('useProjectStore · visão MS Project', () => {
@@ -95,5 +96,93 @@ describe('useProjectStore · visão MS Project', () => {
     store.updateTask(402, { predecessors: [{ uid: 401, type: 'SS', lag: { tipo: 'percentual', percentual: 50 } }] })
     expect(store.msProjectTask(402)!.Predecessors).toEqual([{ PredecessorUID: 401, Type: 'SS', LagDays: 0, LinkLag: 50, LagFormat: 19 }])
   })
-})
 
+  // ---------------------------------------------------------------- Ciclo 00004, E4: divergências e edição de cronograma
+  const sabado4h = (store: ReturnType<typeof useProjectStore>) => {
+    const padrao = store.state.calendarios[0]
+    store.state.calendarios.push({ ...padrao, uid: 2, nome: 'Sábado 4 h', semana: padrao.semana.map((d, i) => (i === 6 ? [{ de: 480, ate: 720 }] : d)) })
+  }
+
+  it('AC-12: o painel lista as divergências da fixture importada com as causas e as diferenças em d.u.', () => {
+    const store = useProjectStore()
+    expect(store.divergencias).toEqual([]) // obra de exemplo: nada veio de arquivo
+    store.importXml(fixtureDivergencias)
+    const d = (uid: number) => store.divergencias.find((x) => x.uid === uid)!
+    expect(store.divergencias.map((x) => x.uid)).toEqual([2, 3, 4, 5]) // D-1 (T1) é igual ao arquivo
+    expect([d(2).causa, d(2).diferencaTerminoDu]).toEqual(['feriado', 1]) // D-2
+    expect([d(3).causa, d(3).predecessoraUid, d(3).diferencaTerminoDu]).toEqual(['predecessora', 2, 1]) // D-3
+    expect([d(4).causa, d(4).diferencaTerminoDu]).toEqual(['manual', -4]) // D-4
+    expect([d(5).causa, d(5).predecessoraUid, d(5).diferencaTerminoDu]).toEqual(['predecessora', 4, -4]) // D-6
+    // D-5: depois de importar, a duração da T1 passa a 6 d
+    store.updateTask(1, { duracaoMin: 6 * 480 })
+    expect([d(1).terminoCalculado, d(1).terminoArquivo, d(1).diferencaTerminoDu, d(1).causa]).toEqual(['2026-09-08', '2026-09-04', 1, 'alterada'])
+    expect(store.state.meta.feriadosNacionaisAplicados).toBe(true)
+  })
+
+  it('AC-13: definirRestricao valida tipo e data, recusa resumo e tarefa inexistente, e ASAP remove a restrição', () => {
+    const store = useProjectStore()
+    expect(store.definirRestricao(105, 'MSO', 'ontem')).toEqual({ ok: false, erro: 'Informe uma data válida (aaaa-mm-dd, ou aaaa-mm-ddThh:mm com a hora).' })
+    expect(store.definirRestricao(105, 'SNET', undefined).ok).toBe(false)
+    expect(store.definirRestricao(105, 'SNET', '9999-12-31')).toEqual({ ok: false, erro: 'A data deve estar a menos de 45 anos do início da obra.' })
+    expect(store.definirRestricao(105, 'XYZ' as 'SNET', '2026-12-01')).toEqual({ ok: false, erro: 'Tipo de restrição desconhecido.' })
+    expect(store.definirRestricao(999, 'ALAP')).toEqual({ ok: false, erro: 'Tarefa não encontrada.' })
+    expect(store.definirRestricao(1, 'ALAP')).toEqual({ ok: false, erro: 'Restrição, prazo e calendário só valem para tarefas folha.' }) // UID 1 é resumo
+    expect(store.taskByUid.get(105)!.restricao).toBeUndefined()
+    // Válida: 105 não pode começar antes de 01/12/2026 (era 05/11)
+    expect(store.definirRestricao(105, 'SNET', '2026-12-01')).toEqual({ ok: true })
+    expect(store.taskByUid.get(105)!.restricao).toEqual({ tipo: 'SNET', data: '2026-12-01' })
+    expect(store.schedule.byUid.get(105)!.start).toBe('2026-12-01')
+    expect(store.state.log[0].title).toBe('Restrição alterada: [UID 105] 03.01.03')
+    expect(store.definirRestricao(105, 'ASAP')).toEqual({ ok: true })
+    expect(Object.keys(store.taskByUid.get(105)!)).not.toContain('restricao')
+    expect(store.schedule.projectFinish).toBe('2027-06-23')
+    expect(store.definirRestricao(105, 'ALAP')).toEqual({ ok: true })
+    expect(store.taskByUid.get(105)!.restricao).toEqual({ tipo: 'ALAP' })
+  })
+
+  it('AC-13: definirPrazoFinal acende o indicador sem mover a tarefa e o vazio remove o prazo', () => {
+    const store = useProjectStore()
+    expect(store.definirPrazoFinal(105, 'x')).toEqual({ ok: false, erro: 'Informe uma data válida (aaaa-mm-dd, ou aaaa-mm-ddThh:mm com a hora).' })
+    expect(store.schedule.byUid.get(105)!.prazoFinalPerdido).toBe(false)
+    expect(store.definirPrazoFinal(105, '2026-11-20')).toEqual({ ok: true })
+    const t = store.schedule.byUid.get(105)!
+    // A 105 termina 30/11 (09:36) e o prazo é 20/11 às 17:00: perdido, sem mover a tarefa; folga de -2.496 min (5 dias + 96 min antes do prazo)
+    expect([t.prazoFinalPerdido, t.finish, t.critical, t.folgaTotalMin]).toEqual([true, '2026-11-30', true, -2496])
+    expect(store.schedule.projectFinish).toBe('2027-06-23')
+    expect(store.definirPrazoFinal(105, '2027-12-31')).toEqual({ ok: true })
+    expect(store.schedule.byUid.get(105)!.prazoFinalPerdido).toBe(false)
+    expect(store.definirPrazoFinal(105, '')).toEqual({ ok: true })
+    expect(Object.keys(store.taskByUid.get(105)!)).not.toContain('prazoFinal')
+    expect(store.definirPrazoFinal(1, '2026-12-31').ok).toBe(false) // resumo
+  })
+
+  it('AC-13: definirCalendarioTarefa recusa calendário inexistente e aceita um existente (CR-2c no cálculo da obra)', () => {
+    const store = useProjectStore()
+    expect(store.definirCalendarioTarefa(105, 2)).toEqual({ ok: false, erro: 'O calendário escolhido não existe nesta obra.' })
+    sabado4h(store)
+    expect(store.definirCalendarioTarefa(105, 2)).toEqual({ ok: true })
+    const t = store.schedule.byUid.get(105)!
+    // 105 (16 d) com sábado de 4 h termina 26/11 às 14:36 e a entrega antecipa 2 d.u.
+    expect([t.finish, t.terminoHora, store.schedule.projectFinish, store.delay.delayDays]).toEqual(['2026-11-26', '14:36', '2027-06-21', 14])
+    expect(store.definirCalendarioTarefa(105, store.state.calendarioPadraoUid)).toEqual({ ok: true }) // o padrão não grava calendarioUid
+    expect(Object.keys(store.taskByUid.get(105)!)).not.toContain('calendarioUid')
+    expect(store.schedule.projectFinish).toBe('2027-06-23')
+  })
+
+  it('definirOpcoesCronograma valida, grava só o que foge do padrão e o formulário da obra usa as mesmas regras', () => {
+    const store = useProjectStore()
+    expect(store.definirOpcoesCronograma({ logica: 'x' as 'retida', moverRestante: true }).ok).toBe(false)
+    expect(store.definirOpcoesCronograma({ logica: 'retida', moverRestante: 'sim' as unknown as boolean }).ok).toBe(false)
+    expect(store.definirOpcoesCronograma({ logica: 'substituir', moverRestante: true })).toEqual({ ok: true })
+    expect(store.state.meta.opcoesCronograma).toEqual({ logica: 'substituir', moverRestante: true })
+    expect(store.state.log[0].title).toBe('Opções de cronograma alteradas')
+    expect(store.definirOpcoesCronograma({ logica: 'retida', moverRestante: true })).toEqual({ ok: true })
+    expect(store.state.meta.opcoesCronograma).toBeUndefined() // o padrão fica ausente, como no seed
+    const m = store.state.meta
+    const dados = { nome: m.name, responsavel: m.manager, dataInicio: m.startDate, dataStatus: m.statusDate }
+    expect(store.atualizarDadosObra({ ...dados, logicaProgresso: 'retida', moverRestante: false })).toEqual({ ok: true })
+    expect(store.state.meta.opcoesCronograma).toEqual({ logica: 'retida', moverRestante: false })
+    expect(store.schedule.projectFinish).toBe('2027-06-09')
+    expect(store.atualizarDadosObra({ ...dados, logicaProgresso: 'x' as 'retida' })).toEqual({ ok: false, erros: ['Selecione uma lógica de progresso válida.'] })
+  })
+})
