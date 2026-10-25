@@ -23,6 +23,24 @@ public sealed class NomeExibicaoTestes
 
     private const string Emoji = "\U0001F600";
 
+    private const string FuncaoDoGatilho = """
+        CREATE FUNCTION cronoai.t_nome_falha() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.nome_exibicao = 'nome-que-explode' THEN
+            RAISE EXCEPTION 'falha simulada' USING ERRCODE = '40001';
+          ELSIF NEW.nome_exibicao = 'nome-erro-comum' THEN
+            RAISE EXCEPTION 'erro comum';
+          ELSIF NEW.nome_exibicao = 'nome-outra-constraint' THEN
+            RAISE EXCEPTION 'outra constraint' USING ERRCODE = '23514', CONSTRAINT = 'ck_outra_constraint';
+          ELSIF NEW.nome_exibicao = 'nome-limite-do-nome' THEN
+            RAISE EXCEPTION 'limite do nome' USING ERRCODE = '23514', CONSTRAINT = 'ck_usuario_nome_tamanho';
+          ELSIF NEW.nome_exibicao = 'nome-rejeitado' THEN
+            RAISE EXCEPTION 'nome rejeitado' USING ERRCODE = '22021';
+          END IF;
+          RETURN NEW;
+        END $$
+        """;
+
     private readonly BancoPostgresFixture _banco;
 
     #endregion
@@ -49,6 +67,7 @@ public sealed class NomeExibicaoTestes
     }
 
     [Theory]
+    [InlineData(0x061C)] // ARABIC LETTER MARK (Bidi_Control)
     [InlineData(0x200E)]
     [InlineData(0x200F)]
     [InlineData(0x202A)]
@@ -167,11 +186,13 @@ public sealed class NomeExibicaoTestes
     [Theory]
     [InlineData("nome-que-explode", "40001")] // serialization_failure (transitório)
     [InlineData("nome-erro-comum", "P0001")] // raise_exception genérico
+    [InlineData("nome-outra-constraint", "23514")] // check_violation de OUTRA constraint: não é o nome
     public async Task Erro_que_nao_e_do_nome_propaga_e_o_nome_gravado_continua_intacto(string nomeQueDisparaOGatilho, string sqlStateEsperado)
     {
-        // Falha REAL do banco, com SQLSTATE que nada tem a ver com o nome (40001, serialization_failure), disparada por
-        // um gatilho de teste. Antes (catch de qualquer PostgresException) o login tentava de novo com nome nulo e APAGAVA
-        // o nome já gravado: este teste falha com o catch antigo (verificado por mutação, ver registro da rodada).
+        // Falha REAL do banco que não é rejeição do nome, disparada por um gatilho de teste: 40001 (serialization_failure,
+        // chega embrulhada em InvalidOperationException), P0001 (raise_exception, chega direta) e 23514 de OUTRA constraint.
+        // Antes (catch de qualquer PostgresException) o login tentava de novo com nome nulo e APAGAVA o nome já gravado:
+        // o caso P0001 falha com o catch antigo (verificado por mutação, ver registro da rodada).
         var servico = CriarServico();
         var sujeito = "sub-" + Guid.NewGuid().ToString("N");
         var consultas = new ConsultasIdentidade(_banco.FabricaApp);
@@ -187,14 +208,16 @@ public sealed class NomeExibicaoTestes
         Assert.Equal("Nome Original", await consultas.ObterNomeExibicaoAsync(original.UsuarioId, TestContext.Current.CancellationToken));
     }
 
-    [Fact]
-    public async Task Nome_rejeitado_pelo_banco_com_22021_grava_nulo_sem_recusar_o_login()
+    [Theory]
+    [InlineData("nome-rejeitado")] // 22021 (character_not_in_repertoire)
+    [InlineData("nome-limite-do-nome")] // 23514 da constraint ck_usuario_nome_tamanho
+    public async Task Nome_rejeitado_pelo_banco_grava_nulo_sem_recusar_o_login(string nomeQueDisparaOGatilho)
     {
         var servico = CriarServico();
         var sujeito = "sub-" + Guid.NewGuid().ToString("N");
 
         await using var gatilho = await GatilhoDeFalhaAsync();
-        var resultado = await servico.EntrarAsync("https://idp-nome.teste", sujeito, "nome-rejeitado", desenvolvimento: false, cancelamento: TestContext.Current.CancellationToken);
+        var resultado = await servico.EntrarAsync("https://idp-nome.teste", sujeito, nomeQueDisparaOGatilho, desenvolvimento: false, cancelamento: TestContext.Current.CancellationToken);
 
         Assert.NotNull(resultado);
         Assert.Null(await new ConsultasIdentidade(_banco.FabricaApp).ObterNomeExibicaoAsync(resultado.UsuarioId, TestContext.Current.CancellationToken));
@@ -237,18 +260,27 @@ public sealed class NomeExibicaoTestes
     private async Task<GatilhoTemporario> GatilhoDeFalhaAsync()
     {
         var conexao = new NpgsqlConnection(_banco.StringConexaoMigrador);
-        await conexao.OpenAsync(TestContext.Current.CancellationToken);
-        foreach (var sql in new[]
+        var gatilho = new GatilhoTemporario(conexao);
+        try
         {
-            "CREATE FUNCTION cronoai.t_nome_falha() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.nome_exibicao = 'nome-que-explode' THEN RAISE EXCEPTION 'falha simulada' USING ERRCODE = '40001'; ELSIF NEW.nome_exibicao = 'nome-erro-comum' THEN RAISE EXCEPTION 'erro comum'; ELSIF NEW.nome_exibicao = 'nome-rejeitado' THEN RAISE EXCEPTION 'nome rejeitado' USING ERRCODE = '22021'; END IF; RETURN NEW; END $$",
-            "CREATE TRIGGER t_nome_falha BEFORE INSERT OR UPDATE ON cronoai.usuario FOR EACH ROW EXECUTE FUNCTION cronoai.t_nome_falha()",
-        })
-        {
-            await using var comando = new NpgsqlCommand(sql, conexao);
-            await comando.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            await conexao.OpenAsync(TestContext.Current.CancellationToken);
+            await Executar(conexao, FuncaoDoGatilho);
+            gatilho.FuncaoCriada = true;
+            await Executar(conexao, "CREATE TRIGGER t_nome_falha BEFORE INSERT OR UPDATE ON cronoai.usuario FOR EACH ROW EXECUTE FUNCTION cronoai.t_nome_falha()");
+            return gatilho;
         }
+        catch
+        {
+            // Falha depois do CREATE FUNCTION (ou antes): remove o que foi criado e fecha a conexão, sem mascarar o erro original.
+            await gatilho.DisposeAsync();
+            throw;
+        }
+    }
 
-        return new GatilhoTemporario(conexao);
+    private static async Task Executar(NpgsqlConnection conexao, string sql)
+    {
+        await using var comando = new NpgsqlCommand(sql, conexao);
+        await comando.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
     private static async Task<string?> LerNomeAsync(HttpClient navegador)
@@ -271,15 +303,30 @@ public sealed class NomeExibicaoTestes
             _conexao = conexao;
         }
 
+        /// <summary>Se a função já foi criada (o gatilho só existe se o CREATE TRIGGER também passou; o DROP usa IF EXISTS).</summary>
+        public bool FuncaoCriada { get; set; }
+
+        // Cada passo em try/finally: um DROP que falhe não impede o outro nem o fechamento da conexão.
         public async ValueTask DisposeAsync()
         {
-            foreach (var sql in new[] { "DROP TRIGGER IF EXISTS t_nome_falha ON cronoai.usuario", "DROP FUNCTION IF EXISTS cronoai.t_nome_falha()" })
+            try
             {
-                await using var comando = new NpgsqlCommand(sql, _conexao);
-                await comando.ExecuteNonQueryAsync();
+                if (FuncaoCriada)
+                {
+                    try
+                    {
+                        await Executar(_conexao, "DROP TRIGGER IF EXISTS t_nome_falha ON cronoai.usuario");
+                    }
+                    finally
+                    {
+                        await Executar(_conexao, "DROP FUNCTION IF EXISTS cronoai.t_nome_falha()");
+                    }
+                }
             }
-
-            await _conexao.DisposeAsync();
+            finally
+            {
+                await _conexao.DisposeAsync();
+            }
         }
     }
 

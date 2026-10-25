@@ -100,7 +100,7 @@ public sealed class ServicoLogin
 
     /// <summary>
     /// Nome de exibição do provedor, sem caracteres de controle (inclui U+0000, que o PostgreSQL não grava), sem
-    /// controles bidirecionais (U+200E, U+200F, U+202A a U+202E e U+2066 a U+2069: invertem a ordem de exibição e
+    /// controles bidirecionais (U+061C, U+200E, U+200F, U+202A a U+202E e U+2066 a U+2069: invertem a ordem de exibição e
     /// permitem forjar nomes) e sem surrogates órfãos (UTF-16 inválido, que não vira UTF-8). Cortado por elemento de
     /// texto (nunca parte um par substituto nem um grafema) em até o limite do domínio. Vazio vira nulo.
     /// </summary>
@@ -176,7 +176,7 @@ public sealed class ServicoLogin
     /// Erro que é rejeição do NOME: falha de codificação, <c>22021</c> (character_not_in_repertoire) ou <c>23514</c>
     /// só da constraint <c>ck_usuario_nome_tamanho</c>. Procura na cadeia de exceções internas.
     /// </summary>
-    public static bool NomeRejeitado(Exception erro)
+    private static bool NomeRejeitado(Exception erro)
     {
         for (var atual = erro; atual is not null; atual = atual.InnerException)
         {
@@ -200,7 +200,7 @@ public sealed class ServicoLogin
     }
 
     private static bool EhControleBidirecional(char c) =>
-        c is '\u200E' or '\u200F' || (c >= '\u202A' && c <= '\u202E') || (c >= '\u2066' && c <= '\u2069');
+        c is '\u061C' or '\u200E' or '\u200F' || (c >= '\u202A' && c <= '\u202E') || (c >= '\u2066' && c <= '\u2069');
 
     #endregion
 }

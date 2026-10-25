@@ -1,0 +1,229 @@
+---
+issue: —
+spec: SPEC-02 (RF-02.1, RF-02.2 base, RF-02.3b, RNF-02.1, RNF-02.2 parcial, RNF-02.3), SPEC-01 (RF-01.1, RF-01.1a), SPEC-12 (RF-12.5, RF-12.9), ASVS 5.0.0 V6–V10, PLANO-FASE-2 §5.2 e §8
+branch: feat/00012-identidade-empresas
+base: feat/00011-backend-esqueleto (PR empilhado enquanto o 00011 não entrar na master)
+faixa: 3 (T5, T8)
+ficha_ou_plano: .claude/ciclos/00012-identidade-empresas-plano.md
+inicio: 2026-10-25
+---
+
+> Adaptado de Sophia.Escolar.Hibrido / SophIA (`.claude/templates/TEMPLATE-CICLO.md`) para o CronoAI em 25/10/2026.
+
+> **RASCUNHO.** A rodada 04 e a auditoria independente ainda não terminaram. Os campos "A PREENCHER" dependem delas.
+
+# Ciclo 00012 — Identidade (OIDC genérico + usuário de desenvolvimento), empresas e isolamento em toda rota
+
+## Resumo
+- **O que é:** o backend passa a saber quem chama e de qual empresa. Contém:
+  - login OIDC genérico (código + PKCE S256), sem provedor fixo no código;
+  - usuário de desenvolvimento só em `Development` com a flag; fora dele, a API não sobe;
+  - sessão em cookie `__Host-cronoai-sessao` (`HttpOnly`, `Secure`, `SameSite=Lax`), revogável no servidor, sem token no navegador;
+  - tabelas `empresa`, `usuario`, `membro_empresa` e `sessao`, com RLS forçado e filtro global do EF;
+  - `GET /api/v1/eu` e `GET`/`PUT /api/v1/empresas/atual`;
+  - teste que enumera toda rota registrada e reprova rota sem cenário de isolamento;
+  - testes de pool provando que a conexão reciclada não carrega a empresa do dono anterior;
+  - regras R14 a R17 no `validar-regras`; ADRs 00005 e 00006.
+- **Decidido:**
+  - gate G1 = (a) emissor OIDC em memória nos testes; G2 = (a) empresa só pela semente e pelos testes; G3 = (a) tabela `sessao` revogável;
+  - decisões de design do plano §15 (RLS + filtro + coluna com `FORCE`, 404 entre empresas, sem e-mail nem `cnpj`, `/api/v1/eu`, `SaveTokens = false`, `SameSite=Lax`, `usuario` fora do RLS até o 00014, id de sessão uuid v4 por CSPRNG, retenção de 30 dias);
+  - emenda 01: os 10 ajustes do parecer do `dba` (`00012-tarefa0-dba.md`, `VEREDITO: AJUSTAR`);
+  - rodada 02: semente exige só `Development` (B1, opção a); S-9 redefinida (vale o `ShowPII = false` explícito);
+  - rodada 03: remoção dos controles bidirecionais antecipada do 00014 para este ciclo;
+  - rodada 04: U+061C incluído na lista.
+  - Todas: **decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR.** Os ADRs 00005 e 00006 ficam "Proposto" até o aceite do usuário.
+  - R2-3 (404 inalcançável removido do `GET /empresas/atual`): escolha do dev, aceita pelo `arquiteto` e pelo orquestrador, também sujeita à revisão no PR.
+- **O que você precisa fazer:**
+  - revisar no PR o gate, as decisões de design e as decisões das rodadas;
+  - fazer merge da `master` antes do PR; o PR é empilhado em `feat/00011-backend-esqueleto` se o 00011 não tiver entrado;
+  - conferir os jobs do backend e o CodeQL C# verdes no PR;
+  - levar à **Segurança da Informação**, ao **Jurídico** e à **Infraestrutura** os itens da última seção.
+- **Estado:** em validação: rodada 04 e auditoria pendentes.
+
+## Pedido
+"Pode fazer todas as fases" → PLANO-FASE-2 §5.2, ciclo 00012.
+
+## Triagem
+- **T5 SIM:** pacote novo `Microsoft.AspNetCore.Authentication.OpenIdConnect`; dado pessoal `nome_exibicao` e o par emissor + `sub`; cookie de sessão; token externo validado.
+- **T8 SIM:** endpoints, autenticação e autorização, quatro tabelas, RLS e migração.
+- **T1–T4, T6, T7 NÃO:** sem cálculo, MSPDI, estado salvo do front, IA, compose, CI ou Dockerfile.
+- **Faixa 3.** O `classificar-diff.mjs` confirma: faixa 3, T8, `seguranca` obrigatório. `especialista-obra` não exigido.
+
+## Commits
+| SHA | Conteúdo |
+|---|---|
+| 5b466b6 | Plano do ciclo, parecer do `dba` (tarefa 0), gate e emenda 01 |
+| 0ac8599 | E1: domínio, empresas, usuários e sessões com RLS e filtro por empresa |
+| 9e929d3 | E2: login OIDC genérico, sessão em cookie, usuário de desenvolvimento, endpoints |
+| ed6ab0b | E3: isolamento entre empresas em toda rota registrada |
+| 74e41de | E4: ADRs 00005 e 00006, R14 a R17 no `validar-regras`, documentação |
+| 8634188 | Rodada 02: 14 itens (fluxo de código exigido, `TypedResults`, nome saneado, logout do handler desligado, novo login encerra a sessão anterior e outros) |
+| b5a3289 | Rodada 03: retry de nome só para rejeição do nome, `SessaoDoCookie` em `Sessao/`, 404 inalcançável removido, controles bidirecionais |
+| A PREENCHER | Rodada 04: `NomeRejeitado` privado, U+061C, testes dos ramos 23514, comentário do P0001, robustez dos gatilhos de teste |
+
+## Rodadas
+| Rodada | testes | arquiteto | dba | seguranca |
+|---|---|---|---|---|
+| 01 (74e41de) | APROVADO com ressalva: 146/146 na 2ª execução; na 1ª, 2 falhas instáveis em `DataProtectionTestes` | REPROVADO: M1 (`Results.*` em vez de `TypedResults`) e B1 (semente × `CLAUDE.md`); N1–N6 não bloqueiam | OK: 3 baixos; os 10 ajustes da tarefa 0 atendidos | REPROVADO: 1 Médio (fluxo de código não exigido), 1 Baixo (nome do provedor), 5 Info |
+| 02 (8634188) | APROVADO: 163/163 3x | REPROVADO: R2-1 (catch largo apaga o nome); R2-2 e R2-3 não bloqueiam | — | APROVADO: 1 Info (controles bidirecionais) |
+| 03 (b5a3289) | APROVADO: 179/179 3x | REPROVADO (2ª revisão): `public static NomeRejeitado` na região privada; 4 observações. A 1ª revisão desta rodada deu APROVADO, mas não foi entregue (ver "Ressalvas") | — | — |
+| 04 (A PREENCHER) | A PREENCHER | A PREENCHER | — | — |
+| auditoria (A PREENCHER) | — | — | — | A PREENCHER |
+
+### Testes do backend, antes → depois
+| Ponto | Total | Fonte |
+|---|---|---|
+| Fim do 00011 | 24 | registro do 00011 |
+| E1 (0ac8599) | 80 | `dev-backend` |
+| E2 (9e929d3) | 137 | `dev-backend` |
+| E3 (ed6ab0b) e E4 (74e41de) | 146 | `dev-backend`; `testes` r01: 146/146 na 2ª execução |
+| Rodada 02 (8634188) | 163 (+17) | `dev-backend` e `testes` r02, 3 execuções |
+| Rodada 03 (b5a3289) | 179 (+16, todos em `NomeExibicaoTestes`) | `dev-backend` e `testes` r03, 3 execuções |
+| Rodada 04 | A PREENCHER | A PREENCHER |
+
+Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 e 03.
+
+### Matriz de verificação (HEAD b5a3289; base: `testes` r03, com a evidência das rodadas 01 e 02 onde a r03 diz "mantido")
+
+| Item | Requisito | Verificação | Obrig. | Estado | Evidência |
+|---|---|---|---|---|---|
+| G-build | Build Release sem avisos | `dotnet build CronoAI.slnx -c Release --no-incremental` | sim | PASS | `0 Aviso(s) 0 Erro(s)` (r03) |
+| G-format | Format limpo | `dotnet format … --verify-no-changes` | sim | PASS | rc=0 (r03) |
+| G-restore | Lock files | `dotnet restore --locked-mode` | sim | PASS | todos os projetos restaurados, sem erro (r03) |
+| G-vuln | Sem pacote vulnerável | `dotnet list … --vulnerable --include-transitive` | sim | PASS | "não tem nenhum pacote vulnerável" nos 4 projetos (r03) |
+| G-pending | Sem migração pendente | `dotnet ef migrations has-pending-model-changes` com `Host=localhost;Database=cronoai;Username=ef_design` | sim | PASS | `No changes have been made to the model since the last migration.` (r03) |
+| G-openapi | Contrato bate com o build | `git diff --exit-code -- server/openapi/` depois do `--no-incremental` | sim | PASS | rc=0 e `git status` vazio; o `GET /empresas/atual` perdeu o 404 no código e o contrato não mudou (r03) |
+| G-test | Suíte completa, 3 execuções | `dotnet test --solution CronoAI.slnx -c Release --no-build` x3 | sim | PASS | run1, run2 e run3: `total: 179 falhou: 0 concluído com êxito: 179 ignorados: 0` (r03) |
+| G-node | Regras R14 a R17 | `node --test .claude/scripts/lib/regras-cronoai.test.mjs` | sim | PASS | `tests 40 pass 40 fail 0` (r03) |
+| G-regras | validar-regras | `validar-regras.mjs --base feat/00011-backend-esqueleto --commits` | sim | PASS | `138 arquivo(s) … 0 bloqueia, 0 alerta` (r03) |
+| G-lint / G-tsc | Lint e tipos do front | `npm run lint`, `npm run typecheck` | sim | PASS | rc=0 nos dois (r03) |
+| T-1 | Sem `Skip`, `Sleep`, `Task.Delay`, `Explicit` em `NomeExibicaoTestes.cs` | grep | sim | PASS | nenhuma ocorrência (r03) |
+| T-2 | Sem bidi nem U+FFFD cru no fonte | `grep -nP` pelos bytes UTF-8 | sim | PASS | rc=1 em `NomeExibicaoTestes.cs` e em todos os `.cs` de `server/`; valores montados por `(char)0x…` (r03) |
+| T-3 | Bidi e surrogates com valor exato | leitura | sim | PASS | Theory dos 11 pontos de código em duas posições; surrogate alto órfão, baixo órfão, invertido e par válido (r03) |
+| T-4 | Gatilho de teste sempre removido | leitura | sim | PASS (com ressalva) | `await using var gatilho = await GatilhoDeFalhaAsync()` nos 3 testes; coleção única `ColecaoBanco`. Ressalva: DDL do helper sem proteção → rodada 04 (r03) |
+| T-5 | Retry só para rejeição do nome | `Erro_que_nao_e_do_nome_propaga_e_o_nome_gravado_continua_intacto` (40001, P0001); `Nome_rejeitado_pelo_banco_com_22021_grava_nulo_sem_recusar_o_login` | sim | PASS | verdes; mutação feita pelo dev (catch antigo falha no P0001), não repetida pelo `testes` (r03) |
+| T-6 | Corte sem partir par substituto | `NomeSeguro_corta_sem_partir_par_substituto`, `Login_com_emoji_na_posicao_199_200…` | sim | PASS | posições 198, 199 e 200 com valor exato (r03) |
+| T-7 | `SessaoDoCookie` sem mudar comportamento | `Novo_login_no_mesmo_navegador_encerra_a_sessao_anterior`, `UsuarioDesenvolvimentoTestes`, V-1 | sim | PASS | verdes; cookie antigo 401 depois do 2º login (r03) |
+| T-8 | `GET /empresas/atual` sem 404 | `EmpresaAtualTestes`, `IsolamentoRotasTestes`, `PoolApiTestes` | sim | PASS | verdes; 403 `empresa-ativa-necessaria` sem empresa ativa (r03) |
+| AC-1 | Build, format, testes, OpenAPI | gates acima | sim | PASS | G-build, G-format, G-test, G-openapi (r03) |
+| AC-2 | Modelo, privilégios, migração | `MigracoesTestes`, `Dados/*Testes`, `has-pending-model-changes`, `database update` | sim | PASS | `Applying migration '20261025094206_Inicial'` e `'20261025113548_IdentidadeEmpresas'`, `Done.` (r01–r03). Catálogo real (`dba` r01): `cronoai_app` sem DELETE em `usuario`; só SELECT/INSERT em `empresa` e `membro_empresa`; DML completo só em `sessao`; nada no histórico |
+| AC-3 | `Restrict`, 63 bytes, precisão | `ArquiteturaTestes`, `CatalogoTestes` | sim | PASS | `Fks_do_schema_sao_restrict` com `NotEmpty`; `Identificadores_cabem_em_63_bytes` cobre também `pg_policies` (r01); laço `Restrict` por último em `CronoDbContext.cs:67-70` (`arquiteto` r01) |
+| AC-4 | RLS forçado, políticas exatas, dono sujeito, helper | `CatalogoTestes`, `RlsTestes`, `MigracaoDeDadosRlsTestes` | sim | PASS | lista exata de 8 políticas `{cronoai_app}`; dono com contexto vazio e setado (r01). `dba` r01: `relforcerowsecurity=t` em `empresa`, `membro_empresa`, `sessao`; helper volta o `FORCE` mesmo com erro no DML |
+| AC-5 | Filtro, listas permitidas, contexto imutável | `ArquiteturaTestes`, `FiltroEmpresaTestes`, `ContextoTestes`, R16 | sim | PASS | teste previsto dividido em `Contexto_do_banco_e_imutavel` e `Contexto_da_sessao_so_pode_ser_preenchido_uma_vez` (`ContextoTestes.cs:11,21`) (r01) |
+| AC-6 | Login OIDC, cookie, upsert, retenção | `OidcTestes`, `SessaoTestes` | sim | PASS | nomes previstos presentes (r01); upsert sem `COALESCE` com `Provedor_que_nao_manda_nome_grava_nulo_sem_manter_o_antigo` (8634188); mantido pelos 179/179 (r03) |
+| AC-7 | Tokens inválidos | `OidcNegativosTestes` | sim | PASS | Theory de 8 casos (outra chave, emissor, audiência, expirado, nonce, state, `alg` none, PKCE); afirma 401, sem cookie, 0 usuários, sem sujeito, código nem `id_token` no log; `Id_token_no_retorno_de_autorizacao_nao_cria_sessao` com e sem `code` (r02) |
+| AC-8 | Sem provedor fixo | `git grep -inE "microsoftonline\|login\.live\|accounts\.google\|keycloak\|okta\|auth0" -- server/src`; `Sem_autoridade_entrar_responde_503_e_api_sobe` | sim | PASS | grep vazio; teste verde (r01) |
+| AC-9 | Usuário de desenvolvimento e semente | `UsuarioDesenvolvimentoTestes`, `SementeDesenvolvimentoTestes`, V-1, V-2 | sim | PASS | semente 2x: `2\|3\|4` (usuários, empresas, vínculos); rota sem os dois interruptores responde 404 (8634188) (r01–r03) |
+| AC-10 | Expiração e revogação | `SessaoTestes`, `OidcTestes` | sim | PASS | 4 testes previstos (r01); `Novo_login_no_mesmo_navegador_encerra_a_sessao_anterior`: 1 sessão aberta de 2 (r02) |
+| AC-11 | Endpoints | `EuTestes`, `EmpresaAtualTestes`, `Dados/SessaoTestes` | sim | PASS | `/eu` 200, sem cookie 401; `/empresas/atual` sem empresa ativa 403; `Definir_empresa_ativa_de_quem_nao_e_membro_devolve_false_sem_lancar` (r01, r02) |
+| AC-12 | Isolamento em toda rota | `IsolamentoRotasTestes`, `PoolApiTestes` | sim | PASS | 7 testes; `DetectorDeRotas` usa `EndpointDataSource`; meta-teste em host separado acusa `GET /api/v1/__teste/sem-cenario` (r01). `PoolApiTestes` sem controle negativo na API: ver "Pendências" |
+| AC-13 | Rate limiting e hosts | `BordaTestes` | sim | PASS | 4 testes previstos verdes (r01) |
+| AC-14 | Data Protection | `DataProtectionTestes` | sim | PASS | verde nas 3 execuções da r02 e da r03; na r01, 2 falhas na 1ª execução (instável; asserção trocada por leitura de log em 8634188) |
+| AC-15 | Logs sem dado pessoal | `LogsTestes`, `OidcNegativosTestes` | sim | PASS | log do login só com `usuario_id` (r01); código e `id_token` ausentes no log (r02) |
+| AC-16 | Regras de .NET | `node --test`; `validar-regras` | sim | PASS | 40/40; 0 bloqueia (r03). R15 linha a linha com teste (8634188) |
+| AC-17 | Documentação e ADRs | diff e greps | sim | PASS | ADRs 00005 e 00006 `Proposto`; exceção do uuid v4 no ADR 00004 (linha 34); nota "sem `cnpj`" na SPEC-01 (linha 63); checklist V6–V10; `backend-dotnet.md`, `CLAUDE.md`, `server/README.md` (r01, r02) |
+| AC-18 (diff) | Front intacto | `git diff --name-only feat/00011-backend-esqueleto...HEAD`; lint; tipos | sim | PASS | nada em `src/`, `e2e/`, `Dockerfile`, `docker/`, `docker-compose` nem `.github/`; lint e typecheck verdes (r01–r03) |
+| AC-18 (`npm run ci`) | `npm run ci` verde | `npm run ci` | sim | NOT_RUN | não rodado por ninguém; o front não mudou; evidência esperada na CI do PR |
+| AC-19 | Pool sem vazamento | `PoolRlsTestes`, `ConfiguracaoTestes`, R17 | sim | PASS | controle negativo `Sem_sobrescrita_e_sem_reset_o_valor_vaza` (pool 1, mesmo `pg_backend_pid`); `Sobrescrita_independe_do_reset`; concorrência com pool 3 e 60 operações; log `'No Reset On Close=true' não é permitido` (r01) |
+| R-1 | Camadas | `ArquiteturaTestes` | sim | PASS | verde; `Dominio` sem pacote; `Api → Dados → Dominio` (r01) |
+| R-2 | DDL só em migração, bootstrap ou `Rls/`; DML de migração só pelo helper | R15 + `git grep` | sim | PASS | `validar-regras` 0 bloqueia (r03) |
+| R-3 | Sem `Migrate(` na partida | `git grep "Migrate(" -- server/src` | sim | PASS | vazio (r01) |
+| R-4 | Sem aviso novo | build | sim | PASS | 0 avisos com `--no-incremental` (r03) |
+| R-5 | Estilo do ADR 00004 | leitura do `arquiteto` | sim | FAIL | `arquiteto` r03 (2ª revisão): `public static bool NomeRejeitado` em `#region Métodos privados` (`ServicoLogin.cs:179`) → rodada 04 (A PREENCHER) |
+| S-1 | Sem segredo versionado | `ConfiguracaoTestes.Appsettings_sem_segredo_do_cliente_nem_flag_de_desenvolvimento`, R08 | sim | PASS | verde; `validar-regras` 0 bloqueia (r01, r03) |
+| S-2 | Dependências, licenças, vulneráveis | `Directory.Packages.props` × §08; `--vulnerable --include-transitive` | sim | PASS | `Microsoft.AspNetCore.Authentication.OpenIdConnect` 10.0.13 e `Microsoft.IdentityModel.*` / `System.IdentityModel.Tokens.Jwt` 8.19.2, todos MIT; sem vulneráveis. Revisão de segurança e licença com a Segurança |
+| S-3 | Atributos do cookie | `OidcTestes`; curl | sim | PASS | `Set-Cookie: __Host-cronoai-sessao=<redigido>; path=/; secure; samesite=lax; httponly` (r01) |
+| S-4 | CSRF | `EmpresaAtualTestes.Escrita_sem_antiforgery_responde_400`, `Toda_escrita_exige_antiforgery` | sim | PASS | verdes (r01) |
+| S-5 | Redirecionamento aberto | `OidcTestes.Retorno_externo_vai_para_a_raiz` | sim | PASS | verde (r01) |
+| S-6 | Headers em 302/401/403/429 | `CabecalhosAutenticadosTestes.Cabecalhos_de_seguranca_em_302_401_403_429` | sim | PASS | verde; nosniff, CSP e Referrer-Policy no 204 real (r01) |
+| S-7 | Sem CORS | `Sem_cabecalho_cors` | sim | PASS | verde (r01) |
+| S-8 | Testes de banco como `cronoai_app` | leitura | sim | PASS | `StringConexaoApp`; migrador só nos testes "dono" e de helper; superusuário só na fixture (r01) |
+| S-9 | `ShowPII` desligado | `git grep ShowPII -- server/src` | não | PASS (redefinido) | `IdentityModelEventSource.ShowPII = false` em `BordaExtensoes.cs`. O plano §3.7 manda definir; a S-9 pedia grep vazio. Vale a S-9 redefinida |
+| S-OUT | Logout do handler desligado | `OidcTestes.Rotas_de_logout_do_handler_ficam_desligadas` | sim | PASS | `/signout-oidc` e `/signout-callback-oidc` 404; `/eu` continua 200 (r02, r03) |
+| V-1 | Subida local com semente e `/eu` por curl | compose `db` (`-p cronoaiqa12c`, porta 15434), migração, semente 2x, API em Development | não | PASS | `Healthy`; `2\|3\|4`; login dev-a 204; `/empresas/atual` 403; login dev-b 204; cookie antigo 401, novo 200; `/signout-oidc` 404; 0 gatilhos de teste no banco (r03) |
+| V-2 | API em Production com a flag não sobe | `dotnet run` com `ASPNETCORE_ENVIRONMENT=Production` | sim | PASS | `OptionsValidationException: O usuário de desenvolvimento só pode ser habilitado em Development`; semente: `A semente de desenvolvimento só roda em Development.` (r01) |
+| PLANO | Todo teste previsto no §11 existe | grep de 70 nomes | sim | PASS | só `Contexto_do_banco_e_imutavel_e_sessao_preenchida_uma_vez` divergia (dividido em dois) (r01) |
+| E2E | `npm run e2e` | — | não | NA | não rodado, por instrução (porta compartilhada); front intacto |
+| R04 | Rodada 04: `NomeRejeitado` privado, U+061C, ramos 23514, comentário do P0001, robustez dos gatilhos | `testes` e `arquiteto` sobre o SHA A PREENCHER | sim | A PREENCHER | A PREENCHER |
+| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | A PREENCHER | A PREENCHER |
+
+## Ressalvas dos validadores e destino
+| Origem | Ressalva | Destino |
+|---|---|---|
+| testes r01 | `DataProtectionTestes` instável (2 falhas na 1ª execução completa) | corrigido (8634188): `PartidaDoHost` lê o log "Hosting failed to start"; 163/163 3x. Causa raiz não explicada → pendência |
+| testes r01 | Teste negativo do OIDC só afirma ausência do sujeito no log | corrigido (8634188): código e `id_token` também |
+| testes r01 / r02 / r03 | `PoolApiTestes` sem controle negativo no nível da API | pendência registrada |
+| testes r01 / arquiteto r01 | S-9 do plano pede grep vazio, código tem `ShowPII = false` | registrado: S-9 redefinida (decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR) |
+| testes r01 | `npm run ci` completo não rodado | registrado: AC-18 (`npm run ci`) NOT_RUN; CI do PR |
+| testes r02 / r03 | `SpinWait` do `PartidaDoHost` sem mensagem própria | pendência registrada |
+| testes r03 | `GatilhoDeFalhaAsync` e `GatilhoTemporario.DisposeAsync` sem proteção | rodada 04 (A PREENCHER) |
+| testes r03 | Mutação do T-5 não repetida pelo `testes` | registrado (feita pelo dev) |
+| testes r03 | `GET /empresas/atual` com 200 não exercitado por curl | registrado: coberto por `EmpresaAtualTestes` e `PoolApiTestes` |
+| arquiteto r01 | M1: `Results.*` em vez de `TypedResults`; OpenAPI errado | corrigido (8634188): uniões `Results<…>`, `.ProducesProblem`, OpenAPI regerado; regra em `backend-dotnet.md` |
+| arquiteto r01 | B1: `CLAUDE.md` e README dizem que a semente exige a flag | corrigido (8634188): opção (a), "só Development" (decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR) |
+| arquiteto r01 | N1: campo estático sem `_` | corrigido (8634188): `AlgoritmosAssinatura.Assimetricos` em arquivo próprio |
+| arquiteto r01 | N2: `Configure<OpcoesOidc>` e `RemoverPolitica` sem uso; chave duplicada | corrigido (8634188) |
+| arquiteto r01 | N3: upsert com `COALESCE` mantém nome antigo (RNF-02.3) | corrigido (8634188), com teste |
+| arquiteto r01 / seguranca r01 | N4 / Baixo: nome do provedor (NUL dá 500; corte parte emoji) | corrigido (8634188): controles removidos, corte por elemento de texto, nulo como último recurso; surrogate órfão em b5a3289 |
+| arquiteto r01 | N5: teste aceita 404 ou 401 | corrigido (8634188): exige 404 |
+| arquiteto r01 | N6: nomes de teste e arquivo diferentes do plano | registrado nesta matriz (AC-5, S-6) |
+| arquiteto r01 | Desvios declarados 1–11 do dev | aceitos e registrados; índice extra confirmado pelo `dba` |
+| arquiteto r01 / seguranca r01 | Requisição sem endpoint passa pela autorização; middleware terminal viraria bypass | corrigido (8634188): aviso em `Program.cs`, ADRs 00005/00006 e `backend-dotnet.md` |
+| arquiteto r01 / seguranca r01 | Atalho do `GetDocument.Insider` | aceito; link da documentação no código e no README (8634188) |
+| arquiteto r02 | R2-1: catch largo refaz o upsert com nome nulo em qualquer erro do PostgreSQL | corrigido (b5a3289): `NomeRejeitado` só para `EncoderFallbackException`, 22021 e 23514 de `ck_usuario_nome_tamanho` |
+| arquiteto r02 | R2-2: `SessaoAnteriorAsync` público na região privada | corrigido (b5a3289): `SessaoDoCookie.ObterAnteriorAsync` em `Sessao/` |
+| arquiteto r02 | R2-3: `GET /empresas/atual` com 404 não declarado | corrigido (b5a3289): caminho inalcançável removido; `SingleAsync` e 500 genérico |
+| arquiteto r03 (1ª revisão) | Log `NomeDeExibicaoDescartado` com causa errada no falso positivo | pendência registrada |
+| arquiteto r03 (1ª revisão) | `GatilhoTemporario` sem regions | registrado: padrão já aceito nos tipos aninhados de teste |
+| arquiteto r03 (1ª revisão) | U+200B–U+200D e U+FEFF fora da lista | pendência registrada (decisão da Segurança) |
+| arquiteto r03 (2ª revisão) | `public static NomeRejeitado` na região privada (bloqueante) | rodada 04 (A PREENCHER) |
+| arquiteto r03 (2ª revisão) | U+061C (Bidi_Control) fora da lista | rodada 04 (A PREENCHER) |
+| arquiteto r03 (2ª revisão) | Ramos 23514 com e sem `ck_usuario_nome_tamanho` sem teste | rodada 04 (A PREENCHER) |
+| arquiteto r03 (2ª revisão) | Ramo `EncoderFallbackException` sem teste | pendência registrada (fora da rodada 04) |
+| arquiteto r03 (2ª revisão) | Comentário cita só o 40001, a teoria cobre também o P0001 | rodada 04 (A PREENCHER) |
+| arquiteto r03 (2ª revisão) | Log `NomeDeExibicaoDescartado` antes de propagar erro do sujeito (info) | pendência registrada |
+| dba r01 | `DefinirEmpresaAtivaAsync` lança 23503 em vez de devolver `false` | corrigido (8634188), com teste |
+| dba r01 | R15 confere o arquivo, não a linha | corrigido (8634188): teste linha a linha. O dev afirma que o código já conferia por linha (ver divergência) |
+| dba r01 | Histórico de migrações sem privilégio para `cronoai_app` | registrado: confirmado no catálogo real e por `Aplicacao_nao_acessa_historico_de_migracoes` |
+| dba r01 | Índice `ix_sessao_empresa_ativa_id_usuario_id` | manter; índice parcial a avaliar no 00014 |
+| dba r01 | PgBouncer não testado; `app.*` não é segredo | pendência de área (Infraestrutura); registrado no ADR 00006 |
+| seguranca r01 | Médio: fluxo de código não exigido (`id_token` sem `code` entra) | corrigido (8634188): `ExigirFluxoDeCodigoAsync` em `OnMessageReceived`; teste com e sem `code`; revalidado na r02 |
+| seguranca r01 (info) | `alg=none` resolvido só em `OnTokenValidated` | corrigido (8634188): `ValidadorTokenAssinado` na origem; cada camada sozinha dá 401 |
+| seguranca r01 (info) | `/signout-oidc` e `/signout-callback-oidc` respondem 200 | corrigido (8634188): 404 sem tocar a sessão |
+| seguranca r01 (info) | Novo login não encerra a sessão anterior | corrigido (8634188), com teste |
+| seguranca r02 (info) | Controles bidirecionais (Cf) passam no nome | corrigido (b5a3289): U+200E, U+200F, U+202A–U+202E, U+2066–U+2069; antecipado do 00014 (decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR). U+061C → rodada 04 (A PREENCHER) |
+
+## Pendências registradas
+- **Controle negativo do `PoolApiTestes`:** existe só no nível de dados (`PoolRlsTestes.Sem_sobrescrita_e_sem_reset_o_valor_vaza`). O teste da API prova o comportamento, mas não prova que detectaria um vazamento.
+- **`SpinWait` do `PartidaDoHost`:** só espera. Se o marcador não aparecer, quem falha é o `Assert.Contains` do chamador, sem mensagem própria.
+- **Causa raiz da instabilidade do `DataProtectionTestes`:** não explicada. O teste passou a ler o log "Hosting failed to start" e depende desse texto.
+- **Log `NomeDeExibicaoDescartado`:** sai antes de propagar um erro que veio do sujeito ou do emissor, com a causa errada. Sem perda de dado (info).
+- **Ramo `EncoderFallbackException` do `NomeRejeitado`:** sem teste. Hoje não acontece, por causa do `NomeSeguro`.
+- **U+200B–U+200D e U+FEFF:** fora da lista de caracteres removidos. A decisão é da Segurança.
+- **404 do `GET /empresas/atual`:** se algum ciclo conceder DELETE em `empresa`, reavaliar e anotar no ADR 00006.
+- **Índice parcial** `WHERE empresa_ativa_id IS NOT NULL`: avaliar no 00014.
+- **`usuario` fora do RLS:** reavaliação no 00014.
+- **Herdado do 00011, ainda aberto:** teste da R08 fora da CI; cobertura do backend não coletada.
+- **Antes do PR:** fazer merge da `master`. PR empilhado em `feat/00011-backend-esqueleto` se o 00011 não tiver entrado.
+
+## Validação de outras áreas (não substitui o parecer delas)
+- **Segurança da Informação:**
+  - provedor OIDC real e MFA; cliente registrado só com authorization code (implícito e híbrido desligados);
+  - método de autenticação do cliente (segredo ou `private_key_jwt`); logout no provedor;
+  - tempos de sessão (30 min / 8 h sugeridos) e limites de taxa;
+  - pacote `Microsoft.AspNetCore.Authentication.OpenIdConnect` 10.0.13 e família `Microsoft.IdentityModel.*` 8.19.2: revisão de segurança e de licença antes de produção; reconferir o `alg=none` a cada atualização;
+  - IdP de teste em memória (código próprio);
+  - aceite dos itens ASVS 5.0.0 V6–V10 e fumaça com o provedor real;
+  - lista de caracteres invisíveis removidos do nome.
+- **Jurídico:**
+  - dado pessoal: `nome_exibicao` e o par emissor + `sub`;
+  - retenção da sessão (`sessao`, 30 dias sugeridos) e de `ultimo_acesso_em`; pseudonimização (`UPDATE`, nunca `DELETE`);
+  - risco residual: `usuario` legível entre empresas pelo `cronoai_app` até o 00014;
+  - termos multiempresa (controlador × operador); licenças MIT;
+  - com o usuário: como empresas passam a existir fora do local (G2).
+- **Infraestrutura:**
+  - PgBouncer em modo de transação vaza as variáveis de sessão; exigiria `set_config(..., true)` com interceptor de transação;
+  - `ForwardedHeaders` (sem isso, o limite por IP vira um limite único) e `AllowedHosts` de produção;
+  - Data Protection fora da máquina local: guarda e proteção do anel;
+  - TLS/HSTS, `redirect_uri` e domínio; cofre para o `SegredoCliente`;
+  - papel de backup (`pg_dump` e RLS) e papel de limpeza em produção.
