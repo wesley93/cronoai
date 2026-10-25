@@ -14,9 +14,11 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
+    // scripts/**/*.ts importam com extensão (o Node roda o TypeScript por type stripping); exige noEmit
+    "allowImportingTsExtensions": true,
     "types": ["vite/client", "vitest/globals"],
     "baseUrl": ".",
     "paths": { "@/*": ["src/*"] }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts", "playwright.config.ts", "e2e/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts", "playwright.config.ts", "e2e/**/*.ts", "scripts/**/*.ts"]
 }

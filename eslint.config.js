@@ -27,7 +27,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.test.ts', 'vite.config.ts', 'playwright.config.ts', 'e2e/**/*.ts', 'eslint.config.js', 'postcss.config.js', 'tailwind.config.js'],
+    files: ['**/*.test.ts', 'scripts/**/*.ts', 'vite.config.ts', 'playwright.config.ts', 'e2e/**/*.ts', 'eslint.config.js', 'postcss.config.js', 'tailwind.config.js'],
     languageOptions: { globals: { ...globals.node } },
   },
 )

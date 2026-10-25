@@ -11,8 +11,8 @@ export default defineConfig({
   server: { port: 5180, strictPort: true },
   test: {
     environment: 'jsdom',
-    // Só os testes unitários: os *.spec.ts de e2e/ são do Playwright e não podem rodar no Vitest
-    include: ['src/**/*.test.ts'],
+    // Só os testes unitários (src e scripts/sinapi): os *.spec.ts de e2e/ são do Playwright e não podem rodar no Vitest
+    include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/lib/**/*.ts'],

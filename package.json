@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "e2e": "playwright test",
+    "sinapi:recorte": "node --experimental-strip-types scripts/sinapi/gerar-recorte.ts",
     "e2e:instalar": "playwright install chromium",
     "ci": "npm run lint && npm run typecheck && npm run test:coverage && vite build"
   },
