@@ -1,0 +1,80 @@
+# Docker: build da imagem e smoke test do container. Não publica em registro (publicação depende da Infraestrutura).
+name: Docker
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - docker/**
+      - docker-compose.yml
+      - package.json
+      - package-lock.json
+      - index.html
+      - vite.config.ts
+      - src/**
+      - public/**
+      - .github/workflows/docker.yml
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke:
+    name: Build e smoke test da imagem
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build da imagem (sem push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: cronoai:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Imagem não roda como root
+        run: |
+          user="$(docker inspect --format '{{.Config.User}}' cronoai:ci)"
+          echo "Usuário da imagem: ${user}"
+          test -n "${user}" && test "${user}" != "root" && test "${user}" != "0"
+
+      - name: Subir container (somente leitura, sem novos privilégios)
+        run: |
+          docker run -d --name cronoai -p 8080:8080 \
+            --read-only --tmpfs /tmp --security-opt no-new-privileges:true \
+            cronoai:ci
+
+      - name: Smoke test
+        run: |
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:8080/healthz && break
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/healthz | grep -q ok
+          curl -fsS http://localhost:8080/ | grep -q '<div id="app">'
+          curl -fsS -o /dev/null http://localhost:8080/qualquer/rota          # fallback da SPA
+          headers="$(curl -fsSI http://localhost:8080/)"
+          echo "${headers}"
+          echo "${headers}" | grep -qi '^content-security-policy:'
+          echo "${headers}" | grep -qi '^x-content-type-options: nosniff'
+          echo "${headers}" | grep -qi '^x-frame-options: deny'
+
+      - name: Logs do container em caso de falha
+        if: failure()
+        run: docker logs cronoai || true

@@ -1,0 +1,44 @@
+name: Tarefa de spec
+description: Incremento de uma spec de docs/specs
+labels: [spec]
+body:
+  - type: dropdown
+    id: spec
+    attributes:
+      label: Spec
+      options:
+        - SPEC-00 Fundação de engenharia
+        - SPEC-01 Backend e multi-obra
+        - SPEC-02 Identidade e auditoria
+        - SPEC-03 Premissas e calendários
+        - SPEC-04 Snapshots e linhas de base
+        - SPEC-05 Motor de cronograma
+        - SPEC-06 Integração MS Project
+        - SPEC-07 SINAPI oficial
+        - SPEC-08 Apontamento de campo
+        - SPEC-09 Suprimentos
+        - SPEC-10 EVM e medição
+        - SPEC-11 Relatórios e notificações
+        - SPEC-12 Segurança, LGPD e operação
+        - SPEC-13 Piloto
+    validations:
+      required: true
+  - type: input
+    id: requisitos
+    attributes:
+      label: Requisitos cobertos
+      placeholder: "RF-04.1, RF-04.2"
+    validations:
+      required: true
+  - type: textarea
+    id: aceite
+    attributes:
+      label: Critérios de aceite
+      description: Copie da spec os critérios deste incremento.
+    validations:
+      required: true
+  - type: textarea
+    id: validacao
+    attributes:
+      label: Validação com outras áreas
+      description: Infra, Segurança, Jurídico, RH… (se aplicável)

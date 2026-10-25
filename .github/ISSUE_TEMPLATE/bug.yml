@@ -1,0 +1,32 @@
+name: Bug
+description: Algo não funciona ou calcula errado
+labels: [bug]
+body:
+  - type: textarea
+    id: oque
+    attributes:
+      label: O que aconteceu
+      description: Inclua o módulo (Apontamento, Caminho Crítico, Suprimentos, SINAPI, EVM, EAP).
+    validations:
+      required: true
+  - type: textarea
+    id: esperado
+    attributes:
+      label: O que era esperado
+      description: Se for cálculo, informe o valor esperado e de onde ele vem (MS Project, planilha, fórmula).
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Como reproduzir
+      placeholder: "1. Abrir o módulo…\n2. Clicar em…\n3. Ver…"
+    validations:
+      required: true
+  - type: input
+    id: versao
+    attributes:
+      label: Versão / commit
+  - type: markdown
+    attributes:
+      value: "⚠️ Não anexe cronogramas, custos ou dados pessoais reais de obra sem anonimizar."

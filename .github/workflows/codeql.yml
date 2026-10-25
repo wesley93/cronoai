@@ -1,0 +1,38 @@
+# CodeQL (SAST) para JavaScript/TypeScript.
+# Em repositório privado exige GitHub Advanced Security/Code Security habilitado (ver docs/devops.md).
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "23 6 * * 1" # segundas, 06:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Análise CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inicializar CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+
+      - name: Analisar
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"

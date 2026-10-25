@@ -1,0 +1,54 @@
+# Release: em tag vX.Y.Z (igual ao "version" do package.json), valida e publica o dist/ zipado no GitHub Releases.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Validar e publicar release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # criar o GitHub Release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node (versão do .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Tag deve bater com a versão do package.json
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "${expected}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} diferente da versão do package.json (${expected})."
+            exit 1
+          fi
+
+      - name: Instalar dependências
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint, tipos, testes e build
+        run: npm run ci
+
+      - name: Empacotar dist/
+        run: |
+          cd dist
+          zip -qr "../cronoai-${GITHUB_REF_NAME}-dist.zip" .
+
+      - name: Criar GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" "cronoai-${GITHUB_REF_NAME}-dist.zip" \
+            --title "CronoAI ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag
