@@ -205,10 +205,21 @@ export const useProjectStore = defineStore('project', () => {
   const msProjectTasks = computed<MSProjectTask[]>(() => {
     const status = state.meta.statusDate
     const pvOf = (t: Task) => t.bac * plannedFraction(t, baseCalendar.value, status)
+    const kidsBySummary = new Map<string, Task[]>()
+    for (const leaf of leaves.value) {
+      const parts = leaf.wbs.split('.')
+      let current = ''
+      for (let i = 0; i < parts.length - 1; i++) {
+        current = current ? `${current}.${parts[i]}` : parts[i]
+        let list = kidsBySummary.get(current)
+        if (!list) kidsBySummary.set(current, (list = []))
+        list.push(leaf)
+      }
+    }
     return tasksByWbs.value.map((t): MSProjectTask => {
       if (t.isSummary) {
         const r = rollups.value.get(t.uid)
-        const kids = leaves.value.filter((k) => k.wbs.startsWith(t.wbs + '.'))
+        const kids = kidsBySummary.get(t.wbs) || []
         const start = r?.start ?? state.meta.startDate
         const finish = r?.finish ?? start
         return {
