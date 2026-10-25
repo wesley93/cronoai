@@ -126,6 +126,14 @@ public sealed class RlsTestes
         var usuario = await _dados.CriarUsuarioAsync();
         var empresa = await _dados.CriarEmpresaComMembrosAsync(usuario);
         await _dados.CriarSessaoAsync(usuario, empresa);
+        await _dados.CriarObraAsync(empresa, usuario);
+
+        // Controle negativo: os dados existem (o app, com o contexto da empresa, vê a obra e a trilha dela).
+        await using (var comoApp = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresa)))
+        {
+            Assert.Equal(1, await Contar(comoApp, "obra"));
+            Assert.Equal(1, await Contar(comoApp, "auditoria"));
+        }
 
         // Migrador (dono) sem contexto E com as variáveis app.* setadas: as políticas são TO cronoai_app,
         // então nenhuma se aplica a ele: zero linhas em ambos os casos.
@@ -135,6 +143,8 @@ public sealed class RlsTestes
             Assert.Equal(0, await Contar(comoDono, "empresa"));
             Assert.Equal(0, await Contar(comoDono, "membro_empresa"));
             Assert.Equal(0, await Contar(comoDono, "sessao"));
+            Assert.Equal(0, await Contar(comoDono, "obra"));
+            Assert.Equal(0, await Contar(comoDono, "auditoria"));
         }
     }
 
@@ -150,6 +160,8 @@ public sealed class RlsTestes
             "empresa" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.empresa"),
             "membro_empresa" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.membro_empresa"),
             "sessao" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.sessao"),
+            "obra" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.obra"),
+            "auditoria" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.auditoria"),
             _ => throw new InvalidOperationException(tabela),
         };
         return (await sql.ToListAsync()).Single();

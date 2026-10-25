@@ -10,8 +10,9 @@ public sealed class CatalogoTestes
 {
     #region Campos
 
-    // Tabelas do schema fora do RLS por decisão (ADR 00006): usuario (aceito com condições) e o histórico de migrações.
-    private static readonly string[] _tabelasForaDoRls = ["usuario", "__ef_migrations_history"];
+    // Tabelas do schema fora do RLS por decisão (ADR 00006): usuario (aceito com condições), o histórico de migrações e as
+    // listas nacionais (UF e município: globais, sem empresa, só leitura para a aplicação; ciclo 00013).
+    private static readonly string[] _tabelasForaDoRls = ["usuario", "__ef_migrations_history", "uf_referencia", "municipio_referencia"];
 
     private readonly BancoPostgresFixture _banco;
 
@@ -86,7 +87,7 @@ public sealed class CatalogoTestes
         }
 
         // As tabelas de dado do ciclo estão de fato presentes e protegidas.
-        foreach (var esperada in new[] { "empresa", "membro_empresa", "sessao" })
+        foreach (var esperada in new[] { "empresa", "membro_empresa", "sessao", "obra", "auditoria" })
         {
             Assert.Contains($"{esperada}|true|true", tabelas);
         }
@@ -98,13 +99,19 @@ public sealed class CatalogoTestes
         var politicas = await ListarAsync(
             "SELECT tablename || '|' || cmd || '|' || roles::text || '|' || permissive FROM pg_policies WHERE schemaname = 'cronoai' ORDER BY 1");
 
-        // Nenhum "ALL", nenhum papel além do cronoai_app, e exatamente os comandos do plano (sem UPDATE/DELETE em empresa e membro_empresa).
+        // Nenhum "ALL", nenhum papel além do cronoai_app, e exatamente os comandos do plano (sem UPDATE/DELETE em empresa e
+        // membro_empresa; obra sem DELETE; auditoria SÓ com SELECT e INSERT: nenhuma política de UPDATE ou DELETE).
         var esperadas = new[]
         {
             "empresa|INSERT|{cronoai_app}|PERMISSIVE",
             "empresa|SELECT|{cronoai_app}|PERMISSIVE",
             "membro_empresa|INSERT|{cronoai_app}|PERMISSIVE",
             "membro_empresa|SELECT|{cronoai_app}|PERMISSIVE",
+            "obra|INSERT|{cronoai_app}|PERMISSIVE",
+            "obra|SELECT|{cronoai_app}|PERMISSIVE",
+            "obra|UPDATE|{cronoai_app}|PERMISSIVE",
+            "auditoria|INSERT|{cronoai_app}|PERMISSIVE",
+            "auditoria|SELECT|{cronoai_app}|PERMISSIVE",
             "sessao|DELETE|{cronoai_app}|PERMISSIVE",
             "sessao|INSERT|{cronoai_app}|PERMISSIVE",
             "sessao|SELECT|{cronoai_app}|PERMISSIVE",
@@ -134,6 +141,11 @@ public sealed class CatalogoTestes
             $"empresa|SELECT|((id = {e}) OR (EXISTS ( SELECT 1 FROM membro_empresa m WHERE ((m.empresa_id = empresa.id) AND (m.usuario_id = {u})))))|{nulo}",
             $"membro_empresa|INSERT|{nulo}|(empresa_id = {e})",
             $"membro_empresa|SELECT|((usuario_id = {u}) OR (empresa_id = {e}))|{nulo}",
+            $"obra|INSERT|{nulo}|(empresa_id = {e})",
+            $"obra|SELECT|(empresa_id = {e})|{nulo}",
+            $"obra|UPDATE|(empresa_id = {e})|(empresa_id = {e})",
+            $"auditoria|INSERT|{nulo}|(empresa_id = {e})",
+            $"auditoria|SELECT|(empresa_id = {e})|{nulo}",
             $"sessao|DELETE|(usuario_id = {u})|{nulo}",
             $"sessao|INSERT|{nulo}|(usuario_id = {u})",
             $"sessao|SELECT|(usuario_id = {u})|{nulo}",

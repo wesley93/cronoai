@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using CronoAI.Dados;
+using CronoAI.Dados.Auditoria;
 using CronoAI.Dominio;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -139,9 +140,148 @@ public sealed partial class ArquiteturaTestes
         Assert.Empty(AcessosIndevidosAUsuario([("src/CronoAI.Api/Empresas/Qualquer.cs", "// o usuario do contexto vem da sessão\nvar usuarioId = contexto.UsuarioId;")]));
     }
 
+
+    [Fact]
+    public void Auditoria_so_recebe_Add()
+    {
+        // Varredura de server/src: a trilha só recebe Add/AddRange (o interceptor) e leitura em ConsultasAuditoria.
+        Assert.Empty(UsosIndevidosDeAuditoria(ArquivosDeSrc()));
+    }
+
+    [Fact]
+    public void Detector_de_uso_da_trilha_acusa_escrita_e_leitura_fora_do_lugar()
+    {
+        var indevidos = new[]
+        {
+            "var x = db.Auditorias.Where(a => a.Id > 0).ToList();",
+            "db.Auditorias.Remove(registro);",
+            "db.Auditorias.Update(registro);",
+            "await db.Auditorias.ExecuteDeleteAsync();",
+            "var y = db.Set<RegistroAuditoria>().ToList();",
+        };
+        foreach (var trecho in indevidos)
+        {
+            Assert.Equal(["src/CronoAI.Api/Obras/Qualquer.cs"], UsosIndevidosDeAuditoria([("src/CronoAI.Api/Obras/Qualquer.cs", trecho)]));
+            Assert.Empty(UsosIndevidosDeAuditoria([("src/CronoAI.Dados/Auditoria/ConsultasAuditoria.cs", trecho)]));
+        }
+
+        Assert.Empty(UsosIndevidosDeAuditoria([("src/CronoAI.Dados/Auditoria/AuditoriaInterceptor.cs", "banco.Auditorias.Add(registro);\nbanco.Auditorias.AddRange(lista);")]));
+    }
+
+    [Fact]
+    public void Sem_ExecuteUpdate_ExecuteDelete_em_entidade_auditada()
+    {
+        // Esses métodos não passam pelo ChangeTracker nem pelo interceptor: a trilha ficaria sem registro.
+        Assert.Empty(ExecuteEmEntidadeAuditada(ArquivosDeSrc()));
+    }
+
+    [Fact]
+    public void Detector_de_Execute_em_entidade_auditada_acusa_Obra_e_Auditoria()
+    {
+        Assert.Equal(["src/X.cs"], ExecuteEmEntidadeAuditada([("src/X.cs", "await db.Obras.Where(o => o.Id == id).ExecuteUpdateAsync(s => s);")]));
+        Assert.Equal(["src/X.cs"], ExecuteEmEntidadeAuditada([("src/X.cs", "await db.Auditorias.ExecuteDeleteAsync();")]));
+        Assert.Equal(["src/X.cs"], ExecuteEmEntidadeAuditada([("src/X.cs", "var obra = new Obra();\nawait db.Sessoes.ExecuteDeleteAsync();")]));
+        Assert.Empty(ExecuteEmEntidadeAuditada([("src/X.cs", "await db.Sessoes.ExecuteDeleteAsync();")]));
+        Assert.Empty(ExecuteEmEntidadeAuditada([("src/X.cs", "await db.Obras.ToListAsync();")]));
+    }
+
+    [Fact]
+    public void Toda_entidade_auditavel_tem_lista_branca()
+    {
+        using var contexto = CriarContextoDeModelo();
+        var auditaveis = contexto.Model.GetEntityTypes().Where(t => typeof(IAuditavel).IsAssignableFrom(t.ClrType)).ToList();
+
+        Assert.NotEmpty(auditaveis);
+        foreach (var tipo in auditaveis)
+        {
+            Assert.True(ListaBrancaAuditoria.Contem(tipo.ClrType), $"{tipo.ClrType.Name} é IAuditavel e não tem lista branca");
+            foreach (var campo in ListaBrancaAuditoria.Campos(tipo.ClrType))
+            {
+                Assert.NotNull(tipo.FindProperty(campo.Propriedade));
+                Assert.Matches("^[a-z_]+$", campo.Chave);
+            }
+        }
+
+        // E o inverso: toda lista é de um tipo auditável do modelo (lista de tipo que sumiu apodrece em silêncio).
+        Assert.All(ListaBrancaAuditoria.Tipos, tipo => Assert.Contains(auditaveis, a => a.ClrType == tipo));
+    }
+
+    [Fact]
+    public void Entidade_gravavel_de_empresa_e_auditavel_ou_excecao_declarada()
+    {
+        // Exceções declaradas até o ciclo 00014, que as torna auditáveis.
+        Type[] excecoes = [typeof(MembroEmpresa), typeof(CronoAI.Dominio.Sessao), typeof(Empresa)];
+        using var contexto = CriarContextoDeModelo();
+        var tiposDoModelo = contexto.Model.GetEntityTypes().Select(t => t.ClrType).ToList();
+
+        // A lista de exceções não pode apodrecer: cada uma existe no modelo.
+        Assert.All(excecoes, e => Assert.Contains(e, tiposDoModelo));
+
+        // RegistroAuditoria é excluída por definição (é a própria trilha).
+        var deEmpresa = tiposDoModelo.Where(t => typeof(IDadoDeEmpresa).IsAssignableFrom(t) && t != typeof(RegistroAuditoria)).ToList();
+        Assert.NotEmpty(deEmpresa);
+        Assert.All(deEmpresa, t => Assert.True(typeof(IAuditavel).IsAssignableFrom(t) || excecoes.Contains(t), $"{t.Name} grava dado de empresa sem auditoria"));
+    }
+
+    [Fact]
+    public void Obra_id_empresa_e_criacao_imutaveis_no_modelo()
+    {
+        using var contexto = CriarContextoDeModelo();
+        var tipo = contexto.Model.FindEntityType(typeof(Obra))!;
+
+        Assert.Equal(PropertySaveBehavior.Throw, tipo.FindProperty(nameof(Obra.Id))!.GetAfterSaveBehavior());
+        Assert.Equal(PropertySaveBehavior.Throw, tipo.FindProperty(nameof(Obra.EmpresaId))!.GetAfterSaveBehavior());
+        Assert.Equal(PropertySaveBehavior.Throw, tipo.FindProperty(nameof(Obra.CriadaEm))!.GetAfterSaveBehavior());
+
+        // Controle negativo: um campo editável continua gravável.
+        Assert.Equal(PropertySaveBehavior.Save, tipo.FindProperty(nameof(Obra.Nome))!.GetAfterSaveBehavior());
+    }
     #endregion
 
     #region Métodos privados
+
+    private static readonly string[] _arquivosComLeituraDaTrilha =
+    [
+        "src/CronoAI.Dados/Auditoria/ConsultasAuditoria.cs",
+        "src/CronoAI.Dados/CronoDbContext.cs",
+    ];
+
+    /// <summary>Todos os .cs de server/src (caminho relativo com "/"), sem obj, bin nem Migrations.</summary>
+    private static List<(string Caminho, string Conteudo)> ArquivosDeSrc()
+    {
+        var raiz = RaizServidor();
+        var arquivos = Directory.GetFiles(Path.Combine(raiz, "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(a => !a.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                     && !a.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                     && !a.Contains($"{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Select(a => (Caminho: Path.GetRelativePath(raiz, a).Replace('\\', '/'), Conteudo: File.ReadAllText(a)))
+            .ToList();
+        Assert.NotEmpty(arquivos);
+        return arquivos;
+    }
+
+    /// <summary>Arquivos que usam o DbSet da trilha de outro jeito que Add/AddRange, fora de ConsultasAuditoria e do contexto.</summary>
+    public static IReadOnlyList<string> UsosIndevidosDeAuditoria(IEnumerable<(string Caminho, string Conteudo)> arquivos) =>
+        arquivos
+            .Where(a => UsoDaTrilhaRegex().IsMatch(a.Conteudo) && !_arquivosComLeituraDaTrilha.Contains(a.Caminho, StringComparer.Ordinal))
+            .Select(a => a.Caminho)
+            .ToList();
+
+    [GeneratedRegex(@"(?:\bAuditorias\b|Set<RegistroAuditoria>\s*\(\s*\))(?!\s*\.\s*(?:Add|AddRange)\s*\()")]
+    private static partial Regex UsoDaTrilhaRegex();
+
+    /// <summary>Arquivos que usam ExecuteUpdate/ExecuteDelete E citam Obra ou a trilha.</summary>
+    public static IReadOnlyList<string> ExecuteEmEntidadeAuditada(IEnumerable<(string Caminho, string Conteudo)> arquivos) =>
+        arquivos
+            .Where(a => ExecuteEmMassaRegex().IsMatch(a.Conteudo) && EntidadeAuditadaRegex().IsMatch(a.Conteudo))
+            .Select(a => a.Caminho)
+            .ToList();
+
+    [GeneratedRegex(@"\bExecute(?:Update|Delete)(?:Async)?\s*\(")]
+    private static partial Regex ExecuteEmMassaRegex();
+
+    [GeneratedRegex(@"\b(?:Obra|Obras|RegistroAuditoria|Auditorias)\b")]
+    private static partial Regex EntidadeAuditadaRegex();
 
     /// <summary>
     /// Arquivos (caminho relativo, com "/") que acessam a tabela usuario fora da lista permitida: DbSet (<c>.Usuarios</c>,

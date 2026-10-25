@@ -42,6 +42,23 @@ public sealed class PrivilegiosIdentidadeTestes
     [InlineData("sessao", "INSERT", true)]
     [InlineData("sessao", "UPDATE", true)]
     [InlineData("sessao", "DELETE", true)]
+    [InlineData("uf_referencia", "SELECT", true)]
+    [InlineData("uf_referencia", "INSERT", false)]
+    [InlineData("uf_referencia", "UPDATE", false)]
+    [InlineData("uf_referencia", "DELETE", false)]
+    [InlineData("municipio_referencia", "SELECT", true)]
+    [InlineData("municipio_referencia", "INSERT", false)]
+    [InlineData("municipio_referencia", "UPDATE", false)]
+    [InlineData("municipio_referencia", "DELETE", false)]
+    [InlineData("obra", "SELECT", true)]
+    [InlineData("obra", "INSERT", true)]
+    [InlineData("obra", "UPDATE", true)]
+    [InlineData("obra", "DELETE", false)]
+    [InlineData("auditoria", "SELECT", true)]
+    [InlineData("auditoria", "INSERT", true)]
+    [InlineData("auditoria", "UPDATE", false)]
+    [InlineData("auditoria", "DELETE", false)]
+    [InlineData("auditoria", "TRUNCATE", false)]
     public async Task Privilegios_da_aplicacao_por_tabela(string tabela, string privilegio, bool esperado)
     {
         await using var conexao = new NpgsqlConnection(_banco.StringConexaoApp);

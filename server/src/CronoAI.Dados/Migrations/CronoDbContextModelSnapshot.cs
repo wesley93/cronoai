@@ -70,6 +70,251 @@ namespace CronoAI.Dados.Migrations
                     b.ToTable("membro_empresa", "cronoai");
                 });
 
+            modelBuilder.Entity("CronoAI.Dominio.MunicipioReferencia", b =>
+                {
+                    b.Property<string>("CodigoIbge")
+                        .HasColumnType("text")
+                        .HasColumnName("codigo_ibge");
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("nome");
+
+                    b.Property<string>("Uf")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("uf");
+
+                    b.HasKey("CodigoIbge")
+                        .HasName("pk_municipio_referencia");
+
+                    b.HasAlternateKey("CodigoIbge", "Uf")
+                        .HasName("ux_municipio_referencia_codigo_uf");
+
+                    b.HasIndex("Uf")
+                        .HasDatabaseName("ix_municipio_referencia_uf");
+
+                    b.ToTable("municipio_referencia", "cronoai", t =>
+                        {
+                            t.HasCheckConstraint("ck_municipio_referencia_codigo", "codigo_ibge ~ '^[0-9]{7}$'");
+                        });
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.Obra", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime?>("ArquivadaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("arquivada_em");
+
+                    b.Property<DateTime>("AtualizadaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("atualizada_em");
+
+                    b.Property<DateTime>("CriadaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criada_em");
+
+                    b.Property<DateOnly?>("DataStatus")
+                        .HasColumnType("date")
+                        .HasColumnName("data_status");
+
+                    b.Property<Guid>("EmpresaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("empresa_id");
+
+                    b.Property<string>("MunicipioIbge")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("municipio_ibge");
+
+                    b.Property<short?>("MunicipioUfCod")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("smallint")
+                        .HasColumnName("municipio_uf_cod")
+                        .HasComputedColumnSql("CASE WHEN municipio_ibge ~ '^[0-9]{7}$' THEN substr(municipio_ibge, 1, 2)::smallint END", true);
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("nome");
+
+                    b.Property<string>("OpcoesCronograma")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("opcoes_cronograma")
+                        .HasDefaultValueSql("'{}'::jsonb");
+
+                    b.Property<Guid?>("ResponsavelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("responsavel_id");
+
+                    b.Property<DateOnly?>("SinapiDataBase")
+                        .HasColumnType("date")
+                        .HasColumnName("sinapi_data_base");
+
+                    b.Property<string>("SinapiRegime")
+                        .HasColumnType("text")
+                        .HasColumnName("sinapi_regime");
+
+                    b.Property<string>("SinapiUf")
+                        .HasColumnType("text")
+                        .HasColumnName("sinapi_uf");
+
+                    b.Property<string>("Uf")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("uf");
+
+                    b.Property<long>("Versao")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L)
+                        .HasColumnName("versao");
+
+                    b.HasKey("Id")
+                        .HasName("pk_obra");
+
+                    b.HasAlternateKey("EmpresaId", "Id")
+                        .HasName("ux_obra_empresa_id_id");
+
+                    b.HasIndex("SinapiUf")
+                        .HasDatabaseName("ix_obra_sinapi_uf");
+
+                    b.HasIndex("EmpresaId", "ResponsavelId")
+                        .HasDatabaseName("ix_obra_empresa_id_responsavel_id");
+
+                    b.HasIndex("Uf", "MunicipioUfCod")
+                        .HasDatabaseName("ix_obra_uf_municipio_uf_cod");
+
+                    b.ToTable("obra", "cronoai", t =>
+                        {
+                            t.HasCheckConstraint("ck_obra_arquivada_apos_criada", "arquivada_em IS NULL OR arquivada_em >= criada_em");
+
+                            t.HasCheckConstraint("ck_obra_atualizada_apos_criada", "atualizada_em >= criada_em");
+
+                            t.HasCheckConstraint("ck_obra_municipio_formato", "municipio_ibge ~ '^[0-9]{7}$'");
+
+                            t.HasCheckConstraint("ck_obra_nome_tamanho", "char_length(nome) BETWEEN 1 AND 200");
+
+                            t.HasCheckConstraint("ck_obra_opcoes_objeto", "jsonb_typeof(opcoes_cronograma) = 'object'");
+
+                            t.HasCheckConstraint("ck_obra_opcoes_tamanho", "octet_length(opcoes_cronograma::text) <= 16384");
+
+                            t.HasCheckConstraint("ck_obra_sinapi_data_base_dia_1", "sinapi_data_base IS NULL OR EXTRACT(DAY FROM sinapi_data_base) = 1");
+
+                            t.HasCheckConstraint("ck_obra_sinapi_regime", "sinapi_regime IS NULL OR sinapi_regime IN ('desonerado', 'nao_desonerado')");
+
+                            t.HasCheckConstraint("ck_obra_sinapi_tudo_ou_nada", "(sinapi_uf IS NULL) = (sinapi_regime IS NULL) AND (sinapi_uf IS NULL) = (sinapi_data_base IS NULL)");
+
+                            t.HasCheckConstraint("ck_obra_versao_positiva", "versao >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.RegistroAuditoria", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Acao")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("acao");
+
+                    b.Property<string>("Antes")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("antes");
+
+                    b.Property<Guid?>("CorrelacaoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("correlacao_id");
+
+                    b.Property<string>("Depois")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("depois");
+
+                    b.Property<DateTime>("Em")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("em");
+
+                    b.Property<Guid>("EmpresaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("empresa_id");
+
+                    b.Property<string>("Entidade")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("entidade");
+
+                    b.Property<Guid>("EntidadeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("entidade_id");
+
+                    b.Property<string>("Motivo")
+                        .HasColumnType("text")
+                        .HasColumnName("motivo");
+
+                    b.Property<Guid?>("ObraId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("obra_id");
+
+                    b.Property<string>("Origem")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("origem");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("usuario_id");
+
+                    b.Property<long?>("VersaoDepois")
+                        .HasColumnType("bigint")
+                        .HasColumnName("versao_depois");
+
+                    b.HasKey("Id")
+                        .HasName("pk_auditoria");
+
+                    b.HasIndex("UsuarioId")
+                        .HasDatabaseName("ix_auditoria_usuario_id");
+
+                    b.HasIndex("EmpresaId", "Em", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("ix_auditoria_empresa_em");
+
+                    b.HasIndex("EmpresaId", "ObraId", "Em", "Id")
+                        .IsDescending(false, false, true, true)
+                        .HasDatabaseName("ix_auditoria_empresa_obra_em");
+
+                    b.ToTable("auditoria", "cronoai", t =>
+                        {
+                            t.HasCheckConstraint("ck_auditoria_acao", "acao IN ('criar', 'alterar', 'arquivar', 'restaurar')");
+
+                            t.HasCheckConstraint("ck_auditoria_antes_objeto", "antes IS NULL OR jsonb_typeof(antes) = 'object'");
+
+                            t.HasCheckConstraint("ck_auditoria_antes_tamanho", "antes IS NULL OR octet_length(antes::text) <= 262144");
+
+                            t.HasCheckConstraint("ck_auditoria_depois_objeto", "depois IS NULL OR jsonb_typeof(depois) = 'object'");
+
+                            t.HasCheckConstraint("ck_auditoria_depois_tamanho", "depois IS NULL OR octet_length(depois::text) <= 262144");
+
+                            t.HasCheckConstraint("ck_auditoria_entidade", "entidade ~ '^[a-z_]{1,64}$'");
+
+                            t.HasCheckConstraint("ck_auditoria_motivo_tamanho", "motivo IS NULL OR char_length(motivo) <= 500");
+
+                            t.HasCheckConstraint("ck_auditoria_origem", "origem IN ('ui', 'importacao', 'whatsapp', 'api')");
+                        });
+                });
+
             modelBuilder.Entity("CronoAI.Dominio.Sessao", b =>
                 {
                     b.Property<Guid>("Id")
@@ -110,6 +355,37 @@ namespace CronoAI.Dados.Migrations
                             t.HasCheckConstraint("ck_sessao_encerrada_apos_criada", "encerrada_em IS NULL OR encerrada_em >= criada_em");
 
                             t.HasCheckConstraint("ck_sessao_expira_apos_criada", "expira_em > criada_em");
+                        });
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.UfReferencia", b =>
+                {
+                    b.Property<string>("Sigla")
+                        .HasColumnType("text")
+                        .HasColumnName("sigla");
+
+                    b.Property<short>("CodigoIbge")
+                        .HasColumnType("smallint")
+                        .HasColumnName("codigo_ibge");
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("nome");
+
+                    b.HasKey("Sigla")
+                        .HasName("pk_uf_referencia");
+
+                    b.HasAlternateKey("Sigla", "CodigoIbge")
+                        .HasName("ux_uf_referencia_sigla_codigo");
+
+                    b.HasIndex("CodigoIbge")
+                        .IsUnique()
+                        .HasDatabaseName("ux_uf_referencia_codigo");
+
+                    b.ToTable("uf_referencia", "cronoai", t =>
+                        {
+                            t.HasCheckConstraint("ck_uf_referencia_sigla", "sigla ~ '^[A-Z]{2}$'");
                         });
                 });
 
@@ -177,6 +453,69 @@ namespace CronoAI.Dados.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_membro_empresa_usuario");
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.MunicipioReferencia", b =>
+                {
+                    b.HasOne("CronoAI.Dominio.UfReferencia", null)
+                        .WithMany()
+                        .HasForeignKey("Uf")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_municipio_referencia_uf");
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.Obra", b =>
+                {
+                    b.HasOne("CronoAI.Dominio.Empresa", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_obra_empresa");
+
+                    b.HasOne("CronoAI.Dominio.UfReferencia", null)
+                        .WithMany()
+                        .HasForeignKey("SinapiUf")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_obra_sinapi_uf");
+
+                    b.HasOne("CronoAI.Dominio.UfReferencia", null)
+                        .WithMany()
+                        .HasForeignKey("Uf")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_obra_uf");
+
+                    b.HasOne("CronoAI.Dominio.MembroEmpresa", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId", "ResponsavelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_obra_responsavel");
+
+                    b.HasOne("CronoAI.Dominio.UfReferencia", null)
+                        .WithMany()
+                        .HasForeignKey("Uf", "MunicipioUfCod")
+                        .HasPrincipalKey("Sigla", "CodigoIbge")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_obra_municipio_uf");
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.RegistroAuditoria", b =>
+                {
+                    b.HasOne("CronoAI.Dominio.Usuario", null)
+                        .WithMany()
+                        .HasForeignKey("UsuarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_auditoria_usuario");
+
+                    b.HasOne("CronoAI.Dominio.Obra", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId", "ObraId")
+                        .HasPrincipalKey("EmpresaId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_auditoria_obra");
                 });
 
             modelBuilder.Entity("CronoAI.Dominio.Sessao", b =>

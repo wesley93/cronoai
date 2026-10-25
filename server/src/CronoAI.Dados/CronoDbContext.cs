@@ -1,4 +1,5 @@
 using System.Reflection;
+using CronoAI.Dados.Auditoria;
 using CronoAI.Dominio;
 using Microsoft.EntityFrameworkCore;
 
@@ -43,6 +44,46 @@ public class CronoDbContext : DbContext
     public DbSet<MembroEmpresa> Membros => Set<MembroEmpresa>();
 
     public DbSet<Sessao> Sessoes => Set<Sessao>();
+
+    public DbSet<Obra> Obras => Set<Obra>();
+
+    /// <summary>Trilha append-only: só <c>Add</c> (o interceptor) e a leitura de <c>ConsultasAuditoria</c>; teste de arquitetura.</summary>
+    public DbSet<RegistroAuditoria> Auditorias => Set<RegistroAuditoria>();
+
+    public DbSet<UfReferencia> Ufs => Set<UfReferencia>();
+
+    public DbSet<MunicipioReferencia> Municipios => Set<MunicipioReferencia>();
+
+    /// <summary>Metadados da escrita auditada em curso; só existem durante <see cref="SalvarAuditadoAsync"/>.</summary>
+    internal MetadadosEscrita? MetadadosAtuais { get; private set; }
+
+    #endregion
+
+    #region Métodos públicos
+
+    /// <summary>
+    /// ÚNICO caminho para gravar entidade <see cref="IAuditavel"/>: guarda os metadados só durante a chamada, para o
+    /// <see cref="AuditoriaInterceptor"/> gravar a trilha na mesma transação (ADR 00009). Um <c>SaveChanges</c> comum
+    /// com entidade auditável lança.
+    /// </summary>
+    public async Task<int> SalvarAuditadoAsync(MetadadosEscrita metadados, CancellationToken cancelamento = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadados);
+        if (MetadadosAtuais is not null)
+        {
+            throw new InvalidOperationException("SalvarAuditadoAsync não admite chamadas aninhadas no mesmo contexto.");
+        }
+
+        MetadadosAtuais = metadados;
+        try
+        {
+            return await SaveChangesAsync(cancelamento);
+        }
+        finally
+        {
+            MetadadosAtuais = null;
+        }
+    }
 
     #endregion
 

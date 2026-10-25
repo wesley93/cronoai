@@ -1,4 +1,5 @@
 using CronoAI.Dados;
+using CronoAI.Dados.Auditoria;
 using CronoAI.Dados.Identidade;
 using CronoAI.Dominio;
 using Microsoft.EntityFrameworkCore;
@@ -82,6 +83,94 @@ public sealed class DadosTeste
         var sessao = SessaoDominio.Criar(usuarioId, criada, expiraEm ?? criada.AddHours(8), empresaAtivaId);
         await _consultas.CriarSessaoAsync(sessao);
         return sessao;
+    }
+
+    /// <summary>Dados válidos e fictícios de obra (UF PE, município fictício 2699999 com DV válido, nome único por chamada).</summary>
+    public static DadosObra DadosObraValidos(string? nome = null) =>
+        new(nome ?? "Obra Ficticia " + Guid.NewGuid().ToString("N")[..10], "PE", "2699999", null, new DateOnly(2026, 10, 1), null, null, null);
+
+    /// <summary>
+    /// Cria a obra AUDITADA, como a API faz (contexto da empresa e do usuário; origem <c>ui</c>), e devolve a entidade já
+    /// com a versão lida do banco.
+    /// </summary>
+    public async Task<Obra> CriarObraAsync(Guid empresaId, Guid usuarioId, DadosObra? dados = null, string? motivo = null)
+    {
+        var obra = Obra.Criar(empresaId, dados ?? DadosObraValidos(), DateTime.UtcNow);
+        await using var contexto = _fabrica.Criar(new ContextoSessaoBanco(usuarioId, empresaId));
+        contexto.Obras.Add(obra);
+        await contexto.SalvarAuditadoAsync(new MetadadosEscrita(OrigensAuditoria.Ui, motivo, null, DateTime.UtcNow));
+        return obra;
+    }
+
+    /// <summary>
+    /// Cria a obra SEM auditoria, por INSERT direto como <c>cronoai_app</c> (o RLS vale): para os testes que precisam
+    /// apagá-la depois com a conexão de bootstrap (a FK da trilha impede apagar obra auditada).
+    /// </summary>
+    public async Task<Guid> CriarObraSemAuditoriaAsync(Guid empresaId, string? nome = null)
+    {
+        var id = Guid.CreateVersion7();
+        var agora = DateTime.UtcNow;
+        await using var contexto = _fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaId));
+        await contexto.Database.ExecuteSqlAsync(
+            $"INSERT INTO cronoai.obra (id, empresa_id, nome, uf, municipio_ibge, criada_em, atualizada_em) VALUES ({id}, {empresaId}, {nome ?? "Obra Ficticia " + id.ToString("N")[..10]}, {"PE"}, {"2699999"}, {agora}, {agora})");
+        return id;
+    }
+
+    /// <summary>
+    /// INSERT direto em <c>obra</c> como <c>cronoai_app</c>, SEM o domínio, para provar as restrições do BANCO (CHECK, FK,
+    /// índice único e RLS). O contexto de banco é o da empresa informada; a linha leva <paramref name="empresaDaLinha"/>.
+    /// </summary>
+    public async Task InserirObraBrutaAsync(
+        Guid empresaDoContexto,
+        Guid empresaDaLinha,
+        string nome,
+        string uf = "PE",
+        string municipio = "2699999",
+        Guid? responsavel = null,
+        string? sinapiUf = null,
+        string? sinapiRegime = null,
+        DateOnly? sinapiDataBase = null,
+        string opcoes = "{}")
+    {
+        var agora = DateTime.UtcNow;
+        await using var contexto = _fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaDoContexto));
+        await contexto.Database.ExecuteSqlAsync($"""
+            INSERT INTO cronoai.obra (id, empresa_id, nome, uf, municipio_ibge, responsavel_id, sinapi_uf, sinapi_regime, sinapi_data_base, opcoes_cronograma, criada_em, atualizada_em)
+            VALUES ({Guid.CreateVersion7()}, {empresaDaLinha}, {nome}, {uf}, {municipio}, {responsavel}, {sinapiUf}, {sinapiRegime}, {sinapiDataBase}, {opcoes}::jsonb, {agora}, {agora})
+            """);
+    }
+
+    /// <summary>
+    /// INSERT direto em <c>auditoria</c> como <c>cronoai_app</c> (contexto da empresa informada), sem obra: prova o RLS e o
+    /// INSERT no identity. A linha leva <paramref name="empresaDaLinha"/>.
+    /// </summary>
+    public async Task InserirAuditoriaBrutaAsync(Guid empresaDoContexto, Guid empresaDaLinha, Guid usuarioId)
+    {
+        await using var contexto = _fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaDoContexto));
+        await contexto.Database.ExecuteSqlAsync($"""
+            INSERT INTO cronoai.auditoria (empresa_id, usuario_id, entidade, entidade_id, acao, origem, em)
+            VALUES ({empresaDaLinha}, {usuarioId}, {"obra"}, {Guid.CreateVersion7()}, {"criar"}, {"ui"}, {DateTime.UtcNow})
+            """);
+    }
+
+    /// <summary>Versão da obra lida do banco (como app, contexto da empresa), sem passar pelo ChangeTracker.</summary>
+    public async Task<long> LerVersaoAsync(Guid empresaId, Guid obraId)
+    {
+        await using var contexto = _fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaId));
+        var versoes = await contexto.Database
+            .SqlQuery<long>($"SELECT versao AS \"Value\" FROM cronoai.obra WHERE id = {obraId}")
+            .ToListAsync();
+        return versoes.Single();
+    }
+
+    /// <summary>Trilha da obra em ordem de gravação (como app, contexto da empresa; o RLS e o filtro valem).</summary>
+    public async Task<List<RegistroAuditoria>> LerAuditoriaAsync(Guid empresaId, Guid obraId)
+    {
+        await using var contexto = _fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaId));
+        return await contexto.Auditorias.AsNoTracking()
+            .Where(a => a.ObraId == obraId)
+            .OrderBy(a => a.Id)
+            .ToListAsync();
     }
 
     /// <summary>Lê um escalar <see cref="Guid"/> ou contagem pelo SQL parametrizado, sem filtro do EF (só o RLS vale).</summary>

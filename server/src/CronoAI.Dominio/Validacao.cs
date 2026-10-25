@@ -13,6 +13,12 @@ internal static class Validacao
         }
     }
 
+    /// <summary>
+    /// Erro de validação de UM campo do contrato: <see cref="ArgumentException.ParamName"/> leva a chave camelCase que a
+    /// API devolve no <c>ValidationProblem</c> (nome que não é parâmetro do método, por isso não passa direto pelo construtor).
+    /// </summary>
+    public static ArgumentException Campo(string campo, string mensagem) => new(mensagem, campo);
+
     public static void Utc(DateTime valor, string parametro)
     {
         if (valor.Kind != DateTimeKind.Utc)

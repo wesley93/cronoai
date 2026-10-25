@@ -43,6 +43,9 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
     /// <summary>String do papel <c>cronoai_migrador</c> (dono do schema).</summary>
     public string StringConexaoMigrador { get; private set; } = "";
 
+    /// <summary>Linhas de <c>municipio_referencia</c> logo depois da migração, ANTES do seed fictício (a migração não semeia município).</summary>
+    public int MunicipiosAposMigracao { get; private set; }
+
     /// <summary>Fábrica de contextos conectados como <c>cronoai_app</c> (o papel da API).</summary>
     public IFabricaCronoDbContext FabricaApp => new FabricaCronoDbContext(StringConexaoApp);
 
@@ -82,6 +85,11 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
         // Migra uma vez por coleção, como o migrador (a API nunca migra na partida).
         await using var contexto = CriarContextoMigrador();
         await contexto.Database.MigrateAsync();
+
+        // A migração não semeia município (a lista oficial é insumo pendente). Registra isso ANTES do seed fictício,
+        // que existe só para os testes (fixture, nunca migração; nenhum nome real).
+        MunicipiosAposMigracao = int.Parse(await ConsultarComoSuperusuarioAsync("SELECT count(*) FROM cronoai.municipio_referencia"), System.Globalization.CultureInfo.InvariantCulture);
+        await SemearMunicipioFicticioAsync();
     }
 
     public async ValueTask DisposeAsync()
@@ -107,6 +115,24 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
         }
 
         return resultado.Stdout.Trim();
+    }
+
+    /// <summary>Município FICTÍCIO (DV válido, nome "TESTE") para provar a FK pós-carga; nunca vai para migração.</summary>
+    public async Task SemearMunicipioFicticioAsync()
+    {
+        await ConsultarComoSuperusuarioAsync(
+            "INSERT INTO cronoai.municipio_referencia (codigo_ibge, uf, nome) VALUES ('2699999', 'PE', 'MUNICIPIO TESTE A') ON CONFLICT DO NOTHING");
+    }
+
+    /// <summary>
+    /// Executa um script como superusuário (psql, VERBOSITY=verbose para trazer o SQLSTATE) e devolve o código de saída e
+    /// a saída de erro, sem lançar. Serve a testes que precisam de <c>SET LOCAL ROLE</c> dentro de uma transação desfeita.
+    /// </summary>
+    public async Task<(long? CodigoSaida, string Saida, string Erro)> ExecutarScriptComoSuperusuarioAsync(string sql)
+    {
+        var resultado = await _container!.ExecAsync(
+            ["psql", "-U", _usuarioSuper, "-d", _bancoNome, "-At", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose", "-c", sql]);
+        return (resultado.ExitCode, resultado.Stdout.Trim(), Mascarar(resultado.Stderr));
     }
 
     /// <summary>Cria um contexto do EF conectado como migrador (DDL).</summary>
