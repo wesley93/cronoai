@@ -268,7 +268,7 @@ Avaliação do `arquiteto` r01 para D1 a D13; os demais vêm das rodadas 02 a 04
 | seguranca r03 Info A | `result: null` passa na validação | corrigido (4223154) |
 | verificação visual r01 | Coluna "Origem" cortada a 800 px; "Risco Baixo" sem frente | corrigido (833cb5f); conferido pelo orquestrador na r02 |
 | testes r04 | Asserção `includes('não estabilizou')` ficou vazia depois da troca do texto do aviso (r04) | corrigido (d8b5ae6): procura "sem estabilizar" (`scenarios.test.ts:494`, 42/42 verdes) |
-| especialista-obra r04 | Redação "8 h no dia inteiro do calendário" na regra e no comentário de `simulateOvertime`: vale o expediente do dia útil do calendário da frente | corrigido (d8b5ae6) (`calculo-precisao.md:54`, `scenarios.ts:592`) |
+| especialista-obra r04 | Redação "8 h no dia inteiro do calendário" na regra e no comentário de `simulateOvertime`: vale o expediente do dia útil do calendário da frente | corrigido (d8b5ae6) (`calculo-precisao.md:54`, `scenarios.ts:592`); a redação antiga voltou ao mover o JSDoc para `custoHoraExtra` (139262d) e foi corrigida de novo depois da reauditoria (`scenarios.ts:742`) |
 | especialista-obra r04 | Não houve tarefa 0 separada; a r01 cobre os 4 itens a posteriori | desvio de processo registrado (ver "Desvios do plano") |
 | auditoria r01 #1 (Médio) | AC-6 no modo "frentes escolhidas" medido acima de 1 s (1.098 / 1.280 / 1.341 ms) e classificado como não obrigatório | corrigido (139262d): agenda separada do custo; todos os modos < 1 s; linha AC-6-F obrigatória e PASS |
 | auditoria r01 #2 (Médio) | RNF-03.2 sem linha na matriz; cenários em R$ inteiro | corrigido (139262d): `fmtBRLCents` nos cenários; linha RNF-03.2 na matriz |
@@ -282,7 +282,7 @@ Avaliação do `arquiteto` r01 para D1 a D13; os demais vêm das rodadas 02 a 04
 | arquiteto r05 R-25 | `agendaHoraExtra` guardava a referência ao array reativo de frentes | corrigido no commit de ajustes finais: cópia `[...p.frentes]` |
 | testes r05 | Teste de tempo do parser (`msProjectXmlParser.test.ts:798`, teto de 2.000 ms) falhou 1 vez com a máquina carregada (2.016 ms), passou isolado (481 ms) e na repetição | pendência registrada: pré-existente, fora do diff do ciclo |
 | testes r05 | 3º teste de identidade só afirma direção do `extraCost` | registrado (menor): a pré-condição de identidade é exata |
-| reauditoria | A PREENCHER | A PREENCHER |
+| reauditoria (125f637) | 1 Baixo: comentário de `custoHoraExtra` voltou a dizer "8 h no dia inteiro" | corrigido no commit seguinte (`scenarios.ts:742`); duas linhas em branco extras removidas |
 
 ## Pendências registradas
 - **Rodada 04:** `especialista-obra` e `seguranca` confirmaram depois (APROVADO); nenhum número de cálculo mudou.

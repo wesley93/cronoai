@@ -739,8 +739,8 @@ export function agendaHoraExtra(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAUL
 /**
  * CUSTO da hora extra sobre a agenda pronta: horas × taxa × adicional, profissionais-dia, economia de indireto, risco e memória financeira
  * (lê as premissas). Custo = Σ por sábado e por frente convocada ativa no sábado: unidades × horas do sábado × taxa × (1 + adicional). As horas
- * do sábado são os minutos úteis da exceção do sábado no calendário da frente ÷ 60 (o mesmo que o cronograma usa): 8 h no dia inteiro, 4 h no
- * meio período. A equipe é convocada para o expediente inteiro (regra do plano, a validar com RH); a memória mostra os minutos efetivamente trabalhados.
+ * do sábado são os minutos úteis da exceção do sábado no calendário da frente ÷ 60 (o mesmo que o cronograma usa): no dia inteiro, o expediente
+ * do dia útil do calendário da frente (8 h no padrão), 4 h no meio período. A equipe é convocada para o expediente inteiro (regra do plano, a validar com RH); a memória mostra os minutos efetivamente trabalhados.
  */
 export function custoHoraExtra(ctx: Ctx, ag: ResultadoAgendaHE): ScenarioResult {
   if ('inaplicavel' in ag) return notApplicable('overtime', TITULO_HORA_EXTRA, ag.inaplicavel, ctx)
@@ -841,8 +841,6 @@ export function custoHoraExtra(ctx: Ctx, ag: ResultadoAgendaHE): ScenarioResult 
     horaExtra: { jornada, dias: days, calendariosNovos: novos, atribuicoes, naoConvocadas, voltas },
   })
 }
-
-
 
 export function simulateOvertime(ctx: Ctx, p: ScenarioParams['overtime'] = DEFAULT_SCENARIO_PARAMS.overtime): ScenarioResult {
   return custoHoraExtra(ctx, agendaHoraExtra(ctx, p))
