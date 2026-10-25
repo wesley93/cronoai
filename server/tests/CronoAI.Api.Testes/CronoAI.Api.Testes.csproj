@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- xunit.v3: o projeto de testes é um executável. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>CronoAI.Api.Testes</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CronoAI.Api\CronoAI.Api.csproj" />
+    <ProjectReference Include="..\..\src\CronoAI.Dados\CronoAI.Dados.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Mesma fonte do bootstrap usado pelo docker-compose: a fixture o executa no contêiner descartável. -->
+    <None Include="..\..\db\bootstrap\01-papeis-e-schema.sh" Link="bootstrap\01-papeis-e-schema.sh" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

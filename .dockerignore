@@ -18,3 +18,4 @@ playwright.config.ts
 playwright-report
 test-results
 blob-report
+server

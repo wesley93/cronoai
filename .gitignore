@@ -10,3 +10,11 @@ blob-report/
 .env
 .env.*
 !.env.example
+
+# Backend .NET
+server/**/bin/
+server/**/obj/
+server/**/TestResults/
+*.user
+# O appsettings.json do backend é versionado (sem segredo); alguns ambientes o ignoram globalmente
+!server/src/**/appsettings.json

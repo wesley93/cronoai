@@ -3,6 +3,11 @@
 #   Outra porta — bash: CRONOAI_PORT=8088 docker compose up --build app
 #                 PowerShell: $env:CRONOAI_PORT=8088; docker compose up --build app
 #   Desenvolvimento (HMR): docker compose --profile dev up dev  -> http://localhost:5180
+#   Banco local do backend (PostgreSQL 17, só 127.0.0.1:5432): exige as 3 senhas no .env (veja .env.example)
+#                 docker compose --profile backend up -d db
+#     Porta do host diferente de 5432: CRONOAI_DB_PORTA=55432 (se já houver PostgreSQL local)
+#     Recriar papéis/senhas (o bootstrap só roda em volume vazio — apaga os dados locais):
+#                 docker compose --profile backend down -v
 # Publicação em servidor/ambientes: alinhar com a equipe de Infraestrutura.
 
 services:
@@ -37,5 +42,55 @@ services:
       - .:/app
       - node_modules:/app/node_modules
 
+  # PostgreSQL local do backend (ciclo 00011). Só desenvolvimento: sem deploy, sem imagem publicada.
+  # Nunca definir POSTGRES_HOST_AUTH_METHOD=trust: com senha, o TCP exige scram-sha-256.
+  db:
+    profiles: ["backend"]
+    # Mesma referência (tag + digest) usada pela fixture dos testes (server/tests/.../BancoPostgresFixture.cs).
+    image: postgres:17@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe
+    command: ["postgres", "-c", "timezone=UTC", "-c", "log_statement=none"]
+    environment:
+      # As 3 senhas vêm do .env. Não se usa "${VAR:?}": o Compose interpola o arquivo inteiro, mesmo de perfil
+      # inativo, e isso quebraria o "docker compose up app" do front. Senha vazia = o contêiner recusa iniciar
+      # (a imagem exige POSTGRES_PASSWORD e o bootstrap exige as outras duas), com mensagem clara no log.
+      POSTGRES_USER: cronoai_bootstrap
+      POSTGRES_DB: cronoai
+      POSTGRES_PASSWORD: ${CRONOAI_DB_SENHA:-}
+      CRONOAI_SENHA_MIGRADOR: ${CRONOAI_DB_SENHA_MIGRADOR:-}
+      CRONOAI_SENHA_APP: ${CRONOAI_DB_SENHA_APP:-}
+      # UTF-8 com ordenação ICU pt-BR (ADR 00004). A collation de produção é da Infraestrutura.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale-provider=icu --icu-locale=pt-BR --locale=C.UTF-8 --auth-host=scram-sha-256"
+    ports:
+      # Só na interface local da máquina (127.0.0.1)
+      - "127.0.0.1:${CRONOAI_DB_PORTA:-5432}:5432"
+    volumes:
+      - cronoai_pgdados:/var/lib/postgresql/data
+      - ./server/db/bootstrap/01-papeis-e-schema.sh:/docker-entrypoint-initdb.d/01-papeis-e-schema.sh:ro
+    healthcheck:
+      # -h 127.0.0.1: o servidor temporário do initdb só escuta no socket. O segundo teste (socket local) garante
+      # que "healthy" só vale com o bootstrap aplicado: se ele falhar, o volume fica inicializado sem os papéis
+      # e o contêiner aparece "unhealthy" (corrija com "docker compose --profile backend down -v").
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U cronoai_bootstrap -d cronoai && psql -U cronoai_bootstrap -d cronoai -Atc \"SELECT 1 FROM pg_roles WHERE rolname = 'cronoai_app'\" | grep -q 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    read_only: true
+    tmpfs:
+      - /var/run/postgresql
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      # Mínimo que o entrypoint da imagem precisa (chown do PGDATA e troca para o usuário postgres)
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 volumes:
   node_modules:
+  cronoai_pgdados:
