@@ -2,7 +2,7 @@
 # CronoAI — imagem de produção: build com Node e entrega estática com Nginx sem root.
 
 # ---------- Etapa 1: dependências e build ----------
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 
 # Instala dependências pelo lockfile (camada reaproveitada enquanto package*.json não mudar)
