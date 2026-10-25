@@ -2,15 +2,15 @@
 
 | Campo | Valor |
 |---|---|
-| Status | **Aprovado pelo usuário em 25/10/2026** (ordem dos 9 ciclos; P1 = B; P2 = a) |
+| Status | **Aprovado pelo usuário em 25/10/2026** (ordem dos 9 ciclos; P1 = B; P2 = a). **Adendo aprovado no mesmo dia:** SPEC-15 (Central de integrações) entra com a E5 do ciclo 00006 e o ciclo novo 00010 |
 | Data | 2026-10-25 |
 | Autor | agente `arquiteto` (processo em [.claude/skills/desenvolver-recurso](../../.claude/skills/desenvolver-recurso/SKILL.md)) |
 | Base | `master` |
 | Origem | Pedido "Pode rodar todas specs", com a triagem do orquestrador; requisito do usuário de obras em **qualquer UF**, para **gestores, construtoras e engenheiros com várias frentes** (SPEC-14); insumos locais fora do git em `D:\Pessoal\Planejamento\Alice\referencias\` (SINAPI 09/2026 nacional e 134 MSPDI do MPXJ) |
 
 ## Resumo
-- **O que é:** a ordem e o recorte para executar no protótipo (front-only) tudo o que está liberado: SPEC-00 incremento 0.2, SPEC-14 parte front, SPEC-06 parcial (robustez da importação com o corpus), SPEC-05 parte 1, SPEC-03, SPEC-07 parcial (leitor do layout 2025), SPEC-04 e SPEC-10 parte 1.
-- **Ordem recomendada (9 ciclos):**
+- **O que é:** a ordem e o recorte para executar no protótipo (front-only) tudo o que está liberado: SPEC-00 incremento 0.2, SPEC-14 parte front, SPEC-06 parcial (robustez da importação com o corpus), SPEC-05 parte 1, SPEC-03, SPEC-07 parcial (leitor do layout 2025), SPEC-04, SPEC-10 parte 1 e SPEC-15 parte sem segredo.
+- **Ordem recomendada (10 ciclos):**
 
 | Ciclo | Conteúdo |
 |---|---|
@@ -19,14 +19,15 @@
 | `00003` | Corpus MSPDI |
 | `00004` | Motor em minutos |
 | `00005` | Premissas e calendários |
-| `00006` | SINAPI 2025 |
+| `00006` | SINAPI 2025 e tela "Integrações" |
 | `00007` | Snapshots |
 | `00008` | Medição de EVM |
 | `00009` | Portfólio |
+| `00010` | Mapeamento de campos do MS Project (Central de integrações) |
 
 - **Por quê:** todas passam pela store única (`useProjectStore.ts`, 812 linhas) e por `src/types/domain.ts`, e quatro delas pelo `msProjectXmlParser.ts`. O multiobra muda o formato de todo o estado salvo e vem antes do que é gravado por obra. O corpus MSPDI vem antes de qualquer mudança no parser, para servir de comparação "antes e depois" em arquivos reais do MS Project.
-- **Faixas previstas:** 3, 2, 3, 3, 2, 3, 3, 2, 2.
-- **Estimativa relativa (opinião):** P, M, M, G, M, M, M/G, M, M.
+- **Faixas previstas:** 3, 2, 3, 3, 2, 3, 3, 2, 2, 3.
+- **Estimativa relativa (opinião):** P, M, M, G, M, M, M/G, M, M, P/M.
 - **Decisões do gate (25/10/2026):** ordem aprovada; P1 = (B), limiar de 80% nas 4 métricas no 00001; P2 = (a), calendário por tarefa (RF-05.2, parte "tarefa") no 00004 e usado pelo 00005.
 - **O que você precisa fazer:** em cada ciclo, aprovar o plano ou a ficha antes da implementação (o gate da etapa 4 continua valendo por ciclo).
 
@@ -42,6 +43,7 @@
 | SPEC-07 (parcial) | Leitor do layout oficial 2025 (offline), RUP por função a partir do Analítico e recorte por UF/regime/data-base levado à obra | RF-07.1 (parcial, offline), RF-07.2, RF-07.3 (no front) |
 | SPEC-04 | Snapshots imutáveis, retificação, Curva S de snapshots, LB0–LB10 no MSPDI, diff | RF-04.1 a RF-04.6 |
 | SPEC-10 (parte 1) | Métodos de EV, critérios de medição, PV por pacote, limiares; AC marcado como estimativa | RF-10.1, RF-10.2, RF-10.3 (marcação), RF-10.4, RF-10.6 |
+| SPEC-15 (Fase 1) | Tela "Integrações" por obra (00006), com o cartão SINAPI e os cartões da Fase 2 sem campos; mapeamento de campos personalizados do MS Project (00010) | RF-15.1 a RF-15.5; RNF-15.1, RNF-15.3 |
 
 **Brasil todo na Fase 1:** cada obra tem UF (seletor das 27), município (texto livre; código IBGE reservado para a Fase 2), regime de encargos e data-base do SINAPI. O navegador **nunca** recebe a tabela nacional: com a 00006, a obra recebe só o recorte da UF/regime/data-base dela (coerente com a SPEC-07 RF-07.1a). Feriados estaduais e municipais entram como exceções manuais por obra, com origem, até a ingestão oficial na Fase 2 (SPEC-03 RF-03.5).
 
@@ -60,8 +62,9 @@
 | 7 | 00007 | SPEC-04 | 00005 | **O snapshot é imutável:** gravá-lo antes da migração de unidade (00004) ou do multiobra (00002) obrigaria a migrar um histórico que não se edita. Reescreve `computeSCurve` (`evm.ts:123-168`) e substitui a linha de base única (`useProjectStore.ts:700-706`; export só `<Number>0` em `msProjectXmlParser.ts:223-231`). |
 | 8 | 00008 | SPEC-10 (parte 1) | 00007 | Dependência declarada na SPEC-10; mexe em `computeEvm`/`plannedFraction` (`evm.ts:48-51`, `83-93`), que a 00007 acabou de alterar. |
 | 9 | 00009 | SPEC-14 (RF-14.4–14.6) | 00002, 00008 | Consolida números que as 00004 a 00008 mudam. Por último, os testes dele não precisam ser refixados a cada ciclo. Os alertas do portfólio (RF-14.6) usam a configuração de limiar da SPEC-10 (RF-10.6), e o RNF-14.1 depende do motor final. **Alternativa:** antecipá-lo para logo depois do 00002, se você quiser mostrar o portfólio cedo, sabendo que os números dele mudarão. |
+| 10 | 00010 | SPEC-15 (RF-15.3/15.4) + SPEC-06 RF-06.4 | 00003, 00006, 00007 | Mexe na leitura e na escrita de `ExtendedAttribute` (`msProjectXmlParser.ts`, Text1 = SINAPI e Number1 = lead time fixos hoje), que a 00004 e a 00007 também alteram: vir depois delas evita conflito no parser e já roda contra o corpus da 00003 e as LBs da 00007. Usa a tela "Integrações" criada na 00006 (E5). **Alternativa:** antecipá-lo para logo depois da 00006, se for preciso importar cedo cronogramas da empresa que usam outros campos (ex.: Text5), aceitando refazer o *merge* do parser na 00007. |
 
-**Grafo:** `00001 → {00002 ‖ 00003} → 00004 → 00005 → 00006 → 00007 → 00008 → 00009`. O único paralelismo recomendado é 00002 com 00003. Os demais ciclos são sequenciais, com merge na `master` antes do seguinte (branch aberta com `git switch master && git pull --ff-only && git switch -c …`). Com issues no GitHub, o número do ciclo passa a ser o da issue.
+**Grafo:** `00001 → {00002 ‖ 00003} → 00004 → 00005 → 00006 → 00007 → 00008 → 00009 → 00010`. O único paralelismo recomendado é 00002 com 00003. O 00010 não depende do 00008 nem do 00009 e pode correr em paralelo a eles, porque os arquivos são disjuntos (parser e cartão do MS Project × `evm.ts` e painel). Os demais ciclos são sequenciais, com merge na `master` antes do seguinte (branch aberta com `git switch master && git pull --ff-only && git switch -c …`). Com issues no GitHub, o número do ciclo passa a ser o da issue.
 
 ## 3. Por ciclo
 
@@ -149,8 +152,8 @@
 | Branch | `feat/00006-sinapi-layout-2025` |
 | Faixa | **3**. T5 SIM (o script lê um arquivo externo de 13,6 MB; possível dependência nova para ler `.xlsx`). T3 SIM (formato novo aceito pelo app: o JSON do recorte, com limite de tamanho e validação de esquema). T2 SIM (RUP derivada do Analítico → duração em `sinapi.ts`). T4 SIM (o recorte associado à obra) |
 | Proposta para o protótipo | **Script offline em Node**, fora de `src/` (ex.: `scripts/sinapi/`), rodado por quem administra: lê `SINAPI_Referencia_AAAA_MM.xlsx` a partir de `CRONOAI_REF_DIR` e gera um **recorte em JSON** por UF + regime + data-base, filtrável por códigos ou grupos, com metadados (fonte, mês de referência, UF, regime, encargos da UF, hash do arquivo de origem). O app importa esse JSON para a obra, só se UF/regime/data-base baterem com os da obra (senão, avisa). O xlsx nacional nunca vai ao navegador. Recorte compartilhado entre obras da mesma UF/regime/data-base (uma chave só), por causa da cota |
-| Entregáveis | **E1:** leitor do layout 2025 (abas `CSD`/`CCD`/`CSE` e `Analítico`; código da composição pelo `Analítico`, porque na `CSD` ele vem como fórmula/hiperlink; colunas localizadas pelo cabeçalho, porque o layout muda entre publicações; encargos por UF do cabeçalho), com testes pulados sem `CRONOAI_REF_DIR`. **E2:** função pura em `src/lib` que deriva a RUP por função a partir dos coeficientes (RF-07.2), com teste fixando valores do arquivo de 09/2026 (fonte citada). **E3:** gerador do recorte JSON e o esquema versionado dele. **E4:** importação do recorte na obra (limite de tamanho, validação de esquema, erro em português); calculadora e planilha usam o recorte; o catálogo ilustrativo fica como *fallback* marcado |
-| Requisitos cobertos | RF-07.1 (parcial: offline, sem upload do xlsx no app), RF-07.2, RF-07.3 (no front). Critérios da spec viáveis com o arquivo: custo unitário publicado em 20 composições amostradas (±R$ 0,01) e RUP igual ao coeficiente da analítica |
+| Entregáveis | **E1:** leitor do layout 2025 (abas `CSD`/`CCD`/`CSE` e `Analítico`; código da composição pelo `Analítico`, porque na `CSD` ele vem como fórmula/hiperlink; colunas localizadas pelo cabeçalho, porque o layout muda entre publicações; encargos por UF do cabeçalho), com testes pulados sem `CRONOAI_REF_DIR`. **E2:** função pura em `src/lib` que deriva a RUP por função a partir dos coeficientes (RF-07.2), com teste fixando valores do arquivo de 09/2026 (fonte citada). **E3:** gerador do recorte JSON e o esquema versionado dele. **E4:** importação do recorte na obra (limite de tamanho, validação de esquema, erro em português); calculadora e planilha usam o recorte; o catálogo ilustrativo fica como *fallback* marcado. **E5 (SPEC-15):** tela "Integrações" da obra (RF-15.1) com o cartão SINAPI (RF-15.2), que recebe a importação da E4, e os cartões da Fase 2 (WhatsApp/IA, ERP, e-mail/Teams, login) só informativos, **sem nenhum campo de credencial** (RF-15.5, RNF-15.1), com teste de componente que prova a ausência desses campos |
+| Requisitos cobertos | RF-07.1 (parcial: offline, sem upload do xlsx no app), RF-07.2, RF-07.3 (no front); SPEC-15 RF-15.1, RF-15.2, RF-15.5. Critérios da spec viáveis com o arquivo: custo unitário publicado em 20 composições amostradas (±R$ 0,01) e RUP igual ao coeficiente da analítica |
 | Fica para depois | Ingestão mensal das 27 UFs e entrega por obra (RF-07.1/07.1a): **backend .NET 10**, Fase 2, com aval de Segurança/Infra; RF-07.4 (composições próprias), RF-07.5, RF-07.6 (orçamento em `.xlsx`), RF-07.7 (orçamento ↔ EAP, que muda o BAC e o EVM) |
 | Risco de números | Médio. Durações geradas pelo SINAPI mudam quando sai o catálogo ilustrativo; obras sem recorte ficam iguais. Cada número vindo da tabela cita "SINAPI {UF} {mês/ano} {regime}" (Inviolável 7 continua para o *fallback*) |
 | Estado salvo (T4) | Referência do recorte na obra (UF/regime/data-base + hash); recorte numa chave própria, dentro da decisão de armazenamento do 00002 |
@@ -203,6 +206,21 @@
 | Outras áreas | Nenhuma no protótipo local |
 | Estimativa (opinião) | **M** |
 
+### 3.10 Ciclo 00010 — SPEC-15 parte 1: mapeamento de campos do MS Project
+
+| Item | Valor |
+|---|---|
+| Branch | `feat/00010-mapeamento-campos-msproject` |
+| Faixa | **3**. T3 SIM (o parser passa a ler e gravar `ExtendedAttribute` pelo mapeamento, em vez de Text1/Number1 fixos). T4 SIM (o mapeamento é dado da obra, pela cadeia de migrações do 00002). T1/T2 NÃO (nenhum cálculo muda; o lead time só muda de campo de origem) |
+| Entregáveis | **E1:** modelo do mapeamento (dado do CronoAI → campo do MS Project com `FieldID` da referência publicada), validação pura em `src/lib` (tipo compatível, campo repetido) e padrão igual ao de hoje. **E2:** `parseMspdiXml` e `buildMspdiXml` recebem o mapeamento, com teste de caracterização provando que o padrão gera o **mesmo `.xml` de hoje** e ida e volta com Text5/Number3 em `strictOrder`; teste de corpus da 00003 sem regressão. **E3:** cartão "MS Project" na tela "Integrações" (RF-15.3), com prévia "antes e depois" dos valores lidos ao trocar o campo e sugestão de campo na importação, só com aviso. **E4 (recomendação):** copiar o mapeamento para outra obra e exportar/importar a configuração em JSON (RF-15.4), com limite de tamanho e validação de esquema |
+| Requisitos cobertos | SPEC-06 RF-06.4; SPEC-15 RF-15.3, RF-15.4, RNF-15.3 |
+| Fica para depois | Mapeamento por empresa (RF-15.13) e todos os conectores com credencial (RF-15.6 a RF-15.12): **backend .NET 10**, Fase 2 |
+| Risco de números | Baixo, com prova obrigatória: sem configurar, import e export ficam idênticos. Trocar o campo de uma obra com histórico muda o que é lido: só com a prévia e registro no log da obra |
+| Estado salvo (T4) | Mapeamento opcional na obra; ausente = padrão Text1/Number1 |
+| Validação obrigatória | `testes`, `arquiteto`, `especialista-obra` (campos usados pelas empresas no MS Project), `seguranca` (T3: JSON importado), auditoria independente |
+| Outras áreas | **Planejamento** (quais campos personalizados a empresa usa hoje) |
+| Estimativa (opinião) | **P/M** |
+
 ## 4. Riscos transversais
 
 | Risco | Onde | Mitigação |
@@ -232,6 +250,7 @@
 | SPEC-09 | Bloqueada | SPEC-01/02; **Suprimentos e TI dona do ERP** |
 | SPEC-11 | Bloqueada | SPEC-01, 02 e 04; **Segurança** (envio de dados da obra) |
 | SPEC-12 (parte 2) | Bloqueada | SPEC-01; **Segurança, Jurídico, Infraestrutura** |
+| SPEC-15 (Fase 2) | Bloqueada | SPEC-01, 02 e 12; **Segurança + Infraestrutura** (cofre de segredos, catálogo de provedores aprovados, saída de rede); **Jurídico** para IA, transcrição e WhatsApp; **TI dona do ERP** |
 | SPEC-13 | Bloqueada | SPECs 01–07, 10 e 14; **Diretoria de engenharia**, Planejamento, Segurança/Jurídico |
 
 ## 6. Estimativa relativa (opinião, não compromisso)
@@ -247,6 +266,7 @@
 | 00007 | SPEC-04 | M/G | Snapshots e LB0–10 no MSPDI |
 | 00008 | SPEC-10 (parte 1) | M | Variações de EV/PV e alertas |
 | 00009 | SPEC-14 (portfólio) | M | Consolidação e painel |
+| 00010 | SPEC-15 (mapeamento MS Project) | P/M | Parser parametrizado, cartão e prévia; padrão idêntico ao de hoje |
 
 ## 7. Decisões do gate (tomadas em 25/10/2026)
 

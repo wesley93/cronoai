@@ -42,6 +42,7 @@ Este diretório reúne as especificações para levar o CronoAI do protótipo at
 | [SPEC-12](SPEC-12-seguranca-lgpd-operacao.md) | Segurança, LGPD e operação | 0–4 | Alta |
 | [SPEC-13](SPEC-13-piloto-validacao.md) | Piloto e validação em obra | 4 | Alta |
 | [SPEC-14](SPEC-14-portfolio-multiobra.md) | Portfólio multiobra (gestores e construtoras) | 1 (front local) e 2 (backend) | Alta |
+| [SPEC-15](SPEC-15-central-integracoes.md) | Central de integrações (MS Project, SINAPI, WhatsApp/IA, ERP, e-mail/Teams, login) | 1 (sem segredo) e 2 (conectores no backend) | Média/Alta |
 
 ## Roadmap por fases (recomendação)
 
@@ -52,6 +53,7 @@ Fase 2  Multiusuário ........ SPEC-01, 02, 12 (parte 2)            ← exige ba
 Fase 3  Integrações ......... SPEC-06 (.mpp), 08, 09, 10 (parte 2) ← exige aval de Segurança/Jurídico
 Fase 4  Operação ............ SPEC-11, 13                          ← piloto em 1 obra antes de escalar
 (SPEC-14 portfólio: parte local na Fase 1, consolidado por empresa na Fase 2)
+(SPEC-15 integrações: tela e configurações sem segredo na Fase 1, conectores com credencial na Fase 2)
 ```
 
 A Fase 1 entra antes do backend de propósito: ela torna os números corretos (premissas, histórico, paridade com o MS Project) e funciona no protótipo atual. A Fase 2 move para o servidor o que já foi validado.
@@ -76,7 +78,8 @@ O CronoAI só substitui planilhas e conferências manuais quando cumprir, no pil
 | Fornecedores de IA/transcrição/WhatsApp, retenção de áudio e foto | **Segurança da Informação + Jurídico** | 08, 12 |
 | Dados pessoais de trabalhadores (nome, telefone, voz, imagem) | **Jurídico (LGPD) + RH** | 02, 08, 12 |
 | Hora extra, adicional e compensação | **RH + Jurídico** | 03 |
-| Integração com ERP/compras | **TI corporativa / dono do ERP** | 09, 10 |
+| Integração com ERP/compras | **TI corporativa / dono do ERP** | 09, 10, 15 |
+| Cofre de segredos, provedores aprovados e saída de rede dos conectores | **Segurança da Informação + Infraestrutura** | 12, 15 |
 
 ## Decisões em aberto
 

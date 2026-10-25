@@ -23,7 +23,7 @@ Ida e volta sem perda entre CronoAI e MS Project, nas versões usadas pela empre
 - **RF-06.1 Matriz de compatibilidade:** MS Project 2016, 2019, 2021 e Project para a Web/365 (confirmar quais a empresa usa). Para cada versão: abrir o `.xml` exportado, salvar e reimportar.
 - **RF-06.2 Validação XSD:** validar o export contra o XSD oficial do MSPDI no CI (o XSD fica em `tests/fixtures/msproject/schema/`, com licença verificada).
 - **RF-06.3** Preservar na ida e volta: UID, ID, WBS/OutlineNumber, nome, duração, vínculos (tipo e lag em qualquer formato), restrições, % concluído, início/término reais, custo fixo, custo real, linhas de base 0–10, calendários (com intervalos e exceções recorrentes), recursos, atribuições e campos personalizados (SINAPI em Text1, lead time em Number1).
-- **RF-06.4 Mapeamento configurável** de campos personalizados (ex.: a empresa usa Text5 para o código SINAPI).
+- **RF-06.4 Mapeamento configurável** de campos personalizados (ex.: a empresa usa Text5 para o código SINAPI), feito na Central de integrações ([SPEC-15](SPEC-15-central-integracoes.md) RF-15.3; ciclo 00010 da Fase 1).
 - **RF-06.5 Importação incremental:** reimportar um `.xml` atualizado no MS Project mescla as mudanças pelo UID e mostra um diff (tarefas novas, removidas, alteradas) antes de aplicar.
 - **RF-06.6 `.mpp` (Fase 3):** upload de `.mpp` processado no backend com [MPXJ](https://www.mpxj.org/), devolvendo o mesmo modelo do MSPDI. Exportar `.mpp` não é possível com MPXJ (só leitura): manter `.xml` para a volta.
 - **RF-06.7** Recursos com taxa padrão opcional: escolher entre custo no "custo fixo" (padrão atual, evita contagem dupla) ou custo por recurso.
