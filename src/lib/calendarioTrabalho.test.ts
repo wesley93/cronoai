@@ -15,6 +15,7 @@ import {
   expedienteDoDiaUtil,
   horaDoMomento,
   horaParaMinutos,
+  horasPorDia,
   lerDataHora,
   minutosParaDias,
   minutosParaHora,
@@ -55,6 +56,12 @@ describe('conversões de unidade', () => {
     expect(diasParaMinutos(7.92)).toBe(3802) // 3.801,6 → 3.802
     expect(minutosParaDias(5760)).toBe(12)
     expect(minutosParaDias(240)).toBe(0.5)
+  })
+
+  it('horas por dia = minutos por dia ÷ 60 (D-18)', () => {
+    expect(horasPorDia(480)).toBe(8)
+    expect(horasPorDia(450)).toBe(7.5)
+    expect(horasPorDia()).toBe(8)
   })
 
   it('horários: 24:00 vale 1.440; inválidos são recusados', () => {

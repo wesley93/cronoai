@@ -96,7 +96,7 @@ describe('suprimentos', () => {
 
 describe('SINAPI', () => {
   it('Duração = Q × HH / (equipe × 8)', () => {
-    expect(durationFromTeam(1000, 0.8, 5)).toBe(20)
+    expect(durationFromTeam(1000, 0.8, 5, 8)).toBe(20)
   })
 })
 

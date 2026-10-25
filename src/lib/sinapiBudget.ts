@@ -1,7 +1,9 @@
 // Planilha orçamentária SINAPI: leitura de CSV e dimensionamento de cada linha para a EAP.
 import type { ResourceAssignment } from '@/types/domain'
-import { SINAPI_CATALOG, type SinapiItem } from '@/data/sinapiCatalog'
+import type { EquipeProporcional, ItemCatalogoSinapi } from '@/types/sinapi'
+import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
 import { durationFromTeam, scheduleDays } from './sinapi'
+import { recursosDaEquipe } from './sinapiRup'
 import { normalizeText } from './wbs'
 
 export interface BudgetLine {
@@ -21,6 +23,10 @@ export interface BudgetLine {
   team: number
   /** Grupo de 1º nível da EAP (01, 02, ...). */
   group: string
+  /** Demais funções da equipe em proporção da principal (recorte SINAPI). Ausente = `helperRatio` (catálogo ilustrativo). */
+  equipe?: EquipeProporcional[]
+  /** Fonte do custo e da RUP ("SINAPI SP 09/2026 não desonerado"). Ausente = ilustrativo. */
+  fonte?: string
 }
 
 export type BatchLinkMode = 'FS' | 'SS'
@@ -35,11 +41,17 @@ export interface BatchOptions {
 export const DEFAULT_BATCH_OPTIONS: BatchOptions = { mode: 'SS', overlapPct: 40 }
 export const MAX_BUDGET_LINES = 200
 
-export function lineDuration(l: Pick<BudgetLine, 'quantity' | 'rup' | 'team'>): number {
-  return scheduleDays(durationFromTeam(l.quantity, l.rup, Math.max(1, l.team)))
+/** Duração em dias úteis; `horasPorDia` = minutos por dia da obra ÷ 60 (D-18, parâmetro obrigatório). */
+export function lineDuration(l: Pick<BudgetLine, 'quantity' | 'rup' | 'team'>, horasPorDia: number): number {
+  return scheduleDays(durationFromTeam(l.quantity, l.rup, Math.max(1, l.team), horasPorDia))
 }
 
-export function lineResources(l: Pick<BudgetLine, 'professional' | 'team' | 'helperRatio'>): ResourceAssignment[] {
+/**
+ * Recursos da linha. Com `equipe` (recorte): cada função com `max(1, ⌈equipe × proporção − TOLERANCIA_EQUIPE⌉)`.
+ * Sem `equipe` (catálogo ilustrativo): a principal e o "Servente" pelo `helperRatio`, com o ceil de sempre (−1e-9).
+ */
+export function lineResources(l: Pick<BudgetLine, 'professional' | 'team' | 'helperRatio'> & { equipe?: readonly EquipeProporcional[] }): ResourceAssignment[] {
+  if (l.equipe) return recursosDaEquipe(l.professional, l.team, l.equipe)
   const helpers = Math.ceil(Math.max(1, l.team) * Math.max(0, l.helperRatio) - 1e-9)
   return [{ resource: l.professional, units: Math.max(1, l.team) }, ...(helpers > 0 ? [{ resource: 'Servente', units: helpers }] : [])]
 }
@@ -64,7 +76,7 @@ export function inferGroup(description: string): string {
   return rules.find(([re]) => re.test(n))?.[1] ?? '09'
 }
 
-export function lineFromCatalog(item: SinapiItem, id: string, quantity = item.sampleQuantity, team = 6, location = ''): BudgetLine {
+export function lineFromCatalog(item: ItemCatalogoSinapi, id: string, quantity = item.sampleQuantity ?? 1, team = 6, location = ''): BudgetLine {
   return {
     id,
     code: item.code,
@@ -78,6 +90,8 @@ export function lineFromCatalog(item: SinapiItem, id: string, quantity = item.sa
     helperRatio: item.helperRatio,
     team,
     group: item.group,
+    ...(item.equipe ? { equipe: item.equipe } : {}),
+    ...(item.fonte ? { fonte: item.fonte } : {}),
   }
 }
 
@@ -133,7 +147,7 @@ export interface CsvImportResult {
  * Lê planilha orçamentária em CSV (separador ; ou ,). Colunas mínimas: código, descrição, unidade, quantidade.
  * RUP, custo e profissional são completados pelo catálogo quando ausentes.
  */
-export function parseBudgetCsv(text: string, catalog: SinapiItem[] = SINAPI_CATALOG, defaultTeam = 6): CsvImportResult {
+export function parseBudgetCsv(text: string, catalog: readonly ItemCatalogoSinapi[] = SINAPI_CATALOG, defaultTeam = 6): CsvImportResult {
   const rows = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((r) => r.trim())
   if (!rows.length) return { lines: [], errors: ['Arquivo vazio.'] }
   const sep = (rows[0].match(/;/g)?.length ?? 0) >= (rows[0].match(/,/g)?.length ?? 0) ? ';' : ','
@@ -179,6 +193,9 @@ export function parseBudgetCsv(text: string, catalog: SinapiItem[] = SINAPI_CATA
       helperRatio: item?.helperRatio ?? 0.5,
       team: Number.isFinite(team) && team >= 1 ? Math.round(team) : defaultTeam,
       group: item?.group ?? inferGroup(description),
+      // Equipe por função só quando o item é do recorte e a planilha não troca o profissional (a mistura de funções segue a publicada, mesmo com RUP digitada)
+      ...(item?.equipe && !get('professional') ? { equipe: item.equipe } : {}),
+      ...(item?.fonte ? { fonte: item.fonte } : {}),
     })
   })
   if (body.length > MAX_BUDGET_LINES) errors.push(`Somente as primeiras ${MAX_BUDGET_LINES} linhas foram lidas.`)

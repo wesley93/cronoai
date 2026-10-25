@@ -9,7 +9,8 @@ import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import BudgetSheet from './sinapi/BudgetSheet.vue'
 import { SINAPI_CATALOG, SINAPI_REFERENCE_URL } from '@/data/sinapiCatalog'
-import { HOURS_PER_DAY, durationFromTeam, scheduleDays, teamFromDuration, totalManHours } from '@/lib/sinapi'
+import { horasPorDia } from '@/lib/calendarioTrabalho'
+import { durationFromTeam, scheduleDays, teamFromDuration, totalManHours } from '@/lib/sinapi'
 import { rateOf } from '@/lib/scenarios'
 import { fmtBRL, fmtDate, fmtDiasUteis, fmtNum } from '@/lib/format'
 import { descreverTabelaSinapi } from '@/lib/obras'
@@ -33,14 +34,16 @@ watch(catalogIdx, (i) => {
   parentWbs.value = groups.value.some((g) => g.wbs === SINAPI_CATALOG[i].group) ? SINAPI_CATALOG[i].group : groups.value[0]?.wbs ?? ''
 })
 
+// Jornada da obra: minutos por dia ÷ 60 (480 → 8 h), a mesma fonte do crashing (D-18)
+const horas = computed(() => horasPorDia(project.minutosPorDia))
 const hh = computed(() => totalManHours(quantity.value, item.rup))
-const rawDuration = computed(() => (mode.value === 'equipe' ? durationFromTeam(quantity.value, item.rup, team.value) : desiredDays.value))
-const officials = computed(() => (mode.value === 'equipe' ? team.value : Math.max(1, Math.ceil(teamFromDuration(quantity.value, item.rup, desiredDays.value) - 1e-9))))
-const rawTeamForDuration = computed(() => teamFromDuration(quantity.value, item.rup, desiredDays.value))
-const days = computed(() => (mode.value === 'equipe' ? scheduleDays(rawDuration.value) : scheduleDays(durationFromTeam(quantity.value, item.rup, officials.value))))
+const rawDuration = computed(() => (mode.value === 'equipe' ? durationFromTeam(quantity.value, item.rup, team.value, horas.value) : desiredDays.value))
+const officials = computed(() => (mode.value === 'equipe' ? team.value : Math.max(1, Math.ceil(teamFromDuration(quantity.value, item.rup, desiredDays.value, horas.value) - 1e-9))))
+const rawTeamForDuration = computed(() => teamFromDuration(quantity.value, item.rup, desiredDays.value, horas.value))
+const days = computed(() => (mode.value === 'equipe' ? scheduleDays(rawDuration.value) : scheduleDays(durationFromTeam(quantity.value, item.rup, officials.value, horas.value))))
 const helpers = computed(() => Math.ceil(officials.value * item.helperRatio - 1e-9))
 const bac = computed(() => quantity.value * item.unitCost)
-const laborCost = computed(() => hh.value * rateOf(project.premissasVigentes, item.professional) + days.value * HOURS_PER_DAY * helpers.value * rateOf(project.premissasVigentes, 'Servente'))
+const laborCost = computed(() => hh.value * rateOf(project.premissasVigentes, item.professional) + days.value * horas.value * helpers.value * rateOf(project.premissasVigentes, 'Servente'))
 const dailyOutput = computed(() => (days.value ? quantity.value / days.value : 0))
 
 // Inserção na EAP
@@ -190,10 +193,10 @@ function add() {
           </div>
 
           <div class="mt-4 overflow-x-auto rounded-lg bg-zinc-950 px-4 py-3 font-mono text-[12px] text-zinc-300 dark:bg-black/50">
-            <div class="text-zinc-500">// Duração = (Quantidade × Coeficiente_HH) / (Equipe × 8 horas)</div>
+            <div class="text-zinc-500">// Duração = (Quantidade × Coeficiente_HH) / (Equipe × {{ fmtNum(horas) }} horas por dia)</div>
             <div class="mt-1 whitespace-nowrap">
-              Duração = (<span class="text-amber-300">{{ fmtNum(quantity) }} {{ item.unit }}</span> × <span class="text-amber-300">{{ item.rup.toString().replace('.', ',') }} HH/{{ item.unit }}</span>) / (<span class="text-sky-300">{{ officials }}</span> × 8 h)
-              = <span class="text-white">{{ fmtNum(durationFromTeam(quantity, item.rup, officials)) }}</span> → <span class="font-bold text-emerald-400">{{ days }} dias úteis</span>
+              Duração = (<span class="text-amber-300">{{ fmtNum(quantity) }} {{ item.unit }}</span> × <span class="text-amber-300">{{ item.rup.toString().replace('.', ',') }} HH/{{ item.unit }}</span>) / (<span class="text-sky-300">{{ officials }}</span> × {{ fmtNum(horas) }} h)
+              = <span class="text-white">{{ fmtNum(durationFromTeam(quantity, item.rup, officials, horas)) }}</span> → <span class="font-bold text-emerald-400">{{ days }} dias úteis</span>
             </div>
           </div>
         </div>

@@ -40,6 +40,11 @@ export function minutosParaDias(minutos: number, minutosPorDia = MINUTOS_POR_DIA
   return minutos / minutosPorDia
 }
 
+/** Horas de trabalho por dia = `minutosPorDia ÷ 60` (480 → 8 h; 450 → 7,5 h). Mesma fonte do custo do crashing e da duração SINAPI (D-18). */
+export function horasPorDia(minutosPorDia = MINUTOS_POR_DIA_PADRAO): number {
+  return minutosPorDia / 60
+}
+
 /** `hh:mm` ou `hh:mm:ss` → minutos do dia (0–1440). `undefined` se o texto não é um horário válido. */
 export function horaParaMinutos(texto: string): number | undefined {
   const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(texto.trim())

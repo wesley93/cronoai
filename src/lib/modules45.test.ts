@@ -65,7 +65,7 @@ describe('Geração em lote na EAP', () => {
     // 1ª linha do grupo 06: FS na última tarefa do grupo anterior; 2ª: SS com 40% da anterior
     expect(contrapiso.predecessors[0].type).toBe('FS')
     expect(porcelanato.predecessors).toEqual([{ uid: contrapiso.uid, type: 'SS', lag: { tipo: 'util', minutos: Math.round((contrapiso.duracaoMin / 480) * 0.4) * 480 } }])
-    expect(porcelanato.duracaoMin).toBe(lineDuration(lines.find((l) => l.code === '87263')!) * 480)
+    expect(porcelanato.duracaoMin).toBe(lineDuration(lines.find((l) => l.code === '87263')!, 8) * 480)
     expect(porcelanato.wbs.startsWith('06.')).toBe(true)
     expect(store.taskByUid.get(porcelanato.uid)!.baselineStart).toBeTruthy()
   })

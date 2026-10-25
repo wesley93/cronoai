@@ -9,6 +9,7 @@ import { useUiStore } from '@/stores/ui'
 import { downloadText } from '@/lib/download'
 import SectionCard from '@/components/common/SectionCard.vue'
 import { fmtBRL, fmtDate, fmtNum } from '@/lib/format'
+import { horasPorDia } from '@/lib/calendarioTrabalho'
 import { formatPredecessors } from '@/lib/wbs'
 
 const project = useProjectStore()
@@ -118,7 +119,7 @@ const cell =
               <input :value="l.team" :class="cell" class="w-10" aria-label="Oficiais na equipe" @change="edit(l, 'team', ($event.target as HTMLInputElement).value)" />
               <span class="text-[10.5px] text-zinc-500">{{ lineResources(l).map((r) => r.units).join('+') }}</span>
             </td>
-            <td class="text-right font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{{ lineDuration(l) }} d.u.</td>
+            <td class="text-right font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{{ lineDuration(l, horasPorDia(project.minutosPorDia)) }} d.u.</td>
             <td class="text-right"><input :value="l.unitCost" :class="cell" class="w-16" aria-label="Custo unitário" @change="edit(l, 'unitCost', ($event.target as HTMLInputElement).value)" /></td>
             <td class="text-right tabular-nums">{{ fmtBRL(l.quantity * l.unitCost) }}</td>
             <td class="mono text-[10.5px]">

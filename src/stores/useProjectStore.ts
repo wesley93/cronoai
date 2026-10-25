@@ -47,6 +47,7 @@ import {
   compilarCalendarios,
   copiarCalendario,
   diasParaMinutos,
+  horasPorDia,
   intervalosDaPredefinicao,
   erroDoCalendario,
   erroDoNomeCalendario,
@@ -1192,7 +1193,7 @@ export const useProjectStore = defineStore('project', () => {
     const lastInGroup = new Map<string, Task>()
     const sorted = [...lines].sort((a, b) => a.group.localeCompare(b.group))
     for (const l of sorted) {
-      const days = lineDuration(l)
+      const days = lineDuration(l, horasPorDia(minutosPorDia.value))
       let parentWbs = existingGroups.has(l.group) ? l.group : extraGroup
       const prev = lastInGroup.get(parentWbs ?? '__novo__')
       const sched = computeSchedule(tasks, calendarios.value, optsDaObra(state.meta, 'forecast', state.meta.statusDate)) // lança se estourar: quem chama trata
