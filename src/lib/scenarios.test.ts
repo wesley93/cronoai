@@ -71,6 +71,21 @@ describe('Recomendação', () => {
   })
 })
 
+describe('Suprimentos do Aurora: efeito do restante exato (CR-9, antes → depois)', () => {
+  it('as datas necessárias recuam 1 dia (3 dias na 602, que cai numa sexta) e os avisos acompanham', () => {
+    const a = analyzeSupplies(seed.materials, seed.tasks, forecast, seed.meta.statusDate, [])
+    const por = (id: string) => a.find((x) => x.material.id === id)!
+    // [necessidade antes, necessidade depois, DLP depois, status depois]
+    expect([por('m-aco').needDate, por('m-aco').dlp, por('m-aco').status]).toEqual(['2026-11-05', '2026-10-18', 'atrasada']) // antes: 06/11, DLP 19/10
+    expect([por('m-concreto').needDate, por('m-concreto').dlp, por('m-concreto').status]).toEqual(['2026-11-05', '2026-10-30', 'atencao']) // antes: 06/11, 31/10, ok
+    expect([por('m-cimento').needDate, por('m-cimento').dlp, por('m-cimento').status]).toEqual(['2026-11-05', '2026-10-31', 'ok']) // antes: 06/11, 01/11
+    expect([por('m-bloco').needDate, por('m-bloco').postponeDays]).toEqual(['2026-11-30', 24]) // antes: 01/12, reagendar +25 dias
+    expect([por('m-porcelanato').needDate, por('m-porcelanato').postponeDays]).toEqual(['2027-03-12', 21]) // antes: 15/03, reagendar +24 dias
+    expect([por('m-ac3').needDate, por('m-ac3').status]).toEqual(['2027-03-12', 'ok']) // antes: 15/03
+    expect([por('m-eletroduto').needDate, por('m-eletroduto').status]).toEqual(['2026-11-30', 'entregue']) // antes: 01/12
+  })
+})
+
 describe('Suprimentos', () => {
   it('a margem de segurança desloca a DLP', () => {
     const base = analyzeSupplies(seed.materials, seed.tasks, forecast, seed.meta.statusDate, [], 3).find((x) => x.material.id === 'm-concreto')!
@@ -86,7 +101,10 @@ describe('Suprimentos', () => {
   it('store: editar lead time, cadastrar, receber e remover insumo', () => {
     const store = useProjectStore()
     const status = () => (id: string) => store.supplies.find((x) => x.material.id === id)!.status
-    expect(status()('m-concreto')).toBe('ok')
+    // Antes do E2 (restante em dias inteiros) a UID 303 começava em 06/11 e a DLP do concreto era 31/10: "ok" (8 dias de folga).
+    // Com o restante exato (CR-9) a 303 começa em 05/11, a DLP vai a 30/10 e faltam 7 dias: "atenção".
+    expect(status()('m-concreto')).toBe('atencao')
+    expect(store.supplies.find((x) => x.material.id === 'm-concreto')).toMatchObject({ needDate: '2026-11-05', dlp: '2026-10-30', headline: 'Emitir pedido em 7 dias' })
     store.updateMaterial('m-concreto', { leadTimeDays: 20 })
     expect(status()('m-concreto')).toBe('atrasada')
 

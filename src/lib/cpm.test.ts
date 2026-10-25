@@ -34,7 +34,8 @@ describe('início da obra depois da data de status (CR-11b)', () => {
     expect(s.projectFinish).toBe('2027-06-23')
     expect(atraso).toBe(16)
     expect(s.byUid.get(104)?.finish).toBe('2026-11-05')
-    expect(s.byUid.get(105)?.start).toBe('2026-11-06')
+    // 105 começava em 06/11 no E1 (restante em dias inteiros); com o restante exato do E2 (CR-9) começa em 05/11, às 09:36
+    expect([s.byUid.get(105)?.start, s.byUid.get(105)?.inicioHora]).toEqual(['2026-11-05', '09:36'])
   })
 
   it('início em 03/11/2026: mesma entrega', () => {
@@ -216,6 +217,227 @@ describe('marcos, lag negativo, feriado e fim de semana', () => {
     const depois: Task = { ...tarefa(13, 1), wbs: '02', predecessors: [liga(10)] }
     const r = agendar([resumo, filha1, filha2, depois], '2026-08-03')
     expect([r.byUid.get(13)!.start, r.byUid.get(13)!.inicioHora]).toEqual(['2026-08-07', '08:00']) // depois da filha de 4 dias
+  })
+})
+
+describe('lag em dias corridos (CR-4) e em % (CR-5)', () => {
+  const corrido = (uid: number, dc: number, type: LinkType = 'FS') => ({ uid, type, lag: { tipo: 'corrido' as const, minutos: dc * 1440 } })
+  const pct = (uid: number, percentual: number, type: LinkType = 'FS') => ({ uid, type, lag: { tipo: 'percentual' as const, percentual } })
+
+  it('CR-4: A de 1 d em qua 02/09 e FS +7 ed (LinkLag 100800): B começa 10/09 às 08:00 (7 dias úteis seriam 15/09; 5/7 dava 11/09)', () => {
+    const base = [tarefa(1, 1)]
+    const ed = agendar([...base, tarefa(2, 1, { predecessors: [corrido(1, 7)] })], '2026-09-02').byUid.get(2)!
+    expect([ed.start, ed.inicioHora]).toEqual(['2026-09-10', '08:00'])
+    const util7 = agendar([...base, tarefa(2, 1, { predecessors: [liga(1, 'FS', 7)] })], '2026-09-02').byUid.get(2)!
+    expect(util7.start).toBe('2026-09-15')
+    const aproximado = agendar([...base, tarefa(2, 1, { predecessors: [liga(1, 'FS', 5)] })], '2026-09-02').byUid.get(2)!
+    expect(aproximado.start).toBe('2026-09-11')
+  })
+
+  it('CR-4: A termina qui 06/08 17:00 e FS +2 ed (LinkLag 28800): B começa 10/08 às 08:00 (2 dias úteis: 11/08)', () => {
+    const r = agendar([tarefa(1, 1), tarefa(2, 1, { predecessors: [corrido(1, 2)] })], '2026-08-06')
+    expect([r.byUid.get(1)!.finish, r.byUid.get(1)!.terminoHora]).toEqual(['2026-08-06', '17:00'])
+    expect([r.byUid.get(2)!.start, r.byUid.get(2)!.inicioHora]).toEqual(['2026-08-10', '08:00'])
+    const util = agendar([tarefa(1, 1), tarefa(2, 1, { predecessors: [liga(1, 'FS', 2)] })], '2026-08-06')
+    expect(util.byUid.get(2)!.start).toBe('2026-08-11')
+  })
+
+  it('lag corrido ignora o calendário (também o da sucessora com sábado de 4 h) e a folga volta consistente', () => {
+    const r = agendar([tarefa(1, 1), tarefa(2, 1, { calendarioUid: 2, predecessors: [corrido(1, 1)] })], '2026-08-06')
+    // A termina qui 06/08 17:00; +24 h = sex 07/08 17:00; B (sábado de 4 h) começa no próximo momento útil: sáb 08/08 08:00
+    expect([r.byUid.get(2)!.start, r.byUid.get(2)!.inicioHora]).toEqual(['2026-08-08', '08:00'])
+    expect(r.byUid.get(1)!.critical).toBe(true)
+    expect(r.byUid.get(1)!.folgaTotalMin).toBe(0)
+  })
+
+  it('CR-5: A de 4 d (03/08 08:00 a 06/08 17:00): FS +50% → B 11/08 08:00; SS +50% → B 05/08 08:00; FS -25% → B 06/08 08:00', () => {
+    const a = tarefa(1, 4)
+    const inicioDeB = (lag: ReturnType<typeof pct>) => {
+      const b = agendar([a, tarefa(2, 1, { predecessors: [lag] })], '2026-08-03').byUid.get(2)!
+      return [b.start, b.inicioHora]
+    }
+    expect(inicioDeB(pct(1, 50))).toEqual(['2026-08-11', '08:00'])
+    expect(inicioDeB(pct(1, 50, 'SS'))).toEqual(['2026-08-05', '08:00'])
+    expect(inicioDeB(pct(1, -25))).toEqual(['2026-08-06', '08:00'])
+  })
+
+  it('lag % arredonda o minuto (meio para cima) e acompanha a duração da predecessora; a volta é coerente (folga 0 na cadeia)', () => {
+    // 100 min de predecessora × 33% = 33 min
+    const a = { ...tarefa(1, 0), duracaoMin: 100 }
+    const r = agendar([a, tarefa(2, 1, { predecessors: [pct(1, 33)] })], '2026-08-03')
+    // A de 100 min vai de 08:00 a 09:40; +33 min de lag → B começa às 10:13
+    expect([r.byUid.get(2)!.start, r.byUid.get(2)!.inicioHora]).toEqual(['2026-08-03', '10:13'])
+    expect(r.byUid.get(1)!.folgaTotalMin).toBe(0)
+    expect(r.byUid.get(2)!.critical).toBe(true)
+  })
+
+  it('FF e SF com lag corrido e %: o término da sucessora acompanha o vínculo', () => {
+    const ff = agendar([tarefa(1, 4), tarefa(2, 2, { predecessors: [corrido(1, 1, 'FF')] })], '2026-08-03').byUid.get(2)!
+    // A termina qui 06/08 17:00; +24 h = sex 07/08 17:00; B de 2 d termina aí e começa qui 06/08 08:00
+    expect([ff.start, ff.finish, ff.terminoHora]).toEqual(['2026-08-06', '2026-08-07', '17:00'])
+    const sf = agendar([tarefa(1, 4), tarefa(2, 2, { predecessors: [pct(1, 50, 'SF')] })], '2026-08-03').byUid.get(2)!
+    // A começa seg 03/08 08:00; +50% de 4 d = 2 d → ter 04/08 17:00; B termina aí e começa seg 03/08 08:00
+    expect([sf.start, sf.finish, sf.terminoHora]).toEqual(['2026-08-03', '2026-08-04', '17:00'])
+  })
+})
+
+describe('restrições (CR-6) com honrar restrições (P2): A 5 d (03/08 a 07/08) e B 2 d FS de A', () => {
+  const rede = (restricao?: Task['restricao'], prazoFinal?: string) => {
+    const r = agendar([tarefa(1, 5), tarefa(2, 2, { predecessors: [liga(1)], restricao, prazoFinal })], '2026-08-03')
+    return { a: r.byUid.get(1)!, b: r.byUid.get(2)! }
+  }
+  const dias = (min: number) => min / 480
+
+  it('ASAP: B 10/08 a 11/08; folga de A 0', () => {
+    const { a, b } = rede()
+    expect([b.start, b.finish]).toEqual(['2026-08-10', '2026-08-11'])
+    expect([dias(a.folgaTotalMin), dias(b.folgaTotalMin), b.restricaoConflito]).toEqual([0, 0, false])
+  })
+
+  it('SNET 12/08: B 12/08 a 13/08; folga de A 2 d', () => {
+    const { a, b } = rede({ tipo: 'SNET', data: '2026-08-12' })
+    expect([b.start, b.finish, dias(a.folgaTotalMin), dias(b.folgaTotalMin), b.restricaoConflito]).toEqual(['2026-08-12', '2026-08-13', 2, 0, false])
+  })
+
+  it('SNLT 05/08: B 05/08 a 06/08 (antes do que o vínculo permite); folga de A -3 d, de B 0, folga livre de B 1 d; conflito', () => {
+    const { a, b } = rede({ tipo: 'SNLT', data: '2026-08-05' })
+    expect([b.start, b.finish, dias(a.folgaTotalMin), dias(b.folgaTotalMin), dias(b.folgaLivreMin), b.restricaoConflito]).toEqual(['2026-08-05', '2026-08-06', -3, 0, 1, true])
+    expect(a.critical).toBe(true) // folga ≤ 0 é crítica
+  })
+
+  it('MSO 06/08: B 06/08 a 07/08; folga de A -2 d; conflito', () => {
+    const { a, b } = rede({ tipo: 'MSO', data: '2026-08-06' })
+    expect([b.start, b.finish, dias(a.folgaTotalMin), dias(b.folgaTotalMin), b.restricaoConflito]).toEqual(['2026-08-06', '2026-08-07', -2, 0, true])
+  })
+
+  it('MSO depois do que o vínculo permite não é conflito: a tarefa só começa mais tarde', () => {
+    const { b } = rede({ tipo: 'MSO', data: '2026-08-12' })
+    expect([b.start, b.finish, b.restricaoConflito]).toEqual(['2026-08-12', '2026-08-13', false])
+  })
+
+  it('MFO 12/08: B 11/08 a 12/08; folga de A 1 d', () => {
+    const { a, b } = rede({ tipo: 'MFO', data: '2026-08-12' })
+    expect([b.start, b.finish, b.terminoHora, dias(a.folgaTotalMin), dias(b.folgaTotalMin), b.restricaoConflito]).toEqual(['2026-08-11', '2026-08-12', '17:00', 1, 0, false])
+  })
+
+  it('FNET 13/08: B 12/08 a 13/08; folga de A 2 d', () => {
+    const { a, b } = rede({ tipo: 'FNET', data: '2026-08-13' })
+    expect([b.start, b.finish, dias(a.folgaTotalMin), dias(b.folgaTotalMin), b.restricaoConflito]).toEqual(['2026-08-12', '2026-08-13', 2, 0, false])
+  })
+
+  it('FNLT 10/08: B 07/08 a 10/08; folga de A -1 d; conflito', () => {
+    const { a, b } = rede({ tipo: 'FNLT', data: '2026-08-10' })
+    expect([b.start, b.finish, dias(a.folgaTotalMin), dias(b.folgaTotalMin), b.restricaoConflito]).toEqual(['2026-08-07', '2026-08-10', -1, 0, true])
+  })
+
+  it('restrição com hora: FNET 12/08 às 10:00 e MSO 12/08 às 14:30 usam o momento exato', () => {
+    const fnet = rede({ tipo: 'FNET', data: '2026-08-12T10:00' }).b
+    // B de 2 d (960 min) termina 12/08 10:00 e, contando para trás no calendário, começa 10/08 às 10:00 (o vínculo dá 10/08 08:00)
+    expect([fnet.start, fnet.inicioHora, fnet.finish, fnet.terminoHora]).toEqual(['2026-08-10', '10:00', '2026-08-12', '10:00'])
+    const mso = rede({ tipo: 'MSO', data: '2026-08-12T14:30' }).b
+    expect([mso.start, mso.inicioHora]).toEqual(['2026-08-12', '14:30'])
+  })
+
+  it('data de restrição inválida é ignorada (o import já avisa); data além do horizonte de 50 anos é erro em português', () => {
+    expect(rede({ tipo: 'SNET', data: 'ontem' }).b.start).toBe('2026-08-10')
+    expect(() => rede({ tipo: 'SNET', data: '9999-12-31' })).toThrow(/horizonte de 50 anos/)
+  })
+
+  it('CR-6b ALAP: Y de 3 d sem vínculo vai para 12/08 08:00 a 14/08 17:00; início cedo 03/08; folga total e livre de 7 d', () => {
+    const r = agendar([tarefa(1, 10), tarefa(2, 3, { restricao: { tipo: 'ALAP' } })], '2026-08-03')
+    const y = r.byUid.get(2)!
+    expect([y.start, y.inicioHora, y.finish, y.terminoHora]).toEqual(['2026-08-12', '08:00', '2026-08-14', '17:00'])
+    expect([y.earlyStart, y.inicioCedoMin]).toEqual(['2026-08-03', 480])
+    expect([y.folgaTotalMin, y.folgaLivreMin, y.critical]).toEqual([3360, 3360, false])
+    expect(r.projectFinish).toBe('2026-08-14')
+  })
+
+  it('o prazo final não move a tarefa: CR-7 prazo 10/08 17:00 em B marca prazoFinalPerdido e folga -1 d em B e em A', () => {
+    const { a, b } = rede(undefined, '2026-08-10T17:00')
+    expect([b.start, b.finish, b.prazoFinalPerdido]).toEqual(['2026-08-10', '2026-08-11', true])
+    expect([dias(b.folgaTotalMin), dias(a.folgaTotalMin), b.critical, a.critical]).toEqual([-1, -1, true, true])
+  })
+
+  it('CR-7: prazo só com a data (fim do expediente) e prazo depois do término tardio não aumentam a folga nem acendem o indicador', () => {
+    const noDia = rede(undefined, '2026-08-10').b
+    expect([noDia.prazoFinalPerdido, dias(noDia.folgaTotalMin)]).toEqual([true, -1]) // 10/08 17:00 < término 11/08 17:00
+    const depois = rede(undefined, '2026-08-14')
+    expect([depois.b.prazoFinalPerdido, dias(depois.b.folgaTotalMin), dias(depois.a.folgaTotalMin)]).toEqual([false, 0, 0])
+    expect(rede().b.prazoFinalPerdido).toBe(false)
+  })
+})
+
+describe('duração corrida (CR-10)', () => {
+  it('CR-10: 1 dc (1.440 min) desde sex 07/08 08:00 termina sáb 08/08 às 08:00', () => {
+    const r = agendar([tarefa(1, 0, { duracaoMin: 1440, duracaoCorrida: true })], '2026-08-07').byUid.get(1)!
+    expect([r.start, r.inicioHora, r.finish, r.terminoHora, r.corrida]).toEqual(['2026-08-07', '08:00', '2026-08-08', '08:00', true])
+    expect(r.duracaoMin).toBe(1440)
+  })
+
+  it('a folga da tarefa corrida é medida em 24 h e exibida em dias corridos; a sucessora segue o calendário dela', () => {
+    const r = agendar([tarefa(1, 5), tarefa(2, 0, { duracaoMin: 1440, duracaoCorrida: true }), tarefa(3, 1, { predecessors: [liga(2)] })], '2026-08-07')
+    const c = r.byUid.get(2)!
+    // C termina sáb 08/08 08:00; o projeto termina em 14/08 17:00 (C → D tem 1 d depois de segunda), folga em minutos de relógio
+    expect(c.corrida).toBe(true)
+    expect(c.totalFloat).toBeCloseTo(c.folgaTotalMin / 1440, 10)
+    expect(r.byUid.get(3)!.start).toBe('2026-08-10') // próxima manhã útil depois do sábado
+    expect(r.byUid.get(1)!.corrida).toBe(false)
+    expect(r.byUid.get(1)!.totalFloat).toBe(r.byUid.get(1)!.folgaTotalMin / 480)
+  })
+
+  it('tarefa corrida sem sucessora: folga = minutos de relógio até o fim do projeto ÷ 1.440', () => {
+    const r = agendar([tarefa(1, 5), tarefa(2, 0, { duracaoMin: 1440, duracaoCorrida: true })], '2026-08-07')
+    const c = r.byUid.get(2)!
+    // C termina sáb 08/08 08:00; o projeto termina qui 13/08 17:00: 5 d e 9 h de relógio = 7.740 min
+    expect([c.folgaTotalMin, c.totalFloat, c.freeFloat]).toEqual([7740, 5.375, 5.375])
+  })
+})
+
+describe('opções de progresso (CR-8) e restante exato', () => {
+  const rede = (opcoes?: { logica?: 'retida' | 'substituir'; moverRestante?: boolean }) => {
+    const tasks = [
+      tarefa(1, 10),
+      tarefa(2, 4, { predecessors: [liga(1)], percentComplete: 50, actualStart: '2026-08-03' }), // iniciada fora de sequência
+    ]
+    const r = computeSchedule(tasks, compilarCalendarios('2026-08-03', [padrao, sabado4h], 1), { mode: 'forecast', statusDate: '2026-08-05', opcoes })
+    return { a: r.byUid.get(1)!, b: r.byUid.get(2)! }
+  }
+
+  it('lógica retida (padrão): A 06/08 a 19/08 com folga 0 e crítica; B termina 21/08 17:00 com folga 0', () => {
+    for (const opcoes of [undefined, { logica: 'retida' as const }]) {
+      const { a, b } = rede(opcoes)
+      expect([a.start, a.finish, a.folgaTotalMin, a.critical]).toEqual(['2026-08-06', '2026-08-19', 0, true])
+      expect([b.start, b.finish, b.terminoHora, b.folgaTotalMin, b.restanteMin]).toEqual(['2026-08-03', '2026-08-21', '17:00', 0, 960])
+    }
+  })
+
+  it('substituir progresso: B termina 07/08 17:00 (como antes), A folga 0 e B folga de 8 d', () => {
+    const { a, b } = rede({ logica: 'substituir' })
+    expect([a.start, a.finish, a.folgaTotalMin, a.critical]).toEqual(['2026-08-06', '2026-08-19', 0, true])
+    expect([b.finish, b.terminoHora, b.folgaTotalMin / 480]).toEqual(['2026-08-07', '17:00', 8])
+  })
+
+  it('mover o restante: A de 5 d sem vínculo (início 03/08, status 05/08) vai para 06/08 a 12/08; sem mover, fica 03/08 a 07/08', () => {
+    const calcular = (moverRestante: boolean) => {
+      const r = computeSchedule([tarefa(1, 5)], compilarCalendarios('2026-08-03', [padrao], 1), { mode: 'forecast', statusDate: '2026-08-05', opcoes: { moverRestante } })
+      return [r.byUid.get(1)!.start, r.byUid.get(1)!.finish]
+    }
+    expect(calcular(true)).toEqual(['2026-08-06', '2026-08-12'])
+    expect(calcular(false)).toEqual(['2026-08-03', '2026-08-07'])
+  })
+
+  it('a opção padrão da obra é lógica retida e mover o restante', () => {
+    const { a } = rede({})
+    expect(a.start).toBe('2026-08-06')
+  })
+
+  it('restante exato: 40% de 12 d = 3.456 min; 78% de 36 d = 3.801,6 → 3.802 min; tarefa quase pronta fica com 1 min no mínimo', () => {
+    const r = computeSchedule(
+      [tarefa(1, 12, { percentComplete: 40, actualStart: '2026-08-03' }), tarefa(2, 36, { percentComplete: 78, actualStart: '2026-08-03' }), { ...tarefa(3, 0), duracaoMin: 10, percentComplete: 99.99, actualStart: '2026-08-03' }],
+      compilarCalendarios('2026-08-03', [padrao], 1),
+      { mode: 'forecast', statusDate: '2026-08-05' },
+    )
+    expect([r.byUid.get(1)!.restanteMin, r.byUid.get(2)!.restanteMin, r.byUid.get(3)!.restanteMin]).toEqual([3456, 3802, 1])
   })
 })
 

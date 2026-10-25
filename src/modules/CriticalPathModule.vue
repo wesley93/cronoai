@@ -8,7 +8,7 @@ import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import GanttChart from '@/components/gantt/GanttChart.vue'
 import ScenarioCard from './critical/ScenarioCard.vue'
-import { fmtBRL, fmtDate, fmtDateLong, fmtDiasUteis } from '@/lib/format'
+import { fmtBRL, fmtDate, fmtDateLong, fmtDiasUteis, fmtFolga } from '@/lib/format'
 import { describeLink, formatPredecessors } from '@/lib/wbs'
 
 const project = useProjectStore()
@@ -240,15 +240,15 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
             <td class="tabular-nums">{{ fmtDate(row.s.finish) }}</td>
             <td class="tabular-nums text-zinc-500">{{ row.t.percentComplete >= 100 ? '—' : fmtDate(row.lateStart) }}</td>
             <td class="tabular-nums text-zinc-500">{{ row.t.percentComplete >= 100 ? '—' : fmtDate(row.lateFinish) }}</td>
-            <td class="text-right font-semibold tabular-nums" :class="row.s.critical ? 'text-coral-600 dark:text-coral-400' : ''">{{ row.t.percentComplete >= 100 ? '—' : `${fmtDiasUteis(row.s.folgaTotalMin, project.minutosPorDia)}d` }}</td>
-            <td class="text-right tabular-nums">{{ row.t.percentComplete >= 100 ? '—' : `${fmtDiasUteis(row.s.folgaLivreMin, project.minutosPorDia)}d` }}</td>
+            <td class="text-right font-semibold tabular-nums" :class="row.s.critical ? 'text-coral-600 dark:text-coral-400' : ''">{{ row.t.percentComplete >= 100 ? '—' : fmtFolga(row.s.folgaTotalMin, row.s.corrida, project.minutosPorDia) }}</td>
+            <td class="text-right tabular-nums">{{ row.t.percentComplete >= 100 ? '—' : fmtFolga(row.s.folgaLivreMin, row.s.corrida, project.minutosPorDia) }}</td>
             <td class="text-right tabular-nums" :class="row.variance > 0 ? 'text-coral-600 dark:text-coral-400' : row.variance < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-500'">
               {{ row.variance > 0 ? `+${row.variance}` : row.variance }}d
             </td>
             <td>
               <span v-if="row.t.percentComplete >= 100" class="chip-neutral">Concluída</span>
               <span v-else-if="row.s.critical" class="chip-critical">Crítica</span>
-              <span v-else class="chip-ok">Folga {{ fmtDiasUteis(row.s.folgaTotalMin, project.minutosPorDia) }}d</span>
+              <span v-else class="chip-ok">Folga {{ fmtFolga(row.s.folgaTotalMin, row.s.corrida, project.minutosPorDia) }}</span>
             </td>
           </tr>
         </tbody>

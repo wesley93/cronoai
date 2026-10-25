@@ -1,7 +1,7 @@
 // Conversor MS Project Data Interchange (MSPDI): estado da store <-> arquivo .xml do MS Project.
 // Referência do esquema: https://learn.microsoft.com/office-project/xml-data-interchange/project-xml-data-interchange-schema-reference
 // A ordem dos elementos segue as sequências (xs:sequence) do esquema MSPDI; o validador abaixo confere essa ordem.
-import type { CalendarioObra, IntervaloTrabalho, Lag, LinkType, ProjectMeta, ScheduleResult, Task } from '@/types/domain'
+import type { CalendarioObra, IntervaloTrabalho, Lag, LinkType, ProjectMeta, Restricao, ScheduleResult, Task } from '@/types/domain'
 import { WorkCalendar, addCalendarDays, defaultHolidays } from './calendar'
 import {
   UID_CALENDARIO_PADRAO,
@@ -164,6 +164,21 @@ export function lagToWorkingDays(linkLag: number, lagFormat: number, minutesPerD
   return undefined // percentual (19/20) ou formato desconhecido
 }
 
+/** Lag do domínio → `LinkLag` (décimos de minuto; no lag %, o percentual inteiro) e `LagFormat` (o original, se veio de arquivo). */
+export function lagParaMspdi(lag: Lag): { linkLag: number; lagFormat: number } {
+  if (lag.tipo === 'percentual') return { linkLag: Math.round(lag.percentual), lagFormat: lag.codigoMspdi ?? 19 }
+  return { linkLag: lag.minutos * 10, lagFormat: lag.codigoMspdi ?? (lag.tipo === 'corrido' ? 8 : 7) }
+}
+
+/** `ConstraintType` do MSPDI e do VBA (PjConstraint). */
+const RESTRICAO_PARA_CODIGO = { ALAP: 1, MSO: 2, MFO: 3, SNET: 4, SNLT: 5, FNET: 6, FNLT: 7 } as const
+
+/** `ConstraintDate`: com hora, a própria; só a data, o início do expediente (restrições de início) ou o fim (de término). */
+function constraintDate(r: Exclude<Restricao, { tipo: 'ALAP' }>): string | undefined {
+  if (r.data.length > 10) return `${r.data.slice(0, 16)}:00`
+  return dt(r.data, r.tipo === 'FNET' || r.tipo === 'FNLT' || r.tipo === 'MFO' ? '17:00:00' : '08:00:00')
+}
+
 const dt = (iso: string | undefined, time: string) => (iso ? `${iso.slice(0, 10)}T${time}` : undefined)
 const money = (v: number) => (Math.round(v * 100) / 100).toFixed(2)
 
@@ -278,18 +293,19 @@ function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
     leaf && x('ActualDuration', toDuration((duration * t.percentComplete) / 100)),
     x('ActualCost', money(actualCost)),
     leaf && x('RemainingDuration', toDuration((duration * (100 - t.percentComplete)) / 100)),
-    x('ConstraintType', t.restricao ? 4 : 0), // 4 = Não iniciar antes de
-    t.restricao && x('ConstraintDate', dt(t.restricao.data, '08:00:00')),
+    x('ConstraintType', t.restricao ? RESTRICAO_PARA_CODIGO[t.restricao.tipo] : 0),
+    t.restricao && t.restricao.tipo !== 'ALAP' && x('ConstraintDate', constraintDate(t.restricao)),
     x('Notes', t.notes),
-    ...t.predecessors.map((p) =>
-      x('PredecessorLink', [
+    ...t.predecessors.map((p) => {
+      const { linkLag, lagFormat } = lagParaMspdi(p.lag)
+      return x('PredecessorLink', [
         x('PredecessorUID', p.uid),
         x('Type', LINK_TO_CODE[p.type]),
         x('CrossProject', 0),
-        x('LinkLag', p.lag.minutos * 10),
-        x('LagFormat', 7),
-      ]),
-    ),
+        x('LinkLag', linkLag),
+        x('LagFormat', lagFormat),
+      ])
+    }),
     t.sinapi && x('ExtendedAttribute', [x('FieldID', FIELD_SINAPI), x('Value', t.sinapi)]),
     t.leadTimeDays !== undefined && x('ExtendedAttribute', [x('FieldID', FIELD_LEAD_TIME), x('Value', t.leadTimeDays)]),
     // LB0 incompleta (só início ou só término, como o MS Project grava) é preservada com a(s) data(s) presente(s);

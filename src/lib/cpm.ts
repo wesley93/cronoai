@@ -1,15 +1,14 @@
-// Motor de Caminho Crítico (CPM) em minutos úteis, com vínculos FS/SS/FF/SF, latência, calendário por tarefa
-// e reprogramação pela data de status (ciclo 00004, ADR 00003).
+// Motor de Caminho Crítico (CPM) em minutos úteis, com vínculos FS/SS/FF/SF, latência (útil, corrida e %), calendário por
+// tarefa, as 8 restrições do MS Project, prazo final e reprogramação pela data de status (ciclo 00004, ADR 00003).
 //
 // Todo cálculo usa "momentos": minutos de relógio desde 00:00 da data-base. Cada calendário converte momento ↔ minuto útil.
 // Início de tarefa com duração vai para o próximo momento útil do calendário dela; o término fica no fim do último trecho
 // útil (17:00, e não 08:00 do dia seguinte); somar lag 0 não normaliza (o marco fica no término da predecessora).
-import type { Lag, PredecessorLink, ScheduleResult, ScheduledTask, Task } from '@/types/domain'
+import type { Lag, OpcoesCronograma, PredecessorLink, ProjectMeta, ScheduleResult, ScheduledTask, Task } from '@/types/domain'
 import {
   MINUTOS_NO_DIA_CORRIDO,
   MINUTOS_POR_DIA_PADRAO,
   dataDoMomento,
-  diasParaMinutos,
   diaRelativo,
   horaDoMomento,
   lerDataHora,
@@ -22,8 +21,17 @@ export interface ScheduleOptions {
   /** baseline = ignora avanço; forecast = reprograma o saldo a partir da data de status (como o MS Project). */
   mode: 'baseline' | 'forecast'
   statusDate?: string
-  /** Minutos por dia da obra, só para as folgas em dias e o restante em dias inteiros (padrão 480). */
+  /** Minutos por dia da obra, só para as folgas em dias (padrão 480). */
   minutosPorDia?: number
+  /** Opções de progresso (ausente = lógica retida e mover o restante para depois da data de status). */
+  opcoes?: Partial<OpcoesCronograma>
+}
+
+export const OPCOES_PADRAO: OpcoesCronograma = { logica: 'retida', moverRestante: true }
+
+/** Opções do motor a partir dos dados da obra (minutos por dia e opções de cronograma). */
+export function optsDaObra(meta: ProjectMeta, mode: ScheduleOptions['mode'], statusDate?: string): ScheduleOptions {
+  return { mode, statusDate, minutosPorDia: meta.minutosPorDia, opcoes: meta.opcoesCronograma }
 }
 
 interface Edge {
@@ -99,6 +107,9 @@ const terminarEm = (cal: CalendarioCompilado, inicio: number, dur: number): numb
 /** Início de tarefa: com duração, vai para o próximo momento útil; marco (duração 0) fica onde está. */
 const iniciarEm = (cal: CalendarioCompilado, m: number, dur: number): number => (dur > 0 ? cal.proximoUtil(m) : m)
 
+/** Restante de tarefa iniciada: round(duração × (1 − %)), meio para cima, com mínimo de 1 minuto (Remaining Duration do MS Project). */
+const restanteDe = (dur: number, pct: number): number => (dur > 0 ? Math.max(1, Math.round((dur * (100 - pct)) / 100)) : 0)
+
 export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts: ScheduleOptions): ScheduleResult {
   const leaves = tasks.filter((t) => !t.isSummary)
   const byUid = new Map(leaves.map((t) => [t.uid, t]))
@@ -106,9 +117,14 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
   const forecast = opts.mode === 'forecast' && !!opts.statusDate
   const base = cals.base
   const mpd = opts.minutosPorDia ?? MINUTOS_POR_DIA_PADRAO
+  const retida = (opts.opcoes?.logica ?? OPCOES_PADRAO.logica) === 'retida'
+  const mover = opts.opcoes?.moverRestante ?? OPCOES_PADRAO.moverRestante
   const statusDia = forecast ? diaRelativo(base, opts.statusDate!) : 0
-  const calOf = new Map(leaves.map((t) => [t.uid, cals.de(t.calendarioUid)]))
-  const cal = (uid: number) => calOf.get(uid)!
+  /** Calendário de início da tarefa e calendário em que a duração corre (o de 24 h para duração corrida). */
+  const calInicio = new Map(leaves.map((t) => [t.uid, cals.de(t.calendarioUid)]))
+  const calDuracao = new Map(leaves.map((t) => [t.uid, t.duracaoCorrida ? cals.corrido : cals.de(t.calendarioUid)]))
+  const cal = (uid: number) => calInicio.get(uid)!
+  const calD = (uid: number) => calDuracao.get(uid)!
 
   const incoming = new Map<number, Edge[]>()
   const outgoing = new Map<number, Edge[]>()
@@ -119,89 +135,145 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
     outgoing.get(e.pred)!.push(e)
   }
   const lagCal = (e: Edge) => calendarioDoLag(cals, byUid.get(e.pred)!, byUid.get(e.succ)!)
-  /** Momento depois de somar o lag do vínculo (no calendário do lag). */
-  const maisLag = (m: number, e: Edge) => lagCal(e).somarUteis(m, e.lag.minutos)
-  /** Momento antes de descontar o lag do vínculo (volta). */
-  const menosLag = (m: number, e: Edge) => lagCal(e).somarUteis(m, -e.lag.minutos)
+  /** Lag em minutos: o próprio valor, ou, no lag %, round(% × duração da predecessora ÷ 100). */
+  const minutosDoLag = (e: Edge): number =>
+    e.lag.tipo === 'percentual' ? Math.round((e.lag.percentual * Math.max(0, Math.round(byUid.get(e.pred)!.duracaoMin))) / 100) : e.lag.minutos
+  /** Momento depois de somar o lag do vínculo: útil no calendário do lag; corrido em minutos de relógio. */
+  const maisLag = (m: number, e: Edge) => (e.lag.tipo === 'corrido' ? m + e.lag.minutos : lagCal(e).somarUteis(m, minutosDoLag(e)))
+  /** Momento antes de descontar o lag do vínculo (passo de volta). */
+  const menosLag = (m: number, e: Edge) => (e.lag.tipo === 'corrido' ? m - e.lag.minutos : lagCal(e).somarUteis(m, -minutosDoLag(e)))
 
   const es = new Map<number, number>()
   const ef = new Map<number, number>()
   const restante = new Map<number, number>()
+  const conflito = new Set<number>()
   const started = (t: Task) => forecast && t.percentComplete > 0
   const done = (t: Task) => forecast && t.percentComplete >= 100
 
-  /** Início do restante: primeiro momento útil depois do dia da data de status (calendário da tarefa). */
+  /** Primeiro momento útil depois do dia da data de status (calendário da tarefa). */
   const aposStatus = (c: CalendarioCompilado) => c.proximoUtil((statusDia + 1) * MINUTOS_NO_DIA_CORRIDO)
 
-  const linkDrivenStart = (t: Task, dur: number, c: CalendarioCompilado): number => {
-    let start = 0
+  /** Momento de uma restrição de INÍCIO: só a data = início do expediente do dia; com hora, o momento exato. */
+  const momentoDeInicio = (data: string, c: CalendarioCompilado): number | undefined => {
+    const dh = lerDataHora(data)
+    return dh ? c.proximoUtil(diaRelativo(base, dh.data) * MINUTOS_NO_DIA_CORRIDO + (dh.minuto ?? 0)) : undefined
+  }
+  /** Momento de uma restrição de TÉRMINO (ou prazo): só a data = fim do expediente do dia; com hora, o momento exato. */
+  const momentoDeTermino = (data: string, c: CalendarioCompilado): number | undefined => {
+    const dh = lerDataHora(data)
+    if (!dh) return undefined
+    const dia = diaRelativo(base, dh.data)
+    return dh.minuto === undefined ? c.fimUtilAte((dia + 1) * MINUTOS_NO_DIA_CORRIDO) : dia * MINUTOS_NO_DIA_CORRIDO + dh.minuto
+  }
+
+  /** Início pelos vínculos, ou `undefined` quando a tarefa não tem vínculo (quem chama aplica o início do projeto, 0). */
+  const porVinculos = (t: Task, dur: number): number | undefined => {
+    const cd = calD(t.uid)
+    let start: number | undefined
+    const maior = (v: number) => (start = start === undefined ? v : Math.max(start, v))
     for (const e of incoming.get(t.uid) ?? []) {
       const pEs = es.get(e.pred) ?? 0
       const pEf = ef.get(e.pred) ?? 0
       switch (e.type) {
-        case 'FS': start = Math.max(start, maisLag(pEf, e)); break
-        case 'SS': start = Math.max(start, maisLag(pEs, e)); break
-        case 'FF': start = Math.max(start, c.somarUteis(maisLag(pEf, e), -dur)); break
-        case 'SF': start = Math.max(start, c.somarUteis(maisLag(pEs, e), -dur)); break
+        case 'FS': maior(maisLag(pEf, e)); break
+        case 'SS': maior(maisLag(pEs, e)); break
+        case 'FF': maior(cd.somarUteis(maisLag(pEf, e), -dur)); break
+        case 'SF': maior(cd.somarUteis(maisLag(pEs, e), -dur)); break
       }
     }
+    return start
+  }
+  /** Início pelos vínculos com o piso do início do projeto (momento 0). */
+  const doProjeto = (t: Task, dur: number): number => Math.max(porVinculos(t, dur) ?? 0, 0)
+
+  /** Limites inferiores de data: SNET (início) e FNET (término). */
+  const comLimitesInferiores = (t: Task, m: number, dur: number): number => {
     const r = t.restricao
     if (r?.tipo === 'SNET') {
-      const dh = lerDataHora(r.data)
-      if (dh) start = Math.max(start, c.proximoUtil(diaRelativo(base, dh.data) * MINUTOS_NO_DIA_CORRIDO + (dh.minuto ?? 0)))
+      const lim = momentoDeInicio(r.data, cal(t.uid))
+      if (lim !== undefined) return Math.max(m, lim)
     }
-    return start
+    if (r?.tipo === 'FNET') {
+      const lim = momentoDeTermino(r.data, calD(t.uid))
+      if (lim !== undefined) return Math.max(m, dur > 0 ? calD(t.uid).somarUteis(lim, -dur) : lim)
+    }
+    return m
   }
 
   // ---------- Passo de ida ----------
   for (const uid of order) {
     const t = byUid.get(uid)!
     const c = cal(uid)
+    const cd = calD(uid)
     const dur = Math.max(0, Math.round(t.duracaoMin))
     const inicioReal = t.actualStart ? c.proximoUtil(diaRelativo(base, t.actualStart) * MINUTOS_NO_DIA_CORRIDO) : undefined
     if (done(t)) {
-      const s = inicioReal ?? Math.min(iniciarEm(c, linkDrivenStart(t, dur, c), dur), c.inicioDoDiaUtilNoOuAntes(statusDia))
+      const s = inicioReal ?? Math.min(iniciarEm(c, comLimitesInferiores(t, doProjeto(t, dur), dur), dur), c.inicioDoDiaUtilNoOuAntes(statusDia))
       const f = t.actualFinish
         ? c.fimUtilAte((diaRelativo(base, t.actualFinish) + 1) * MINUTOS_NO_DIA_CORRIDO)
-        : Math.min(terminarEm(c, s, dur), c.fimUtilAte(aposStatus(c)))
+        : Math.min(terminarEm(cd, s, dur), c.fimUtilAte(aposStatus(c)))
       es.set(uid, s)
       ef.set(uid, Math.max(s, f))
       restante.set(uid, 0)
     } else if (started(t)) {
-      const s = inicioReal ?? Math.min(iniciarEm(c, linkDrivenStart(t, dur, c), dur), c.inicioDoDiaUtilNoOuAntes(statusDia))
-      // E1: o restante segue em dias inteiros, ⌈dur × (1 − %)⌉ com mínimo de 1 dia, para não mudar nenhuma data
-      const restDias = Math.max(1, Math.ceil(minutosParaDias(dur, mpd) * (1 - t.percentComplete / 100) - 1e-9))
-      const rem = diasParaMinutos(restDias, mpd)
+      const porLigacao = iniciarEm(c, comLimitesInferiores(t, doProjeto(t, dur), dur), dur)
+      const s = inicioReal ?? Math.min(porLigacao, c.inicioDoDiaUtilNoOuAntes(statusDia))
+      // Só os vínculos (sem o piso do início do projeto) restringem o restante: ele já está em andamento
+      const vinculos = porVinculos(t, dur)
+      const apos = vinculos === undefined ? undefined : iniciarEm(c, vinculos, dur)
+      const rem = restanteDe(dur, t.percentComplete)
+      // Lógica retida: o restante começa depois da predecessora (fora de sequência); substituir: o progresso ignora o vínculo.
+      // Mover o restante (política do CronoAI): o restante começa depois da data de status.
+      let rs = mover ? Math.max(s, aposStatus(c)) : s
+      if (retida && apos !== undefined) rs = Math.max(rs, apos)
       es.set(uid, s)
-      ef.set(uid, terminarEm(c, Math.max(s, aposStatus(c)), rem))
+      ef.set(uid, mover || rs > s ? terminarEm(cd, rs, rem) : terminarEm(cd, s, dur))
       restante.set(uid, rem)
     } else {
-      const s = iniciarEm(c, Math.max(linkDrivenStart(t, dur, c), forecast ? aposStatus(c) : 0), dur)
+      let m = Math.max(doProjeto(t, dur), forecast && mover ? aposStatus(c) : 0)
+      m = comLimitesInferiores(t, m, dur)
+      let s = iniciarEm(c, m, dur)
+      const sVinculos = s
+      const r = t.restricao
+      const limInicio = r && (r.tipo === 'SNLT' || r.tipo === 'MSO') ? momentoDeInicio(r.data, c) : undefined
+      if (limInicio !== undefined) s = r?.tipo === 'MSO' ? iniciarEm(c, limInicio, dur) : Math.min(s, limInicio)
+      let f = terminarEm(cd, s, dur)
+      const limTermino = r && (r.tipo === 'FNLT' || r.tipo === 'MFO') ? momentoDeTermino(r.data, cd) : undefined
+      if (limTermino !== undefined && (r?.tipo === 'MFO' || f > limTermino)) {
+        f = limTermino
+        s = dur > 0 ? cd.somarUteis(f, -dur) : f
+      }
+      // A restrição prevalece sobre o vínculo (honrar restrições, gate P2): sinaliza quando começa antes do que os vínculos permitem
+      if (s < sVinculos) conflito.add(uid)
       es.set(uid, s)
-      ef.set(uid, terminarEm(c, s, dur))
+      ef.set(uid, f)
       restante.set(uid, dur)
     }
   }
 
   const terminoProjeto = order.reduce((m, u) => Math.max(m, ef.get(u) ?? 0), 0)
 
-  // Duração efetiva (do início ao término cedo), em minutos úteis do calendário da tarefa
-  const efetiva = (uid: number) => cal(uid).minutosUteisEntre(es.get(uid)!, ef.get(uid)!)
+  // Duração efetiva (do início ao término cedo), em minutos úteis do calendário em que a duração corre
+  const efetiva = (uid: number) => calD(uid).minutosUteisEntre(es.get(uid)!, ef.get(uid)!)
 
   // ---------- Passo de volta ----------
   const ls = new Map<number, number>()
   const lf = new Map<number, number>()
+  /** Início tarde do RESTANTE: o que restringe a predecessora quando a sucessora está iniciada (lógica retida). */
+  const lsRestante = new Map<number, number>()
   for (let i = order.length - 1; i >= 0; i--) {
     const uid = order[i]
+    const t = byUid.get(uid)!
     const c = cal(uid)
+    const cd = calD(uid)
     const d = efetiva(uid)
     /** Término tarde que corresponde a um limite de INÍCIO tarde (LF = LS + d). */
-    const doInicio = (limite: number) => terminarEm(c, iniciarEm(c, limite, d), d)
+    const doInicio = (limite: number) => terminarEm(cd, iniciarEm(c, limite, d), d)
     let late = terminoProjeto
     for (const e of outgoing.get(uid) ?? []) {
       const succ = byUid.get(e.succ)!
-      if (started(succ)) continue // sucessora já iniciada não restringe a predecessora
-      const sLs = ls.get(e.succ) ?? terminoProjeto
+      if (done(succ) || (started(succ) && !retida)) continue // sucessora concluída não restringe; iniciada só em "substituir"
+      const sLs = lsRestante.get(e.succ) ?? terminoProjeto
       const sLf = lf.get(e.succ) ?? terminoProjeto
       switch (e.type) {
         case 'FS': late = Math.min(late, menosLag(sLs, e)); break
@@ -210,8 +282,26 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
         case 'SF': late = Math.min(late, doInicio(menosLag(sLf, e))); break
       }
     }
+    // Restrições que limitam o término tarde (SNLT, FNLT, MSO e MFO) e o prazo final (LF = min(LF, prazo))
+    const r = t.restricao
+    if (!started(t)) {
+      if (r && (r.tipo === 'SNLT' || r.tipo === 'MSO')) {
+        const lim = momentoDeInicio(r.data, c)
+        if (lim !== undefined) late = Math.min(late, doInicio(lim))
+      }
+      if (r && (r.tipo === 'FNLT' || r.tipo === 'MFO')) {
+        const lim = momentoDeTermino(r.data, cd)
+        if (lim !== undefined) late = Math.min(late, lim)
+      }
+    }
+    if (t.prazoFinal) {
+      const prazo = momentoDeTermino(t.prazoFinal, cd)
+      if (prazo !== undefined) late = Math.min(late, prazo)
+    }
     lf.set(uid, late)
-    ls.set(uid, c.somarUteis(late, -d))
+    const lateStart = cd.somarUteis(late, -d)
+    ls.set(uid, lateStart)
+    lsRestante.set(uid, started(t) && !done(t) ? cd.somarUteis(late, -(restante.get(uid) ?? d)) : lateStart)
   }
 
   // ---------- Folgas e datas ----------
@@ -219,57 +309,66 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
   for (const uid of order) {
     const t = byUid.get(uid)!
     const c = cal(uid)
+    const cd = calD(uid)
     const s = es.get(uid)!
     const f = ef.get(uid)!
     const concluida = done(t)
-    const folgaTotal = concluida ? 0 : c.minutosUteisEntre(f, lf.get(uid)!)
+    const folgaTotal = concluida ? 0 : cd.minutosUteisEntre(f, lf.get(uid)!)
 
-    let folgaLivre = c.minutosUteisEntre(f, terminoProjeto)
+    let folgaLivre = cd.minutosUteisEntre(f, terminoProjeto)
     for (const e of outgoing.get(uid) ?? []) {
       const sEs = es.get(e.succ)!
       const sEf = ef.get(e.succ)!
       let slack: number
       switch (e.type) {
-        case 'FS': slack = c.minutosUteisEntre(f, menosLag(sEs, e)); break
-        case 'SS': slack = c.minutosUteisEntre(s, menosLag(sEs, e)); break
-        case 'FF': slack = c.minutosUteisEntre(f, menosLag(sEf, e)); break
-        case 'SF': slack = c.minutosUteisEntre(s, menosLag(sEf, e)); break
+        case 'FS': slack = cd.minutosUteisEntre(f, menosLag(sEs, e)); break
+        case 'SS': slack = cd.minutosUteisEntre(s, menosLag(sEs, e)); break
+        case 'FF': slack = cd.minutosUteisEntre(f, menosLag(sEf, e)); break
+        case 'SF': slack = cd.minutosUteisEntre(s, menosLag(sEf, e)); break
       }
       folgaLivre = Math.min(folgaLivre, slack)
     }
 
-    const marco = f === s
-    const dataTermino = (m: number) => dataDoMomento(base, c.fimUtilAte(m) - 1)
-    const inicioNorm = c.proximoUtil(s)
-    const earlyFinish = marco ? undefined : dataTermino(f)
+    // ALAP: depois da volta, a tarefa vai para as datas tardias; as datas cedo e as folgas continuam as do cálculo cedo
+    const alap = t.restricao?.tipo === 'ALAP' && !started(t)
+    const sAgendado = alap ? c.proximoUtil(ls.get(uid)!) : s
+    const fAgendado = alap ? lf.get(uid)! : f
+    const marco = fAgendado === sAgendado
+    const dataTermino = (m: number) => dataDoMomento(base, cd.fimUtilAte(m) - 1)
+    const inicioNorm = c.proximoUtil(sAgendado)
     // Marco: data do último trecho útil até o momento (o dia da predecessora); no início do projeto, o 1º dia útil
-    let finish = marco ? (c.uteisAte(s) === 0 ? dataDoMomento(base, inicioNorm) : dataTermino(s)) : dataTermino(f)
-    let start = marco ? finish : dataDoMomento(base, s)
+    let finish = marco ? (c.uteisAte(sAgendado) === 0 ? dataDoMomento(base, inicioNorm) : dataTermino(sAgendado)) : dataTermino(fAgendado)
+    let start = marco ? finish : dataDoMomento(base, sAgendado)
     if (forecast && t.percentComplete > 0 && t.actualStart) start = t.actualStart
     if (concluida && t.actualFinish) finish = t.actualFinish
 
     const folgaLivreMin = concluida ? 0 : Math.max(0, folgaLivre)
+    const unidadeDia = t.duracaoCorrida ? MINUTOS_NO_DIA_CORRIDO : mpd
+    const prazo = t.prazoFinal ? momentoDeTermino(t.prazoFinal, cd) : undefined
     result.set(uid, {
       uid,
       inicioCedoMin: s,
       terminoCedoMin: f,
       inicioTardeMin: ls.get(uid)!,
       terminoTardeMin: lf.get(uid)!,
-      earlyStart: dataDoMomento(base, inicioNorm),
-      earlyFinish: earlyFinish ?? finish,
+      earlyStart: dataDoMomento(base, c.proximoUtil(s)),
+      earlyFinish: f === s ? finish : dataTermino(f),
       lateStart: dataDoMomento(base, c.proximoUtil(ls.get(uid)!)),
       lateFinish: dataTermino(lf.get(uid)!),
       start,
       finish,
-      inicioHora: horaDoMomento(marco ? s : inicioNorm),
-      terminoHora: horaDoMomento(c.fimUtilAte(f)),
+      inicioHora: horaDoMomento(marco ? sAgendado : inicioNorm),
+      terminoHora: horaDoMomento(cd.fimUtilAte(fAgendado)),
       folgaTotalMin: folgaTotal,
       folgaLivreMin,
-      totalFloat: minutosParaDias(folgaTotal, mpd),
-      freeFloat: minutosParaDias(folgaLivreMin, mpd),
+      totalFloat: minutosParaDias(folgaTotal, unidadeDia),
+      freeFloat: minutosParaDias(folgaLivreMin, unidadeDia),
       critical: !concluida && folgaTotal <= 0,
-      duracaoMin: c.minutosUteisEntre(s, f),
+      duracaoMin: cd.minutosUteisEntre(s, f),
       restanteMin: restante.get(uid)!,
+      corrida: !!t.duracaoCorrida,
+      prazoFinalPerdido: prazo !== undefined && fAgendado > prazo,
+      restricaoConflito: conflito.has(uid),
     })
   }
 

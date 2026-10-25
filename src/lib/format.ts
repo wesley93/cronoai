@@ -1,6 +1,6 @@
 // Formatação pt-BR (moeda, números, datas).
 import { parseISO } from './calendar'
-import { MINUTOS_POR_DIA_PADRAO, minutosParaDias } from './calendarioTrabalho'
+import { MINUTOS_NO_DIA_CORRIDO, MINUTOS_POR_DIA_PADRAO, minutosParaDias } from './calendarioTrabalho'
 
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 const brlCents = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 })
@@ -14,6 +14,11 @@ export const fmtBRLCents = (v: number) => brlCents.format(Number.isFinite(v) ? v
 export const fmtNum = (v: number) => num.format(Number.isFinite(v) ? v : 0)
 /** Minutos úteis em dias da obra, até 1 casa (pt-BR): 5760 → "12", 26534 → "55,3" (sem a unidade). */
 export const fmtDiasUteis = (minutos: number, minutosPorDia = MINUTOS_POR_DIA_PADRAO) => fmtNum(minutosParaDias(minutos, minutosPorDia))
+/** Minutos de relógio em dias corridos, até 1 casa (pt-BR), para a folga de tarefa de duração corrida: 7740 → "5,4" (sem a unidade). */
+export const fmtDiasCorridos = (minutos: number) => fmtNum(minutos / MINUTOS_NO_DIA_CORRIDO)
+/** Folga com a unidade: "55,3d" em dias úteis da obra; "5,4dc" em dias corridos (tarefa de duração corrida). */
+export const fmtFolga = (minutos: number, corrida: boolean, minutosPorDia = MINUTOS_POR_DIA_PADRAO) =>
+  corrida ? `${fmtDiasCorridos(minutos)}dc` : `${fmtDiasUteis(minutos, minutosPorDia)}d`
 export const fmtPct = (v: number, digits = 0) => `${(Number.isFinite(v) ? v : 0).toFixed(digits).replace('.', ',')}%`
 export const fmtIndex = (v: number) => (Number.isFinite(v) ? v.toFixed(2).replace('.', ',') : '—')
 

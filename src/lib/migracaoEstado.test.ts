@@ -43,7 +43,7 @@ describe('lerEstadoV1', () => {
     expect(t104.baselineDuracaoMin).toBe(5760)
     expect(Object.keys(t104)).not.toContain('durationDays')
     expect(r.estado.tasks.find((t) => t.uid === 402)!.predecessors).toEqual([{ uid: 401, type: 'SS', lag: { tipo: 'util', minutos: 4800 } }])
-    expect(r.estado.tasks.find((t) => t.uid === 103)!.predecessors[0].lag.minutos).toBe(2400) // 301FS+5
+    expect(r.estado.tasks.find((t) => t.uid === 103)!.predecessors[0].lag).toEqual({ tipo: 'util', minutos: 2400 }) // 301FS+5
     expect(r.estado.calendarioPadraoUid).toBe(1)
     expect(r.estado.calendarios).toHaveLength(1)
     expect(r.estado.calendarios[0].nome).toBe('Padrão Obra (seg-sex, 8h)')

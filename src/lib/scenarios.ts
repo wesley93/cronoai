@@ -13,8 +13,8 @@ import {
   diaRelativo,
   minutosParaDias,
 } from './calendarioTrabalho'
-import { computeSchedule, downstreamOf } from './cpm'
-import { normalizeText } from './wbs'
+import { computeSchedule, downstreamOf, optsDaObra } from './cpm'
+import { normalizeText, rotuloLag } from './wbs'
 
 export const CONGESTION_FACTOR = 1.05 // perda de produtividade por adensamento da frente
 export const MOBILIZATION_PER_WORKER = 1200 // integração, EPI, exames (R$/profissional)
@@ -158,7 +158,7 @@ const minutosPorDiaDe = (ctx: Ctx) => ctx.meta.minutosPorDia ?? MINUTOS_POR_DIA_
 
 function reschedule(ctx: Ctx, tasks: Task[], calendarios: CalendarioObra[]) {
   const cals = compilarCalendarios(ctx.meta.startDate, calendarios, ctx.calendarioPadraoUid)
-  const schedule = computeSchedule(tasks, cals, { mode: 'forecast', statusDate: ctx.meta.statusDate, minutosPorDia: minutosPorDiaDe(ctx) })
+  const schedule = computeSchedule(tasks, cals, optsDaObra(ctx.meta, 'forecast', ctx.meta.statusDate))
   return { cals, schedule }
 }
 
@@ -310,7 +310,11 @@ export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking']
   const mpd = minutosPorDiaDe(ctx)
   const lag = Math.max(0, Math.round(p.lagDays))
   const antigo = succ.predecessors.find((l) => l.uid === pred.uid)?.lag
-  const oldLag = antigo ? minutosParaDias(antigo.minutos, mpd) : 0
+  // Vínculo de antes, em texto: "5" dias úteis vira " + 5" (e " + 5 d" na memória); dias corridos e % usam o rótulo ("+7dc", "+50%")
+  const lagUtilAntigo = antigo?.tipo === 'util' && antigo.minutos !== 0 ? minutosParaDias(antigo.minutos, mpd) : 0
+  const lagOutroAntigo = antigo && antigo.tipo !== 'util' ? rotuloLag(antigo, mpd) : ''
+  const oldLagResumo = lagUtilAntigo ? ` + ${lagUtilAntigo}` : lagOutroAntigo ? ` ${lagOutroAntigo}` : ''
+  const oldLagMemoria = lagUtilAntigo ? ` + ${lagUtilAntigo} d` : lagOutroAntigo ? ` ${lagOutroAntigo}` : ''
   const predecessors = succ.predecessors.map((l) =>
     l.uid === pred.uid ? { ...l, type: 'SS' as const, lag: { tipo: 'util' as const, minutos: diasParaMinutos(lag, mpd) } } : l,
   )
@@ -332,7 +336,7 @@ export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking']
     targetUid: succ.uid,
     predecessorUid: pred.uid,
     title,
-    summary: `Vínculo ${pred.wbs} → ${succ.wbs}: FS${oldLag ? ` + ${oldLag}` : ''} → SS + ${lag} dias`,
+    summary: `Vínculo ${pred.wbs} → ${succ.wbs}: FS${oldLagResumo} → SS + ${lag} dias`,
     daysRecovered: days,
     newFinish: schedule.projectFinish,
     extraCost: contingency,
@@ -347,7 +351,7 @@ export function simulateFastTracking(ctx: Ctx, p: ScenarioParams['fastTracking']
       { label: 'Contingência de retrabalho', value: fmt(contingency) },
     ],
     memory: [
-      `Antes: início de ${succ.wbs} ≥ término de ${pred.wbs}${oldLag ? ` + ${oldLag} d` : ''} (FS)`,
+      `Antes: início de ${succ.wbs} ≥ término de ${pred.wbs}${oldLagMemoria} (FS)`,
       `Depois: início de ${succ.wbs} ≥ início de ${pred.wbs} + ${lag} d (SS)`,
       `Sobreposição = (${predDur} − ${lag}) ÷ ${predDur} = ${Math.round(overlap * 100)}% da predecessora`,
       `Contingência de retrabalho = ${Math.round(REWORK_CONTINGENCY * 100)}% × ${fmt(succ.bac)} × ${Math.round(overlap * 100)}% = ${fmt(contingency)}`,

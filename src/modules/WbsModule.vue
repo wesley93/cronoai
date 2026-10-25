@@ -8,7 +8,7 @@ import { useMsProject } from '@/lib/useMsProject'
 import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import ProgressBar from '@/components/common/ProgressBar.vue'
-import { fmtBRL, fmtDate, fmtNum } from '@/lib/format'
+import { fmtBRL, fmtDate, fmtFolga } from '@/lib/format'
 import { diasParaMinutos, minutosParaDias } from '@/lib/calendarioTrabalho'
 import { formatPredecessors } from '@/lib/wbs'
 
@@ -140,7 +140,7 @@ const ac = (t: Task) => (t.isSummary ? (project.rollups.get(t.uid)?.actualCost ?
             <td class="max-w-[180px] truncate text-[11px] text-zinc-500" :title="t.resources.map((r) => `${r.units} ${r.resource}`).join(', ')">{{ t.resources.map((r) => `${r.units} ${r.resource}`).join(', ') }}</td>
             <td class="mono">{{ t.sinapi }}</td>
             <td class="text-right tabular-nums">
-              <template v-if="!t.isSummary && t.percentComplete < 100">{{ fmtNum(project.schedule.byUid.get(t.uid)?.totalFloat ?? 0) }}d</template>
+              <template v-if="!t.isSummary && t.percentComplete < 100">{{ fmtFolga(project.schedule.byUid.get(t.uid)?.folgaTotalMin ?? 0, !!project.schedule.byUid.get(t.uid)?.corrida, project.minutosPorDia) }}</template>
             </td>
           </tr>
         </tbody>

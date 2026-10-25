@@ -14,7 +14,7 @@ import type {
   ScenarioKind,
   Task,
 } from '@/types/domain'
-import type { MSProjectTask } from '@/types/msProject'
+import type { MSProjectPredecessor, MSProjectTask } from '@/types/msProject'
 import type { IndiceObras, MigracaoV1, PersistedState, ResumoObra, ScenarioUndo } from '@/types/obra'
 import { SEED_HOLIDAYS, SEED_MATERIALS, SEED_META, SEED_REPORTS, SEED_TASKS } from '@/data/seed'
 import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
@@ -41,10 +41,10 @@ import {
   minutosParaDias,
   semDiasExtras,
 } from '@/lib/calendarioTrabalho'
-import { computeSchedule, withBaseline } from '@/lib/cpm'
+import { computeSchedule, optsDaObra, withBaseline } from '@/lib/cpm'
 import { computeEvm, computePackageEvm, computeSCurve, eacVariants, forecastFinishBySpi, plannedFraction } from '@/lib/evm'
 import { interpretReport } from '@/lib/fieldAi'
-import { buildMspdiXml, buildTaskXml, parseMspdiXml, validateMspdi, type MspdiValidation } from '@/lib/msProjectXmlParser'
+import { buildMspdiXml, buildTaskXml, lagParaMspdi, parseMspdiXml, validateMspdi, type MspdiValidation } from '@/lib/msProjectXmlParser'
 import {
   DEFAULT_SCENARIO_PARAMS,
   analyzeDelay,
@@ -58,7 +58,7 @@ import {
 } from '@/lib/scenarios'
 import { SAFETY_MARGIN_DAYS, analyzeSupplies } from '@/lib/supplies'
 import { fmtBRL, fmtMonth, uid } from '@/lib/format'
-import { nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
+import { lagEmDias, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
 import { criarRegistro, lerEstadoV1, migrarRegistro } from '@/lib/migracaoEstado'
 import { avaliarCota, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, validarIndice, type DadosObra } from '@/lib/obras'
 import { obterArmazenamento, type ArmazenamentoObras } from './armazenamentoObras'
@@ -81,7 +81,7 @@ function clone<T>(v: T): T {
 /** Linha de base: cálculo sem avanço e sem dias úteis extras (hora extra não entra na linha de base). */
 function baselineFor(tasks: Task[], meta: ProjectState['meta'], calendarios: CalendarioObra[], padraoUid: number, onlyMissing = false): Task[] {
   const cals = compilarCalendarios(meta.startDate, calendarios, padraoUid, { semExcecoesUteis: true })
-  return withBaseline(tasks, computeSchedule(tasks, cals, { mode: 'baseline', minutosPorDia: meta.minutosPorDia }), onlyMissing)
+  return withBaseline(tasks, computeSchedule(tasks, cals, optsDaObra(meta, 'baseline')), onlyMissing)
 }
 
 export function buildSeedState(): PersistedState {
@@ -447,7 +447,7 @@ export const useProjectStore = defineStore('project', () => {
   const baseCalendar = computed(() => calendarioDeDias(calendariosPv.value.padrao))
   /** Cronograma previsto de uma lista de tarefas (a da obra ou uma hipótese: apontamento, inclusão, planilha). */
   function agendar(tasks: Task[]) {
-    return computeSchedule(tasks, calendarios.value, { mode: 'forecast', statusDate: state.meta.statusDate, minutosPorDia: minutosPorDia.value })
+    return computeSchedule(tasks, calendarios.value, optsDaObra(state.meta, 'forecast', state.meta.statusDate))
   }
   const schedule = computed(() => agendar(state.tasks))
   const rollups = computed(() => rollupSummaries(state.tasks, schedule.value))
@@ -508,6 +508,12 @@ export const useProjectStore = defineStore('project', () => {
     analyzeSupplies(state.materials, state.tasks, schedule.value, state.meta.statusDate, state.restrictions, safetyMarginDays.value),
   )
 
+  /** Vínculo no formato MS Project: lag em dias (úteis ou corridos) e o par `LinkLag`/`LagFormat` do MSPDI. */
+  function predecessorMs(p: Task['predecessors'][number]): MSProjectPredecessor {
+    const { linkLag, lagFormat } = lagParaMspdi(p.lag)
+    return { PredecessorUID: p.uid, Type: p.type, LagDays: lagEmDias(p.lag, minutosPorDia.value), LinkLag: linkLag, LagFormat: lagFormat }
+  }
+
   /** Tarefas no formato MS Project (folhas + resumos), sempre coerentes com o CPM e o EVM atuais. */
   const msProjectTasks = computed<MSProjectTask[]>(() => {
     const status = state.meta.statusDate
@@ -528,7 +534,7 @@ export const useProjectStore = defineStore('project', () => {
           Start: start,
           Finish: finish,
           PercentComplete: Math.round((r?.percentComplete ?? 0) * 10) / 10,
-          Predecessors: t.predecessors.map((p) => ({ PredecessorUID: p.uid, Type: p.type, LagDays: minutosParaDias(p.lag.minutos, minutosPorDia.value) })),
+          Predecessors: t.predecessors.map(predecessorMs),
           IsCritical: !!r?.critical,
           TotalSlack: null,
           BudgetAtCompletion: r?.bac ?? 0,
@@ -554,7 +560,7 @@ export const useProjectStore = defineStore('project', () => {
         Start: s?.start ?? state.meta.startDate,
         Finish: s?.finish ?? state.meta.startDate,
         PercentComplete: t.percentComplete,
-        Predecessors: t.predecessors.map((p) => ({ PredecessorUID: p.uid, Type: p.type, LagDays: minutosParaDias(p.lag.minutos, minutosPorDia.value) })),
+        Predecessors: t.predecessors.map(predecessorMs),
         IsCritical: !!s?.critical,
         TotalSlack: done || !s ? null : s.totalFloat,
         BudgetAtCompletion: t.bac,

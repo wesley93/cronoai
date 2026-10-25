@@ -28,7 +28,7 @@ const schedule: ScheduleResult = {
         uid: 1, inicioCedoMin: 480, terminoCedoMin: 8160, inicioTardeMin: 480, terminoTardeMin: 8160,
         earlyStart: START, earlyFinish: '2026-11-06', lateStart: START, lateFinish: '2026-11-06',
         start: START, finish: '2026-11-06', inicioHora: '08:00', terminoHora: '17:00',
-        folgaTotalMin: 0, folgaLivreMin: 0, totalFloat: 0, freeFloat: 0, critical: false, duracaoMin: 2400, restanteMin: 2400,
+        folgaTotalMin: 0, folgaLivreMin: 0, totalFloat: 0, freeFloat: 0, critical: false, duracaoMin: 2400, restanteMin: 2400, corrida: false, prazoFinalPerdido: false, restricaoConflito: false,
       },
     ],
   ]),

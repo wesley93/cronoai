@@ -25,11 +25,37 @@ export interface CalendarioObra {
   excecoes: ExcecaoCalendario[]
 }
 
-/** Latência do vínculo, em minutos inteiros (negativa = antecipação). `codigoMspdi` guarda o `LagFormat` do arquivo. */
-export type Lag = { tipo: 'util'; minutos: number; codigoMspdi?: number }
+/**
+ * Latência do vínculo (negativa = antecipação). `util`: minutos úteis, contados no calendário da sucessora;
+ * `corrido`: minutos de relógio (24 h por dia, sem calendário); `percentual`: % da duração da predecessora.
+ * `codigoMspdi` guarda o `LagFormat` do arquivo para devolvê-lo na exportação.
+ */
+export type Lag =
+  | { tipo: 'util'; minutos: number; codigoMspdi?: number }
+  | { tipo: 'corrido'; minutos: number; codigoMspdi?: number }
+  | { tipo: 'percentual'; percentual: number; codigoMspdi?: number }
 
-/** Restrição de data da tarefa. `data` é `yyyy-mm-dd` (início do expediente) ou `yyyy-mm-ddThh:mm`, hora local sem fuso. */
-export type Restricao = { tipo: 'SNET'; data: string; inferida?: true }
+/** Restrições de data com data (as outras, ASAP, é a ausência de restrição, e ALAP não tem data). */
+export const RESTRICOES_COM_DATA = ['SNET', 'SNLT', 'MSO', 'MFO', 'FNET', 'FNLT'] as const
+export type RestricaoComData = (typeof RESTRICOES_COM_DATA)[number]
+
+/**
+ * Restrição de data da tarefa (os códigos do MS Project: SNET 4, SNLT 5, MSO 2, MFO 3, FNET 6, FNLT 7, ALAP 1).
+ * `data` é `yyyy-mm-dd` (início do expediente nas de início; fim do expediente nas de término) ou `yyyy-mm-ddThh:mm`,
+ * hora local sem fuso. `inferida`: o import deduziu a restrição (tarefa sem vínculo), o arquivo não a tinha.
+ */
+export type Restricao = { tipo: RestricaoComData; data: string; inferida?: true } | { tipo: 'ALAP' }
+
+/** Opções de cronograma da obra (RF-05.5). */
+export interface OpcoesCronograma {
+  /**
+   * `retida` (padrão do MS Project): o restante de tarefa iniciada fora de sequência começa depois da predecessora e
+   * restringe a predecessora na volta. `substituir`: o progresso substitui a lógica (ignora a predecessora).
+   */
+  logica: 'retida' | 'substituir'
+  /** Política do CronoAI: o restante (e a tarefa não iniciada) começa depois da data de status. */
+  moverRestante: boolean
+}
 
 export interface PredecessorLink {
   uid: number
@@ -83,8 +109,12 @@ export interface Task {
   baselineStart?: string
   baselineFinish?: string
   baselineDuracaoMin?: number
-  /** Restrição de data (E1: "Não iniciar antes de"). */
+  /** Restrição de data (ausente = ASAP, o mais cedo possível). */
   restricao?: Restricao
+  /** Prazo final (`yyyy-mm-dd` = fim do expediente, ou `yyyy-mm-ddThh:mm`): não move a tarefa, entra na folga e no indicador. */
+  prazoFinal?: string
+  /** Duração em tempo corrido (relógio de 24 h, `DurationFormat` corrido do MS Project). */
+  duracaoCorrida?: true
   /** Pavimentos atendidos [de, até] — usado pelo match semântico. */
   floors?: [number, number]
   notes?: string
@@ -117,6 +147,8 @@ export interface ProjectMeta {
   dataBaseSinapi?: string
   /** Minutos de trabalho por dia, só para exibir dias (ausente = 480). */
   minutosPorDia?: number
+  /** Opções de cronograma (ausente = lógica retida e mover o restante para depois da data de status). */
+  opcoesCronograma?: OpcoesCronograma
 }
 
 export interface ScheduledTask {
@@ -147,6 +179,12 @@ export interface ScheduledTask {
   /** Duração efetiva usada pelo cálculo, em minutos úteis. */
   duracaoMin: number
   restanteMin: number
+  /** Tarefa de duração corrida: a folga é medida em 24 h e exibida em dias corridos. */
+  corrida: boolean
+  /** O término calculado passa do prazo final. */
+  prazoFinalPerdido: boolean
+  /** A restrição (SNLT, FNLT, MSO ou MFO) prevalece sobre os vínculos: a tarefa começa antes do que eles permitem. */
+  restricaoConflito: boolean
 }
 
 export interface ScheduleResult {

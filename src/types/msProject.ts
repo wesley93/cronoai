@@ -6,8 +6,12 @@ export interface MSProjectPredecessor {
   PredecessorUID: number
   /** FS = Término-Início, SS = Início-Início, FF = Término-Término, SF = Início-Término. */
   Type: LinkType
-  /** Latência em dias úteis (negativa = antecipação). */
+  /** Latência em dias (úteis; corridos para lag em dias corridos; 0 para lag em %). Negativa = antecipação. */
   LagDays: number
+  /** `LinkLag` do MSPDI: décimos de minuto; para lag em %, o percentual inteiro (50 = 50%). */
+  LinkLag: number
+  /** `LagFormat` do MSPDI (7 = dias úteis, 8 = dias corridos, 19 = %…). */
+  LagFormat: number
 }
 
 export interface MSProjectResource {

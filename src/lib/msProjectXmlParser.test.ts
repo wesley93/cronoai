@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { Task } from '@/types/domain'
 import { buildSeedState } from '@/stores/useProjectStore'
 import { addCalendarDays } from './calendar'
 import { compilarCalendarios } from './calendarioTrabalho'
@@ -9,6 +10,7 @@ import {
   buildMspdiXml,
   buildTaskXml,
   fromDuration,
+  lagParaMspdi,
   lagToWorkingDays,
   parseMspdiXml,
   validateMspdi,
@@ -459,5 +461,53 @@ describe('parseMspdiXml: rodada 03 (chaves do protótipo, datas inválidas, ocor
     expect(r.warnings).toContain('1 vínculo(s) com lag em formato diferente de dias úteis: serão exportados em dias úteis.')
     const seedImport = parseMspdiXml(buildMspdiXml(input))
     expect(seedImport.warnings.join(' ')).not.toMatch(/formato diferente|segunda a sexta|data inválida/)
+  })
+})
+
+describe('exportação de restrições e lag em todos os formatos (E2)', () => {
+  it('lag do domínio vira LinkLag e LagFormat: útil 7, corrido 8, percentual 19 (percentual inteiro); o código do arquivo volta', () => {
+    expect(lagParaMspdi({ tipo: 'util', minutos: 4800 })).toEqual({ linkLag: 48000, lagFormat: 7 })
+    expect(lagParaMspdi({ tipo: 'util', minutos: -480 })).toEqual({ linkLag: -4800, lagFormat: 7 })
+    expect(lagParaMspdi({ tipo: 'corrido', minutos: 10080 })).toEqual({ linkLag: 100800, lagFormat: 8 })
+    expect(lagParaMspdi({ tipo: 'percentual', percentual: 50 })).toEqual({ linkLag: 50, lagFormat: 19 })
+    expect(lagParaMspdi({ tipo: 'percentual', percentual: -25 })).toEqual({ linkLag: -25, lagFormat: 19 })
+    expect(lagParaMspdi({ tipo: 'util', minutos: 2400, codigoMspdi: 5 })).toEqual({ linkLag: 24000, lagFormat: 5 })
+    expect(lagParaMspdi({ tipo: 'corrido', minutos: 1440, codigoMspdi: 36 })).toEqual({ linkLag: 14400, lagFormat: 36 })
+  })
+
+  it('as 8 restrições saem com o ConstraintType do MS Project e a ConstraintDate (hora do expediente ou a informada)', () => {
+    const xmlDe = (restricao: Task['restricao']) => {
+      const tasks = seed.tasks.map((t) => (t.uid === 105 ? { ...t, restricao } : t))
+      return buildTaskXml(tasks.find((t) => t.uid === 105)!, { ...input, tasks })
+    }
+    const campo = (xml: string, nome: string) => new RegExp(`<${nome}>([^<]*)</${nome}>`).exec(xml)?.[1]
+    const casos: [Task['restricao'], string, string | undefined][] = [
+      [undefined, '0', undefined],
+      [{ tipo: 'ALAP' }, '1', undefined],
+      [{ tipo: 'MSO', data: '2026-11-05T14:30' }, '2', '2026-11-05T14:30:00'],
+      [{ tipo: 'MFO', data: '2026-11-05' }, '3', '2026-11-05T17:00:00'],
+      [{ tipo: 'SNET', data: '2026-11-05' }, '4', '2026-11-05T08:00:00'],
+      [{ tipo: 'SNLT', data: '2026-11-05' }, '5', '2026-11-05T08:00:00'],
+      [{ tipo: 'FNET', data: '2026-11-05' }, '6', '2026-11-05T17:00:00'],
+      [{ tipo: 'FNLT', data: '2026-11-05T10:00' }, '7', '2026-11-05T10:00:00'],
+    ]
+    for (const [restricao, codigo, data] of casos) {
+      const xml = xmlDe(restricao)
+      expect([campo(xml, 'ConstraintType'), campo(xml, 'ConstraintDate')], JSON.stringify(restricao)).toEqual([codigo, data])
+    }
+  })
+
+  it('exporta lag corrido e em % com strictOrder e valida o arquivo', () => {
+    const tasks = seed.tasks.map((t) =>
+      t.uid === 105
+        ? { ...t, restricao: { tipo: 'MSO' as const, data: '2026-11-05T14:30' }, predecessors: [{ uid: 104, type: 'FS' as const, lag: { tipo: 'corrido' as const, minutos: 2880 } }] }
+        : t.uid === 401
+          ? { ...t, predecessors: [{ uid: 105, type: 'SS' as const, lag: { tipo: 'percentual' as const, percentual: 50 } }] }
+          : t,
+    )
+    const xml = buildMspdiXml({ ...input, tasks })
+    expect(validateMspdi(xml, { strictOrder: true }).errors).toEqual([])
+    expect(xml).toMatch(/<LinkLag>28800<\/LinkLag>\s*<LagFormat>8<\/LagFormat>/)
+    expect(xml).toMatch(/<LinkLag>50<\/LinkLag>\s*<LagFormat>19<\/LagFormat>/)
   })
 })

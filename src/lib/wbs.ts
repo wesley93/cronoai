@@ -133,12 +133,21 @@ export function nextUid(tasks: Task[]): number {
 
 const LINK_PT: Record<string, string> = { FS: 'Término-Início', SS: 'Início-Início', FF: 'Término-Término', SF: 'Início-Término' }
 
-/** Rótulo do lag no estilo MS Project, em dias da obra: "+10", "-2", "+0,5"; vazio quando é zero. */
+const MINUTOS_DIA_CORRIDO = 1440
+
+/** Lag em dias: úteis (dias da obra) para lag útil, corridos para lag em dias corridos; 0 para lag em % (não é tempo). */
+export function lagEmDias(lag: Lag, minutosPorDia = MINUTOS_POR_DIA_PADRAO): number {
+  if (lag.tipo === 'percentual') return 0
+  return minutosParaDias(lag.minutos, lag.tipo === 'corrido' ? MINUTOS_DIA_CORRIDO : minutosPorDia)
+}
+
+/** Rótulo do lag no estilo MS Project: "+10" (dias úteis), "-2", "+0,5", "+7dc" (dias corridos), "+50%"; vazio quando é zero. */
 export function rotuloLag(lag: Lag, minutosPorDia = MINUTOS_POR_DIA_PADRAO): string {
-  const dias = Math.round(minutosParaDias(lag.minutos, minutosPorDia) * 100) / 100
-  if (!dias) return ''
-  const texto = String(dias).replace('.', ',')
-  return dias > 0 ? `+${texto}` : texto
+  const valor = lag.tipo === 'percentual' ? lag.percentual : Math.round(lagEmDias(lag, minutosPorDia) * 100) / 100
+  if (!valor) return ''
+  const texto = String(valor).replace('.', ',')
+  const sufixo = lag.tipo === 'percentual' ? '%' : lag.tipo === 'corrido' ? 'dc' : ''
+  return `${valor > 0 ? '+' : ''}${texto}${sufixo}`
 }
 
 /** Predecessoras no estilo MS Project: "104FS; 401SS+10". */

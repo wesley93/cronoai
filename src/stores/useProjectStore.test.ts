@@ -74,4 +74,26 @@ describe('useProjectStore · visão MS Project', () => {
     store.applyScenario(r)
     expect(store.schedule.projectFinish).toBe('2027-06-18')
   })
+
+  it('opções do cronograma da obra: padrão (retida, mover o restante) = N-1; substituir não muda o Aurora; sem mover o restante a entrega vai a 09/06/27', () => {
+    const store = useProjectStore()
+    expect(store.state.meta.opcoesCronograma).toBeUndefined() // ausente = lógica retida e mover o restante
+    expect(store.schedule.projectFinish).toBe('2027-06-23')
+    store.state.meta.opcoesCronograma = { logica: 'substituir', moverRestante: true }
+    expect([store.schedule.projectFinish, store.delay.delayDays]).toEqual(['2027-06-23', 16]) // nenhuma tarefa iniciada fora de sequência
+    store.state.meta.opcoesCronograma = { logica: 'retida', moverRestante: false }
+    // O restante não é empurrado para depois da data de status: a 104 (40%) termina 21/10 e a entrega antecipa
+    expect([store.schedule.projectFinish, store.delay.delayDays]).toEqual(['2027-06-09', 6])
+    expect([store.schedule.byUid.get(104)!.finish, store.schedule.byUid.get(105)!.start]).toEqual(['2026-10-21', '2026-10-22'])
+  })
+
+  it('a visão MS Project traz o lag em dias e o par LinkLag/LagFormat (útil 7, corrido 8, % 19)', () => {
+    const store = useProjectStore()
+    expect(store.msProjectTask(402)!.Predecessors).toEqual([{ PredecessorUID: 401, Type: 'SS', LagDays: 10, LinkLag: 48000, LagFormat: 7 }])
+    store.updateTask(402, { predecessors: [{ uid: 401, type: 'SS', lag: { tipo: 'corrido', minutos: 14400 } }] })
+    expect(store.msProjectTask(402)!.Predecessors).toEqual([{ PredecessorUID: 401, Type: 'SS', LagDays: 10, LinkLag: 144000, LagFormat: 8 }])
+    store.updateTask(402, { predecessors: [{ uid: 401, type: 'SS', lag: { tipo: 'percentual', percentual: 50 } }] })
+    expect(store.msProjectTask(402)!.Predecessors).toEqual([{ PredecessorUID: 401, Type: 'SS', LagDays: 0, LinkLag: 50, LagFormat: 19 }])
+  })
 })
+
