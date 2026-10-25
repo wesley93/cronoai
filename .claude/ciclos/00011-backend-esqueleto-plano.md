@@ -471,7 +471,7 @@ Parecer: `00011-tarefa0-dba.md`, `VEREDITO: AJUSTAR`. Os 8 ajustes e onde foram 
 
 ## Decisões do gate
 - **Tarefa 0 (`dba`): feita em 25/10/2026.** Veio `VEREDITO: AJUSTAR`, e os 8 ajustes estão aplicados nesta emenda (seção 15). A condição "convenções de banco com parecer do `dba` antes do gate" está cumprida. O `dba` revisa de novo na validação do E1.
-- **P1, P2 e P3:** pendentes da sua resposta. Na P3, o `dba` concorda com a 17 em imagem Debian. A recomendação é a mesma, e a decisão continua sendo sua, alinhada com a Infraestrutura.
+- **P1, P2 e P3:** decididas pelo orquestrador; ver "Decisões do gate — registro final" no fim deste plano.
 
 ## Decisões do gate — registro final (25/10/2026)
 Decididas pelo orquestrador com a autorização do usuário para seguir sem parar por todas as fases, **sujeitas à revisão dele no PR**:
