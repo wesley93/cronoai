@@ -202,6 +202,31 @@ public sealed class ObraTestes
         Assert.Equal("opcoesCronograma", erro.ParamName);
     }
 
+    [Theory]
+    [InlineData("{\"a\":1e131071}")]
+    [InlineData("{\"a\":1e-16383}")]
+    [InlineData("{\"a\":1E5}")]
+    [InlineData("{\"a\":[1,2.5e3]}")]
+    [InlineData("{\"a\":123456789012345678901234567890123}")] // 33 caracteres
+    public void Obra_opcoes_recusa_numero_exponencial_ou_com_mais_de_32_caracteres(string json)
+    {
+        // O jsonb escreve o número por extenso: 1e131071 (8 bytes de texto) vira ~131 KB no banco.
+        var erro = Assert.Throws<ArgumentException>(() => Obra.Criar(_empresa, Valida() with { OpcoesCronograma = json }, _criada));
+
+        Assert.Equal("opcoesCronograma", erro.ParamName);
+    }
+
+    [Fact]
+    public void Obra_opcoes_aceita_numero_decimal_normal_e_longo_ate_32_caracteres()
+    {
+        // Controle negativo: 32 caracteres passam (decimal longo, negativo, inteiro grande).
+        foreach (var numero in new[] { "1234567890123456789012345678901", "-1234567890.12345678901234567890", "0.5", "-12", "1234567890.12345678901234567890" })
+        {
+            Assert.True(numero.Length <= 32);
+            Obra.Criar(_empresa, Valida() with { OpcoesCronograma = "{\"a\":" + numero + "}" }, _criada);
+        }
+    }
+
     #endregion
 
     #region Métodos privados

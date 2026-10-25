@@ -186,6 +186,10 @@ public sealed partial class ArquiteturaTestes
     [InlineData("    DELETE FROM cronoai.auditoria WHERE id = {id}")]
     [InlineData("    INSERT INTO obra (id) VALUES ({id})")]
     [InlineData("    UPDATE ONLY obra SET nome = {n}")]
+    [InlineData("    MERGE INTO cronoai.obra o USING origem x ON o.id = x.id")]
+    [InlineData("    MERGE INTO auditoria a USING origem x ON a.id = x.id")]
+    [InlineData("    $\"UPDATE \\\"cronoai\\\".\\\"obra\\\" SET nome = {n}\"")]
+    [InlineData("    $@\"UPDATE \"\"cronoai\"\".\"\"obra\"\" SET nome = {n}\"")]
     [InlineData("    $\"UPDATE \"cronoai\".\"obra\" SET nome = {n}\"")]
     [InlineData("await db.Database.ExecuteSqlInterpolatedAsync($\"DELETE FROM auditoria\");")]
     public void Detector_de_SQL_de_escrita_acusa_as_formas_que_escapavam(string linha)
@@ -313,7 +317,7 @@ public sealed partial class ArquiteturaTestes
             .Select(a => a.Caminho)
             .ToList();
 
-    [GeneratedRegex(@"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)(\s+ONLY)?\s+(""?cronoai""?\s*\.\s*)?""?(obra|auditoria)""?\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)(\s+ONLY)?\s+((?:\\""|""""|"")?cronoai(?:\\""|""""|"")?\s*\.\s*)?(?:\\""|""""|"")?(obra|auditoria)\b", RegexOptions.IgnoreCase)]
     private static partial Regex EscritaEmAuditadaRegex();
 
     [GeneratedRegex(@"\bExecute(?:Update|Delete)(?:Async)?\s*\(")]

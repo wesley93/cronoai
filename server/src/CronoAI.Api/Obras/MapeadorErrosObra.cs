@@ -32,6 +32,8 @@ public static class MapeadorErrosObra
         ["ck_obra_sinapi_tudo_ou_nada"] = ("sinapi", "Informe UF, regime e data-base do SINAPI juntos, ou nenhum deles."),
         ["ck_obra_opcoes_objeto"] = ("opcoesCronograma", "As opções do cronograma devem ser um objeto JSON."),
         ["ck_obra_opcoes_tamanho"] = ("opcoesCronograma", "As opções do cronograma excedem o tamanho máximo."),
+        ["ck_auditoria_antes_tamanho"] = ("opcoesCronograma", "As opções do cronograma excedem o tamanho máximo."),
+        ["ck_auditoria_depois_tamanho"] = ("opcoesCronograma", "As opções do cronograma excedem o tamanho máximo."),
         ["ck_auditoria_motivo_tamanho"] = ("motivo", "O motivo deve ter no máximo 500 caracteres."),
     };
 

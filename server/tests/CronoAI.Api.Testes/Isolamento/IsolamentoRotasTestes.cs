@@ -210,7 +210,7 @@ public sealed class IsolamentoRotasTestes
                 && (texto.StartsWith("/api/v1/obras", StringComparison.Ordinal) || texto.StartsWith("/api/v1/auditoria", StringComparison.Ordinal)))
             .ToList();
 
-        Assert.True(endpoints.Count >= 8, $"esperava ao menos 8 endpoints de obras e auditoria, achou {endpoints.Count}");
+        Assert.True(endpoints.Count == 8, $"esperava exatamente 8 endpoints de obras e auditoria (6 de obras, a trilha da obra e a exportação), achou {endpoints.Count}: rota nova exige decidir a política e atualizar este número");
         foreach (var endpoint in endpoints)
         {
             var politicas = endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>().Select(a => a.Policy).ToList();

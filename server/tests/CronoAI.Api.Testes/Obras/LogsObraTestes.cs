@@ -68,8 +68,11 @@ public sealed class LogsObraTestes
     }
 
     [Fact]
-    public async Task Em_Development_o_409_de_nome_duplicado_nao_leva_o_nome_ao_log_do_EF()
+    public async Task Em_Development_o_409_de_nome_duplicado_nao_deixa_o_nome_em_nenhum_log_da_aplicacao()
     {
+        // ATENÇÃO ao que este teste prova: hoje o EF não loga nada (o contexto nasce de uma fábrica sem ILoggerFactory), então ele
+        // passaria mesmo sem a mitigação. Prova só que, de ponta a ponta, o nome repetido não vai a log NENHUM da aplicação em
+        // Development. A proteção da configuração é o teste do appsettings logo abaixo.
         // Em Development o Npgsql inclui o detalhe do erro (a linha, com o nome) e o EF logaria a exceção do 23505. O
         // appsettings.Development.json silencia as categorias Update e Database.Command do EF.
         var logs = new LogsEmMemoria();

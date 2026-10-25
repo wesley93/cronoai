@@ -142,6 +142,11 @@ const R18_ACUSA = [
   ['UPDATE ONLY sem schema', OBRAS_API, '    UPDATE ONLY obra SET nome = {n}'],
   ['espaços em volta do ponto', OBRAS_API, '    UPDATE cronoai . obra SET nome = {n}'],
   ['minúsculas', OBRAS_API, '    update cronoai.obra set nome = {n}'],
+  ['MERGE INTO com schema', OBRAS_API, '    MERGE INTO cronoai.obra o USING origem x ON o.id = x.id'],
+  ['MERGE INTO sem schema', AUDITORIA_DADOS, '    MERGE INTO auditoria a USING origem x ON a.id = x.id'],
+  ['aspas escapadas em string C# (barra e aspas)', OBRAS_API, '    $"UPDATE \\"cronoai\\".\\"obra\\" SET nome = {n}"'],
+  ['aspas escapadas só na auditoria', AUDITORIA_DADOS, '    $"DELETE FROM cronoai.\\"auditoria\\""'],
+  ['aspas dobradas em string verbatim', OBRAS_API, '    $@"UPDATE ""cronoai"".""obra"" SET nome = {n}"'],
 ]
 
 const R18_NAO_ACUSA = [

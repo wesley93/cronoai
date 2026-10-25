@@ -19,6 +19,8 @@ internal static class JsonOpcoes
 
     private const int LimiteDoTextoBrutoEmBytes = 65536;
 
+    private const int LimiteDoNumeroEmCaracteres = 32;
+
     #endregion
 
     #region Métodos públicos
@@ -49,6 +51,14 @@ internal static class JsonOpcoes
             if (TemCaractereNulo(documento.RootElement))
             {
                 throw new ArgumentException("As opções do cronograma não podem ter o caractere nulo.", parametro);
+            }
+
+            // O jsonb escreve o número POR EXTENSO: {"a":1e131071} (14 bytes) vira ~131 KB no texto do banco, e ~1.000 chaves assim
+            // fazem o CHECK de tamanho montar ~131 MB num backend compartilhado (DoS). Recusa-se antes de gravar: nada de notação
+            // exponencial nem número com mais de 32 caracteres. Decimal normal e longo, dentro do teto, passa.
+            if (TemNumeroQueExplodeNoJsonb(documento.RootElement))
+            {
+                throw new ArgumentException("As opções do cronograma não aceitam número em notação exponencial nem com mais de 32 caracteres.", parametro);
             }
 
             // O CHECK do banco mede octet_length(jsonb::text): o jsonb escreve ": " e ", " (com espaço), então um objeto compacto
@@ -125,6 +135,22 @@ internal static class JsonOpcoes
         }
 
         return bytes;
+    }
+
+    private static bool TemNumeroQueExplodeNoJsonb(JsonElement elemento)
+    {
+        switch (elemento.ValueKind)
+        {
+            case JsonValueKind.Object:
+                return elemento.EnumerateObject().Any(p => TemNumeroQueExplodeNoJsonb(p.Value));
+            case JsonValueKind.Array:
+                return elemento.EnumerateArray().Any(TemNumeroQueExplodeNoJsonb);
+            case JsonValueKind.Number:
+                var texto = elemento.GetRawText();
+                return texto.Length > LimiteDoNumeroEmCaracteres || texto.Contains('e', StringComparison.OrdinalIgnoreCase);
+            default:
+                return false;
+        }
     }
 
     private static bool TemCaractereNulo(JsonElement elemento)

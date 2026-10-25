@@ -111,6 +111,8 @@ A execução real e os testes validam normalmente.
 
 ## Obras, trilha de auditoria e concorrência (ciclo 00013)
 
+**Banco local criado antes da troca do id da migração `ObrasAuditoria`** (rodadas 01 e 02 do ciclo, enquanto ela não estava mergeada): quem já a aplicou localmente precisa rodar `docker compose --profile backend down -v` antes de subir de novo (apaga os dados locais) e reaplicar as migrações; o id novo é `20261025201449_ObrasAuditoria`.
+
 Rotas (todas exigem sessão e **empresa ativa**; as escritas exigem o cabeçalho `X-XSRF-TOKEN`):
 
 | Rota | O que faz |
@@ -124,7 +126,7 @@ Rotas (todas exigem sessão e **empresa ativa**; as escritas exigem o cabeçalho
 
 - **Concorrência otimista:** `PUT`, `arquivar` e `restaurar` levam `versao` (a que o cliente leu) no corpo. Versão velha, obra arquivada ou nome repetido respondem **409** em ProblemDetails (`type` = `conflito-de-versao`, `obra-arquivada`, `obra-nao-arquivada` ou `obra-nome-duplicado`) com o `estadoAtual` da obra quando ela é visível. Obra de outra empresa responde **404**, igual à inexistente.
 - **Auditoria:** toda escrita grava, na mesma transação, quem, o quê (só os campos alterados da lista branca), quando, a origem (`ui`), a correlação com o log e o `motivo` opcional (texto livre: **não digite dado pessoal**). A trilha é append-only no banco (nem o dono altera ou apaga com `UPDATE`/`DELETE`/`TRUNCATE`). **Não há IP** (pendência do Jurídico) nem nome de usuário (só o `usuarioId`).
-- **CSV:** UTF-8 com BOM, separador `;`, `CRLF`, todo campo entre aspas; células que começam com `=`, `+`, `-`, `@`, TAB ou CR saem com o prefixo `'`. **O arquivo termina numa linha de controle `#fim;<n>`** (n = número de registros): **sem essa linha o CSV está cortado** (a conexão ou o servidor falhou no meio) e não deve ser usado. Datas de 2000-01-01 até hoje + 1 ano (400 fora disso); o limite de taxa da exportação é por usuário, não por IP.
+- **CSV:** UTF-8 com BOM, separador `;`, `CRLF`, todo campo entre aspas; células que começam com `=`, `+`, `-`, `@`, TAB ou CR saem com o prefixo `'`. **O arquivo termina numa linha de controle `#fim;<n>`** (n = número de registros): **sem essa linha o CSV está cortado** (a conexão ou o servidor falhou no meio) e não deve ser usado. A conferência (n igual ao número de registros) deve ser feita com um **parser RFC 4180**, que lê campos entre aspas com quebra de linha dentro, e não linha a linha: um `motivo` com CR ou LF no meio de um campo faz uma contagem de linhas divergir da de registros. Datas de 2000-01-01 até hoje + 1 ano (400 fora disso); o limite de taxa da exportação é por usuário, não por IP.
 - **Municípios:** a lista oficial ainda não foi carregada (`municipio_referencia` vazia): o código é validado por formato, prefixo da UF e dígito verificador, então um código inexistente com dígito coincidente passa até a carga. Os **27 códigos de UF** semeados pela migração precisam ser conferidos contra a fonte oficial do IBGE antes do merge.
 
 ## Comandos

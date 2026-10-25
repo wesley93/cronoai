@@ -413,8 +413,8 @@ const CONEXAO_CRUA = /\bNpgsql(Connection|DataSource)\b/
 // R18: escrita em massa do EF e SQL de escrita nas entidades auditadas (ADR 00009)
 const EXECUTE_EM_MASSA = /\bExecute(Update|Delete)(Async)?\s*\(/
 // Escrita em obra/auditoria: acusa a PRÓPRIA linha do SQL (a chamada pode estar na linha de cima ou num bloco $"""), com
-// schema, aspas e ONLY opcionais; sem schema vale porque o search_path do papel da aplicação é cronoai.
-const ESCRITA_EM_AUDITADA = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)(\s+ONLY)?\s+("?cronoai"?\s*\.\s*)?"?(obra|auditoria)"?\b/i
+// schema, aspas (inclusive escapadas em string C#: \"x\" e ""x"") e ONLY opcionais, também MERGE INTO; sem schema vale porque o search_path do papel da aplicação é cronoai.
+const ESCRITA_EM_AUDITADA = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)(\s+ONLY)?\s+((?:\\"|""|")?cronoai(?:\\"|""|")?\s*\.\s*)?(?:\\"|""|")?(obra|auditoria)\b/i
 // Único arquivo que usa ExecuteUpdate/ExecuteDelete: só sobre sessao, que não é auditada.
 const EXECUTE_PERMITIDO = '/CronoAI.Dados/Identidade/ConsultasIdentidade.cs'
 // R19: migração que desliga ou afrouxa as garantias da trilha (alerta; revisão humana decide)
