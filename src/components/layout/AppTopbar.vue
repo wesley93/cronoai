@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Menu, Moon, Sun, Upload, Download, CalendarClock, KeyRound } from 'lucide-vue-next'
+import { Menu, Moon, Sun, Upload, Download, KeyRound } from 'lucide-vue-next'
 import { useUiStore } from '@/stores/ui'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useMsProject } from '@/lib/useMsProject'
-import { fmtDate, fmtDateLong, fmtIndex } from '@/lib/format'
+import { fmtDate, fmtIndex } from '@/lib/format'
+import ObraSelector from './ObraSelector.vue'
 
 const ui = useUiStore()
 const project = useProjectStore()
@@ -26,12 +27,7 @@ async function onFile(e: Event) {
   <header class="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-zinc-200 bg-white/85 px-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
     <button class="btn-ghost px-2 lg:hidden" aria-label="Abrir menu" @click="ui.sidebarOpen = !ui.sidebarOpen"><Menu class="h-4 w-4" /></button>
 
-    <div class="min-w-0 flex-1">
-      <div class="truncate text-sm font-semibold tracking-tight">{{ project.state.meta.name }}</div>
-      <div class="flex items-center gap-1.5 text-[11px] text-zinc-500">
-        <CalendarClock class="h-3 w-3" /> Data de status: <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ fmtDateLong(project.state.meta.statusDate) }}</span>
-      </div>
-    </div>
+    <ObraSelector />
 
     <div class="hidden items-center gap-4 xl:flex">
       <div class="text-right">

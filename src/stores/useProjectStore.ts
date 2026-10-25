@@ -334,6 +334,7 @@ export const useProjectStore = defineStore('project', () => {
     }
     if (!existente) {
       obraAtivaId.value = uid('obra')
+      if (migracaoV1.value?.resultado === 'migrado') migracaoV1.value = { ...migracaoV1.value, obraId: obraAtivaId.value }
       precisaGravar = true
     } else if (!obraAtivaId.value) {
       // Nenhuma obra legível no índice: a obra de exemplo entra como nova, sem tocar nas ilegíveis.

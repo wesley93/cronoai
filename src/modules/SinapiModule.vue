@@ -12,9 +12,11 @@ import { SINAPI_CATALOG, SINAPI_REFERENCE_URL } from '@/data/sinapiCatalog'
 import { HOURS_PER_DAY, durationFromTeam, scheduleDays, teamFromDuration, totalManHours } from '@/lib/sinapi'
 import { rateOf } from '@/lib/scenarios'
 import { fmtBRL, fmtDate, fmtNum } from '@/lib/format'
+import { descreverTabelaSinapi } from '@/lib/obras'
 
 const project = useProjectStore()
 const ui = useUiStore()
+const tabelaSinapi = computed(() => descreverTabelaSinapi(project.state.meta))
 
 const catalogIdx = ref(0)
 const item = reactive({ ...SINAPI_CATALOG[0] })
@@ -201,7 +203,7 @@ function add() {
           <span>Orçamento do pacote (BAC): <strong class="tabular-nums">{{ fmtBRL(bac) }}</strong></span>
           <span class="text-zinc-500">Mão de obra estimada: {{ fmtBRL(laborCost) }} ({{ Math.round((laborCost / Math.max(1, bac)) * 100) }}% do BAC)</span>
         </div>
-        <p class="mt-3 text-[11px] text-zinc-500">Códigos, RUP e custos do catálogo são ilustrativos. Valide na tabela SINAPI vigente da UF e data-base do orçamento antes de usar em proposta ou medição.</p>
+        <p class="mt-3 text-[11px] text-zinc-500">{{ tabelaSinapi }} Códigos, RUP e custos do catálogo são ilustrativos. Valide na tabela SINAPI vigente da UF e data-base do orçamento antes de usar em proposta ou medição.</p>
       </SectionCard>
 
       <div class="space-y-5">

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { UFS } from '@/data/ufs'
 import { WorkCalendar } from './calendar'
 import { computeSchedule } from './cpm'
-import { avaliarCota, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, type DadosObra } from './obras'
+import { avaliarCota, descreverTabelaSinapi, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, type DadosObra } from './obras'
 
 const valido: DadosObra = {
   nome: 'Residencial Teste',
@@ -109,6 +109,22 @@ describe('nomeDaCopia e resumirObra', () => {
     })
     const nu = estadoObraVazia({ nome: 'Sem', dataInicio: '2026-11-03', dataStatus: '2026-11-03' }, 1)
     expect(resumirObra('o2', nu, 'x')).toEqual({ id: 'o2', nome: 'Sem', atualizadoEm: 'x' })
+  })
+})
+
+describe('descreverTabelaSinapi', () => {
+  it('sem UF, diz que a UF não foi informada', () => {
+    expect(descreverTabelaSinapi({})).toBe('UF da obra não informada: o catálogo é ilustrativo.')
+  })
+
+  it('com UF, data-base e regime, cita os três', () => {
+    expect(descreverTabelaSinapi({ uf: 'PE', dataBaseSinapi: '2026-09', regimeSinapi: 'nao-desonerado' })).toBe(
+      'Catálogo SINAPI ilustrativo: não corresponde a PE · 09/2026 · não desonerado.',
+    )
+  })
+
+  it('com só a UF, cita apenas a UF', () => {
+    expect(descreverTabelaSinapi({ uf: 'PE' })).toBe('Catálogo SINAPI ilustrativo: não corresponde a PE.')
   })
 })
 

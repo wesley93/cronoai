@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { MessagesSquare, GitBranch, Truck, Calculator, TrendingUp, TableProperties, HardHat, RotateCcw } from 'lucide-vue-next'
+import { MessagesSquare, GitBranch, Truck, Calculator, TrendingUp, TableProperties, HardHat, RotateCcw, Building2 } from 'lucide-vue-next'
 import { MODULES, useUiStore, type ModuleId } from '@/stores/ui'
 import { useProjectStore } from '@/stores/useProjectStore'
 
@@ -14,6 +14,7 @@ const icons: Record<ModuleId, typeof MessagesSquare> = {
   sinapi: Calculator,
   evm: TrendingUp,
   eap: TableProperties,
+  obras: Building2,
 }
 
 const badges = computed<Partial<Record<ModuleId, { text: string; tone: string }>>>(() => {
@@ -72,6 +73,7 @@ async function criarExemplo() {
         <div class="eyebrow mb-1">Obra ativa</div>
         <div class="line-clamp-2 text-xs font-medium text-zinc-800 dark:text-zinc-200">{{ project.state.meta.name }}</div>
         <div class="mt-1">{{ project.leaves.length }} tarefas · {{ project.schedule.criticalPath.length }} críticas em aberto</div>
+        <button class="mt-1.5 font-medium text-amber-600 hover:underline dark:text-amber-400" @click="ui.current = 'obras'">Trocar obra</button>
       </div>
       <button class="btn-ghost w-full justify-start" @click="criarExemplo"><RotateCcw class="h-3.5 w-3.5" /> Criar obra de exemplo</button>
     </div>

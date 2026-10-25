@@ -33,6 +33,8 @@ export interface MigracaoV1 {
   /** Data e hora ISO da migração. */
   em: string
   resultado: 'migrado' | 'ilegivel'
+  /** Obra que nasceu da migração (quando `resultado` é 'migrado'). */
+  obraId?: string
 }
 
 export interface IndiceObras {

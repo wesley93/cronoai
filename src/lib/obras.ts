@@ -1,6 +1,7 @@
 // Regras puras da obra: validação dos dados, obra em branco, nome da cópia, resumo da lista e limiar de cota.
 import type { PersistedState, ResumoObra } from '@/types/obra'
-import { REGIMES_SINAPI, UFS, type RegimeSinapi, type UF } from '@/data/ufs'
+import type { ProjectMeta } from '@/types/domain'
+import { REGIMES_SINAPI, ROTULO_REGIME_SINAPI, UFS, type RegimeSinapi, type UF } from '@/data/ufs'
 import { defaultHolidays, parseISO, toISO } from './calendar'
 
 export const MAX_NOME_OBRA = 120
@@ -86,6 +87,14 @@ export function nomeDaCopia(nome: string, existentes: string[] = []): string {
     const candidato = `${nome} (cópia ${n})`
     if (!existentes.includes(candidato)) return candidato
   }
+}
+
+/** Aviso do catálogo SINAPI com a UF, a data-base e o regime da obra (o catálogo do app é ilustrativo, de nenhuma UF). */
+export function descreverTabelaSinapi(meta: Pick<ProjectMeta, 'uf' | 'regimeSinapi' | 'dataBaseSinapi'>): string {
+  if (!meta.uf) return 'UF da obra não informada: o catálogo é ilustrativo.'
+  const [ano, mes] = (meta.dataBaseSinapi ?? '').split('-')
+  const partes = [meta.uf, meta.dataBaseSinapi ? `${mes}/${ano}` : '', meta.regimeSinapi ? ROTULO_REGIME_SINAPI[meta.regimeSinapi].toLowerCase() : ''].filter(Boolean)
+  return `Catálogo SINAPI ilustrativo: não corresponde a ${partes.join(' · ')}.`
 }
 
 /** Linha da lista de obras a partir do estado. */

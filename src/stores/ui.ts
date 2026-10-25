@@ -8,6 +8,7 @@ export const MODULES = [
   { id: 'sinapi', label: 'Gerador SINAPI', short: 'Orçamento → Cronograma', pain: 'Dor 4' },
   { id: 'evm', label: 'Valor Agregado', short: 'EVM & Curva S', pain: 'Dor 5' },
   { id: 'eap', label: 'EAP / MS Project', short: 'Tabela do cronograma', pain: 'Base' },
+  { id: 'obras', label: 'Obras', short: 'Lista e dados das obras', pain: 'Base' },
 ] as const
 export type ModuleId = (typeof MODULES)[number]['id']
 
