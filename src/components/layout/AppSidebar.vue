@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { MessagesSquare, GitBranch, Truck, Calculator, TrendingUp, TableProperties, HardHat, RotateCcw, Building2, SlidersHorizontal } from '@lucide/vue'
+import { MessagesSquare, GitBranch, Truck, Calculator, TrendingUp, TableProperties, HardHat, RotateCcw, Building2, SlidersHorizontal, Plug } from '@lucide/vue'
 import { MODULES, useUiStore, type ModuleId } from '@/stores/ui'
 import { useProjectStore } from '@/stores/useProjectStore'
 
@@ -16,6 +16,7 @@ const icons: Record<ModuleId, typeof MessagesSquare> = {
   eap: TableProperties,
   obras: Building2,
   premissas: SlidersHorizontal,
+  integracoes: Plug,
 }
 
 const badges = computed<Partial<Record<ModuleId, { text: string; tone: string }>>>(() => {

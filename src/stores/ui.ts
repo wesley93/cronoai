@@ -10,6 +10,7 @@ export const MODULES = [
   { id: 'eap', label: 'EAP / MS Project', short: 'Tabela do cronograma', pain: 'Base' },
   { id: 'obras', label: 'Obras', short: 'Lista e dados das obras', pain: 'Base' },
   { id: 'premissas', label: 'Premissas', short: 'Custos, taxas e versões', pain: 'Base' },
+  { id: 'integracoes', label: 'Integrações', short: 'SINAPI e conectores', pain: 'Base' },
 ] as const
 export type ModuleId = (typeof MODULES)[number]['id']
 

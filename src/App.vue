@@ -19,6 +19,7 @@ const views: Record<ModuleId, ReturnType<typeof defineAsyncComponent>> = {
   eap: defineAsyncComponent(() => import('@/modules/WbsModule.vue')),
   obras: defineAsyncComponent(() => import('@/modules/ObrasModule.vue')),
   premissas: defineAsyncComponent(() => import('@/modules/PremissasModule.vue')),
+  integracoes: defineAsyncComponent(() => import('@/modules/IntegracoesModule.vue')),
 }
 </script>
 

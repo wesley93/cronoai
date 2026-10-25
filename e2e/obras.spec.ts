@@ -123,11 +123,11 @@ test('excluir pede confirmação e o Aurora migrado não volta, mesmo com a v1 a
   await expect(page.getByRole('row').filter({ hasText: NOME_AURORA })).toHaveCount(0)
 })
 
-// 7 → 8 módulos: entrou "Premissas" (ciclo 00005)
-test('os 8 módulos abrem na obra em branco sem erro de console', async ({ page }) => {
+// 7 → 8 módulos: entrou "Premissas" (ciclo 00005); 8 → 9: "Integrações" (ciclo 00006)
+test('os 9 módulos abrem na obra em branco sem erro de console', async ({ page }) => {
   await page.goto('/')
   await criarObraRecife(page)
-  const rotulos = [/Apontamento IA/, /Caminho Crítico/, /Suprimentos JIT/, /Gerador SINAPI/, /Valor Agregado/, /EAP \/ MS Project/, /Obras/, /Premissas/]
+  const rotulos = [/Apontamento IA/, /Caminho Crítico/, /Suprimentos JIT/, /Gerador SINAPI/, /Valor Agregado/, /EAP \/ MS Project/, /Obras/, /Premissas/, /Integrações/]
   for (const rotulo of rotulos) {
     await page.getByRole('navigation').getByRole('button', { name: rotulo }).click()
     await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)

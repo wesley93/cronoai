@@ -21,3 +21,19 @@ test('navega pelos 6 módulos sem erro de console', async ({ page }) => {
     await expect(page).toHaveURL(new RegExp(`${m.hash}$`))
   }
 })
+
+// SPEC-15 E5 (ciclo 00006): a tela Integrações mostra o cartão SINAPI e os 5 da Fase 2, sem campo nenhum nos da Fase 2
+test('Integrações: 6 cartões, estado em texto e nenhum campo de credencial nos da Fase 2', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('navigation').getByRole('button', { name: /Integrações/ }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Integrações' })).toBeVisible()
+  await expect(page).toHaveURL(/#\/integracoes$/)
+  const cartoes = page.locator('article')
+  await expect(cartoes).toHaveCount(6)
+  await expect(page.getByTestId('estado-integracao').filter({ hasText: 'Requer servidor (Fase 2)' })).toHaveCount(5)
+  await expect(page.getByTestId('estado-integracao').filter({ hasText: 'Não configurada' })).toHaveCount(1)
+  const fase2 = page.locator('article').filter({ hasNot: page.getByRole('heading', { name: 'SINAPI' }) })
+  await expect(fase2).toHaveCount(5)
+  await expect(fase2.locator('input, textarea, select, button, [contenteditable]')).toHaveCount(0)
+  await expect(page.locator('input[type=password]')).toHaveCount(0)
+})
