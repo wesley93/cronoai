@@ -26,8 +26,10 @@ Porta 8080 ocupada? bash: `CRONOAI_PORT=8088 docker compose up --build app`; Pow
 | Script | O que faz |
 |---|---|
 | `npm run dev` | Servidor de desenvolvimento (Vite) |
-| `npm run ci` | Lint + type-check + testes + build (o mesmo que o GitHub Actions roda) |
+| `npm run ci` | Lint + type-check + testes com cobertura + build (o mesmo que o GitHub Actions roda) |
 | `npm test` / `test:watch` | Testes do núcleo (Vitest), uma vez ou em modo observação |
+| `npm run test:coverage` | Testes com cobertura de `src/lib` (mínimo de 80%; HTML em `coverage/`) |
+| `npm run e2e:instalar` / `npm run e2e` | Baixa o Chromium (uma vez) / roda os testes E2E (Playwright) sobre o build de produção |
 | `npm run lint` / `lint:fix` | ESLint (JS, TypeScript e Vue) |
 | `npm run build` | Type-check + build de produção em `dist/` |
 

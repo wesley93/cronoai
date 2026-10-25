@@ -50,4 +50,28 @@ describe('useProjectStore · visão MS Project', () => {
     expect(t104.EarnedValue).toBe(126000)
     expect(t104.ActualCost).toBeGreaterThan(72000)
   })
+
+  // Números de referência do E2E (e2e/fluxos.spec.ts): aqui separam falha de motor de falha de tela
+  it('N-1: obra de exemplo entrega em 23/06/27, +16 d.u., SPI 0,89 e CPI 0,93', () => {
+    const store = useProjectStore()
+    expect(store.schedule.projectFinish).toBe('2027-06-23')
+    expect(store.delay.delayDays).toBe(16)
+    expect(store.evm.spi).toBeCloseTo(0.8883, 4)
+    expect(store.evm.cpi).toBeCloseTo(0.9349, 4)
+  })
+
+  it('N-2: aprovar o relato do Mestre Tião (75%) antecipa 5 d.u. e a entrega vai a 16/06/27', () => {
+    const store = useProjectStore()
+    expect(store.approveReport('r-tiao', 104, 75, [])).toEqual({ delta: -5 })
+    expect(store.schedule.projectFinish).toBe('2027-06-16')
+  })
+
+  it('N-3: crashing no estado inicial recupera 3 d.u., custa R$ 12.616,80 e entrega em 18/06/27', () => {
+    const store = useProjectStore()
+    const r = store.scenarios.crashing
+    expect(r.daysRecovered).toBe(3)
+    expect(r.extraCost).toBeCloseTo(12616.8, 1)
+    store.applyScenario(r)
+    expect(store.schedule.projectFinish).toBe('2027-06-18')
+  })
 })

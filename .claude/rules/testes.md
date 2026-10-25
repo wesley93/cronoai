@@ -41,4 +41,4 @@ Fonte da verdade: `CLAUDE.md` › **Convenções › Testes** e › **Invioláve
 
 ## Antes de entregar
 
-`npx vitest run` dos arquivos tocados, `npm run typecheck` e, antes do PR, `npm run ci` (o GitHub Actions roda os testes). Não há E2E ainda (SPEC-00, incremento 0.2).
+`npx vitest run` dos arquivos tocados, `npm run typecheck` e, antes do PR, `npm run ci` (o GitHub Actions roda os testes). Fluxos de tela: `npm run e2e` (Playwright, `e2e/`); número que muda de propósito atualiza E2E e teste de store juntos.

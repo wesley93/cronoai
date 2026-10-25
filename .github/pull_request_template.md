@@ -7,6 +7,7 @@
 ## Como testei
 
 - [ ] `npm run ci` (lint, tipos, testes e build) passou localmente
+- [ ] `npm run e2e` passou (se mexeu em tela, fluxo ou números exibidos)
 - [ ] Testei na tela (módulo: …)
 - [ ] `docker compose up --build app` (se mexeu em Docker/Nginx/build)
 

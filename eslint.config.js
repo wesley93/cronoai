@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint'
 import globals from 'globals'
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'node_modules/**'] },
+  { ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'playwright-report/**', 'test-results/**', 'blob-report/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...pluginVue.configs['flat/essential'],
@@ -27,7 +27,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.test.ts', 'vite.config.ts', 'eslint.config.js', 'postcss.config.js', 'tailwind.config.js'],
+    files: ['**/*.test.ts', 'vite.config.ts', 'playwright.config.ts', 'e2e/**/*.ts', 'eslint.config.js', 'postcss.config.js', 'tailwind.config.js'],
     languageOptions: { globals: { ...globals.node } },
   },
 )

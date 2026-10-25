@@ -18,7 +18,6 @@ O código vizinho tem limitações vivas, listadas no `CLAUDE.md › Dívida con
 | Premissas fixas no código | `lib/scenarios.ts` (`CONGESTION_FACTOR`, `MOBILIZATION_PER_WORKER`, `OVERTIME_PREMIUM`, `REWORK_CONTINGENCY`), `HOURLY_RATES` (`data/seed.ts`), `SAFETY_MARGIN_DAYS` (`lib/supplies.ts`), catálogo `data/sinapiCatalog.ts` | não acrescente constante nova sem marcar como ilustrativa; configurável por obra é a SPEC-03 (Inviolável 7) |
 | CPM em dias inteiros, calendário único | `computeSchedule` (`Math.round(t.durationDays)`), `WorkCalendar` | não introduza frações de dia nem calendário por tarefa fora da SPEC-05 |
 | `vitest` 3 (críticas) e `tailwindcss` 3 (moderadas) com aviso de vulnerabilidade (dev) | `package.json` | as correções exigem `vitest` 5 e Tailwind 4, cada uma num PR próprio; não misture |
-| Sem testes E2E | — | verificação de tela é manual (`V-N` com captura); E2E é a SPEC-00, incremento 0.2 |
 
 ## Aproximações e armadilhas observadas no código
 

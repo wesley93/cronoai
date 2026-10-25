@@ -13,3 +13,8 @@ docs
 .claude
 .env
 .env.*
+e2e
+playwright.config.ts
+playwright-report
+test-results
+blob-report
