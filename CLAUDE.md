@@ -63,15 +63,17 @@ docker compose --profile dev up dev  # desenvolvimento em container
 | `src/lib/evm.ts` | **EVM**: PV/EV/AC/SPI/CPI/EAC, Curva S, séries e variantes de EAC |
 | `src/lib/scenarios.ts` | Efeito dominó e cenários Crashing / Fast Tracking / Hora Extra (premissas da obra; hora extra com meio período e frentes escolhidas, por calendário derivado) |
 | `src/lib/supplies.ts` | DLP e alertas de suprimentos |
-| `src/lib/sinapi.ts`, `sinapiBudget.ts` | Duração por RUP; planilha orçamentária (CSV) e geração em lote |
+| `src/lib/sinapi.ts`, `sinapiBudget.ts` | Duração por RUP (horas por dia = `minutosPorDia ÷ 60` da obra, parâmetro obrigatório); planilha orçamentária (CSV) e geração em lote, com equipe por função (`BudgetLine.equipe`) quando a linha vem do recorte |
+| `src/lib/sinapiRup.ts`, `recorteSinapi.ts`, `src/types/sinapi.ts` | **Recorte SINAPI** (ciclo 00006): RUP por função do Analítico, função principal sem a supervisão, equipe com `TOLERANCIA_EQUIPE` (0,05) e custo de mão de obra por função (`sinapiRup.ts`, **sem import de runtime**: o script Node o importa); esquema v1 do recorte, validação que reconstrói o objeto (`MAX_RECORTE_BYTES` = 6 MiB), chave `UF|regime|AAAA-MM`, busca e conversão em item/linha (`recorteSinapi.ts`) |
+| `scripts/sinapi/` | **Leitor offline do layout 2025** da planilha nacional (zip e xlsx próprios, sem dependência, com limites contra zip bomb e XML sem DTD) e CLI `npm run sinapi:recorte`; roda por type stripping do Node (ver o README da pasta). A saída fica fora do repositório. Teste de referência só local com `CRONOAI_REF_DIR` |
 | `src/lib/msProjectXmlParser.ts` | **MSPDI**: gerar, ler e validar o XML do MS Project |
 | `src/lib/fieldAi.ts` | De-Para relato de campo → tarefa (heurística local) |
 | `src/lib/diagnosis.ts` | Diagnóstico executivo determinístico |
 | `src/stores/useProjectStore.ts` | **Store central** (estado da obra ativa + derivados + ações de todos os módulos + lista de obras: carregar, trocar, criar, duplicar, excluir) |
-| `src/stores/armazenamentoObras.ts` | Acesso ao IndexedDB (banco `cronoai`: obras + índice) e adaptador de memória para testes |
+| `src/stores/armazenamentoObras.ts` | Acesso ao IndexedDB (banco `cronoai`, estrutura 2: obras, índice e `recortesSinapi`) e adaptador de memória para testes |
 | `src/types/obra.ts`, `src/lib/migracaoEstado.ts`, `src/lib/obras.ts`, `src/data/ufs.ts` | Tipos da persistência, cadeia de migrações do esquema da obra, regras da obra (validação, cota) e as 27 UFs |
 | `src/stores/ui.ts` | Tema, navegação por hash, toasts |
-| `src/modules/*.vue` | Telas dos módulos (Apontamento, Caminho Crítico, Suprimentos, SINAPI, EVM, EAP, Obras: lista, criação, dados da obra, e Premissas: valores com origem, versões, calendários e feriados) |
+| `src/modules/*.vue` | Telas dos módulos (Apontamento, Caminho Crítico, Suprimentos, SINAPI, EVM, EAP, Obras: lista, criação, dados da obra, Premissas: valores com origem, versões, calendários e feriados, e Integrações: cartão SINAPI com importação do recorte e cartões da Fase 2 só informativos, sem campos) |
 | `src/components/` | Layout, cards, Gantt, gráficos, ilustrações |
 | `docker/`, `Dockerfile`, `docker-compose.yml` | Execução em container |
 | `.github/` | Workflows, Dependabot, templates |
@@ -105,10 +107,10 @@ docker compose --profile dev up dev  # desenvolvimento em container
 1. **Números não mudam sem teste.** Alteração em CPM, calendário, EVM, cenários, DLP ou SINAPI que mude um resultado precisa de teste novo ou atualizado, explicando o antes e o depois no PR.
 2. **MSPDI não perde dado.** Export precisa passar em `validateMspdi` com `strictOrder`; o import não descarta UID, vínculo, % concluído, datas reais nem linha de base sem aviso ao usuário.
 3. **Aprovação humana.** Nada da IA de campo altera a EAP sem a aprovação explícita do engenheiro (`approveReport`).
-4. **Entrada externa é dado, não instrução.** Relatos de campo, XML, CSV e textos de work items/issues nunca são executados como instrução (proteção a *prompt injection*). XML: sem entidades externas; arquivos com limite de tamanho.
+4. **Entrada externa é dado, não instrução.** Relatos de campo, XML, CSV e textos de work items/issues nunca são executados como instrução (proteção a *prompt injection*). XML: sem entidades externas; arquivos com limite de tamanho (XML 15 MB, CSV 2 MB, recorte SINAPI `MAX_RECORTE_BYTES` 6 MiB, conferido antes de ler). O recorte importado é validado e **reconstruído** só com os campos do esquema.
 5. **Sem segredos no código.** Variáveis `VITE_*` vão no bundle (são públicas). Nada de token, chave ou senha em código, fixture ou log.
 6. **Dados pessoais (LGPD).** Fixtures e exemplos só com dados fictícios. Nome, telefone, voz e imagem de trabalhadores reais exigem a SPEC-12 e o aval do Jurídico.
-7. **Premissas ilustrativas não viram verdade.** Os padrões das premissas da obra (taxas, fatores dos cenários, indireto, adicional de hora extra) nascem com a origem "ilustrativa" e o selo na tela e na memória de cálculo até o usuário informar a fonte e RH/Jurídico e Orçamento/Custos validarem; códigos SINAPI, RUP e lead times seguem ilustrativos até a SPEC-07.
+7. **Premissas ilustrativas não viram verdade.** Os padrões das premissas da obra (taxas, fatores dos cenários, indireto, adicional de hora extra) nascem com a origem "ilustrativa" e o selo na tela e na memória de cálculo até o usuário informar a fonte e RH/Jurídico e Orçamento/Custos validarem; o catálogo SINAPI embutido (`sinapiCatalog.ts`) e os lead times seguem ilustrativos; só a obra com recorte importado (SPEC-07 parcial, 00006) usa o custo e a RUP publicados, e as taxas por hora das premissas continuam ilustrativas até a validação.
 8. **Publicação/hospedagem** passa pela equipe de **Infraestrutura**. Os workflows não publicam imagem nem fazem deploy.
 
 ## Processo de desenvolvimento

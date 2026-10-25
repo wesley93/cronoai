@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import aurora from './__fixtures__/estado-v1-aurora.json?raw'
 import aurora75 from './__fixtures__/estado-v1-aurora-75.json?raw'
 import auroraCenarios from './__fixtures__/estado-v2-aurora-cenarios.json?raw'
+import fixtureEsquema4 from './__fixtures__/registro-esquema4-aurora-cenarios.json?raw'
 import {
   ESQUEMA_ATUAL,
   MIGRACOES,
@@ -195,7 +196,7 @@ describe('migrarRegistro', () => {
   it('o registro criado volta igual ao estado gravado', () => {
     const estado = estadoV1()
     const reg = criarRegistro('o1', estado, '2026-10-25T10:00:00.000Z')
-    expect(reg.versaoEsquema).toBe(4)
+    expect(reg.versaoEsquema).toBe(5)
     expect(migrarRegistro(reg)).toEqual({ tipo: 'ok', estado: JSON.parse(JSON.stringify(estado)), avisos: [] })
   })
 
@@ -239,7 +240,7 @@ describe('migrarRegistro', () => {
   })
 
   it('a cadeia cobre todos os esquemas até o atual, sem buracos', () => {
-    expect(MIGRACOES.map((p) => [p.de, p.para])).toEqual([[1, 2], [2, 3], [3, 4]])
+    expect(MIGRACOES.map((p) => [p.de, p.para])).toEqual([[1, 2], [2, 3], [3, 4], [4, 5]])
     expect(MIGRACOES.at(-1)?.para).toBe(ESQUEMA_ATUAL)
   })
 
@@ -248,9 +249,9 @@ describe('migrarRegistro', () => {
       tipo: 'erro',
       mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 99).',
     })
-    expect(migrarRegistro(registro(aurora, 5))).toEqual({
+    expect(migrarRegistro(registro(aurora, 6))).toEqual({
       tipo: 'erro',
-      mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 5).',
+      mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 6).',
     })
   })
 
@@ -482,8 +483,8 @@ describe('esquema 3 → 4: premissas versionadas e feriados da obra (ciclo 00005
     expect(longo.estado.premissas[0].motivo).toBe('Premissas padrão (o estado salvo não tinha premissas válidas)')
   })
 
-  it('P-4: esquema 5 é recusado (e nunca sobrescrito)', () => {
-    expect(migrarRegistro(registro(JSON.stringify(esquema3()), 5))).toEqual({ tipo: 'erro', mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 5).' })
+  it('P-4: esquema 6 é recusado (e nunca sobrescrito)', () => {
+    expect(migrarRegistro(registro(JSON.stringify(esquema3()), 6))).toEqual({ tipo: 'erro', mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 6).' })
   })
 
   it('P-5: esquema 4 sem premissas ou feriados (ou inválidos) volta ao padrão, com aviso', () => {
@@ -514,5 +515,127 @@ describe('esquema 3 → 4: premissas versionadas e feriados da obra (ciclo 00005
     if (f.tipo !== 'ok') throw new Error('esperava ok')
     expect(f.avisos[0]).toContain('feriados')
     expect(f.estado.feriados).toEqual({ nacionais: true, carnaval: true, corpusChristi: true, manuais: [] })
+  })
+})
+
+describe('esquema 4 → 5: referência ao recorte SINAPI e equipe por função (ciclo 00006, AC-15, P-1 e P-4)', () => {
+  const registro = (json: string, versaoEsquema: number): RegistroObra => ({ id: 'o1', versaoEsquema, json, atualizadoEm: '2026-10-25T10:00:00.000Z' })
+  const SHA = '9f1a69dfbe103bdaecb39b871a74435c364b4e6652fdbc677d8537e6742cf0d2'
+  const CHAVE = 'SP|nao-desonerado|2026-09'
+  const ref = { chave: CHAVE, sha256Origem: SHA, importadoEm: '2026-10-25T12:00:00.000Z' }
+  /** Aurora no esquema 5 com UF, regime e data-base e uma referência ao recorte (para adulterar). */
+  const esquema5 = () => {
+    const e = JSON.parse(JSON.stringify(buildSeedState())) as Record<string, unknown> & { meta: Record<string, unknown>; budget: Record<string, unknown>[] }
+    e.meta = { ...e.meta, uf: 'SP', regimeSinapi: 'nao-desonerado', dataBaseSinapi: '2026-09', recorteSinapi: { ...ref } }
+    return e
+  }
+  const migrarEsq5 = (e: unknown) => {
+    const r = migrarRegistro(registro(JSON.stringify(e), 5))
+    if (r.tipo !== 'ok') throw new Error(r.mensagem)
+    return r
+  }
+  const AVISO_REF = 'A referência ao recorte SINAPI do estado salvo estava inválida e foi removida: a obra usa o catálogo ilustrativo.'
+
+  it('o passo 4 → 5 existe e a cadeia termina no esquema 5', () => {
+    expect(ESQUEMA_ATUAL).toBe(5)
+    expect(MIGRACOES.find((p) => p.de === 4)?.para).toBe(5)
+  })
+
+  it('P-1: o registro REAL do esquema 4 (gerado pela store da base 281a99a: premissas v2, calendário alternativo, feriado manual, crashing, hora extra por frente e o undo) migra para o 5 com o resto igual', () => {
+    const fx = JSON.parse(fixtureEsquema4) as { registro: RegistroObra; esperado: { tarefas: number; premissas: number; undo: number; calendarios: string[] } }
+    expect(fx.registro.versaoEsquema).toBe(4)
+    const r = migrarRegistro(fx.registro)
+    if (r.tipo !== 'ok') throw new Error(r.mensagem)
+    expect(r.avisos).toEqual([])
+    // O resto igual: nenhum campo muda, nenhum campo novo aparece
+    expect(r.estado).toEqual(JSON.parse(fx.registro.json))
+    expect(r.estado.tasks).toHaveLength(fx.esperado.tarefas)
+    expect(r.estado.premissas).toHaveLength(fx.esperado.premissas)
+    expect(r.estado.undo).toHaveLength(fx.esperado.undo)
+    expect(r.estado.calendarios.map((c) => c.nome)).toEqual(fx.esperado.calendarios)
+    expect(r.estado.meta.recorteSinapi).toBeUndefined()
+    // A próxima gravação já é no esquema 5
+    expect(criarRegistro('o1', r.estado, fx.registro.atualizadoEm).versaoEsquema).toBe(5)
+  })
+
+  it('esquema 5 com referência e equipe válidas passa intacto (a referência é reconstruída só com os 3 campos)', () => {
+    const e = esquema5()
+    e.budget[0] = { ...e.budget[0]!, equipe: [{ recurso: 'Servente', proporcao: 0.5 }], fonte: 'SINAPI SP 09/2026 não desonerado' }
+    ;(e.meta.recorteSinapi as Record<string, unknown>).extra = 'x'
+    const r = migrarEsq5(e)
+    expect(r.avisos).toEqual([])
+    expect(r.estado.meta.recorteSinapi).toEqual(ref)
+    expect(r.estado.budget[0]).toMatchObject({ equipe: [{ recurso: 'Servente', proporcao: 0.5 }], fonte: 'SINAPI SP 09/2026 não desonerado' })
+  })
+
+  it.each([
+    ['chave fora do formato', { ...ref, chave: 'SP-2026' }],
+    ['UF da chave inexistente', { ...ref, chave: 'XX|nao-desonerado|2026-09' }],
+    ['SHA-256 fora do padrão', { ...ref, sha256Origem: 'abc' }],
+    ['SHA-256 em maiúsculas', { ...ref, sha256Origem: SHA.toUpperCase() }],
+    ['data de importação inválida', { ...ref, importadoEm: 'ontem' }],
+    ['data de importação gigante', { ...ref, importadoEm: '2026-10-25T12:00:00.000Z'.padEnd(500, '0') }],
+    ['chave de outra UF (não bate com os dados SINAPI da obra)', { ...ref, chave: 'BA|nao-desonerado|2026-09' }],
+    ['campos de tipo errado', { chave: 7, sha256Origem: null, importadoEm: [] }],
+    ['não é objeto', 'SP|nao-desonerado|2026-09'],
+  ])('P-4: referência com %s é removida, com aviso', (_nome, adulterada) => {
+    const e = esquema5()
+    e.meta.recorteSinapi = adulterada
+    const r = migrarEsq5(e)
+    expect(r.estado.meta.recorteSinapi).toBeUndefined()
+    expect(r.avisos).toEqual([AVISO_REF])
+    // O resto da obra fica igual
+    expect(r.estado.tasks).toEqual((e as unknown as PersistedState).tasks)
+  })
+
+  it('P-4: referência numa obra sem UF (ou regime, ou data-base) é removida: nunca se assume nenhum', () => {
+    for (const campo of ['uf', 'regimeSinapi', 'dataBaseSinapi']) {
+      const e = esquema5()
+      delete e.meta[campo]
+      expect(migrarEsq5(e).estado.meta.recorteSinapi).toBeUndefined()
+    }
+  })
+
+  it.each([
+    ['recurso vazio', [{ recurso: '', proporcao: 1 }]],
+    ['recurso com 61 caracteres', [{ recurso: 'R'.repeat(61), proporcao: 1 }]],
+    ['recurso com caractere de controle', [{ recurso: 'Servente\u0007', proporcao: 1 }]],
+    ['proporção zero', [{ recurso: 'Servente', proporcao: 0 }]],
+    ['proporção negativa', [{ recurso: 'Servente', proporcao: -1 }]],
+    ['proporção acima do limite', [{ recurso: 'Servente', proporcao: 10_001 }]],
+    ['proporção em texto', [{ recurso: 'Servente', proporcao: '0.5' }]],
+    ['17 itens', Array.from({ length: 17 }, () => ({ recurso: 'Servente', proporcao: 1 }))],
+    ['não é lista', { recurso: 'Servente', proporcao: 1 }],
+    ['item que não é objeto', ['Servente']],
+  ])('P-4: equipe com %s é removida da linha com aviso, e a linha volta ao helperRatio', (_nome, equipe) => {
+    const e = esquema5()
+    const original = e.budget[0]!
+    e.budget[0] = { ...original, equipe }
+    const r = migrarEsq5(e)
+    expect('equipe' in r.estado.budget[0]!).toBe(false)
+    expect(r.estado.budget[0]!.helperRatio).toBe(original.helperRatio)
+    expect(r.avisos).toEqual(['1 linha(s) da planilha com equipe ou fonte inválida voltaram à equipe padrão (serventes por oficial).'])
+  })
+
+  it('P-4: fonte da linha inválida (texto longo, controle ou não texto) é removida; as linhas boas ficam', () => {
+    const e = esquema5()
+    e.budget[0] = { ...e.budget[0]!, fonte: 'F'.repeat(81) }
+    e.budget[1] = { ...e.budget[1]!, fonte: 42 }
+    e.budget[2] = { ...e.budget[2]!, fonte: 'SINAPI SP 09/2026 não desonerado' }
+    const r = migrarEsq5(e)
+    expect(r.estado.budget.map((l) => l.fonte)).toEqual([undefined, undefined, 'SINAPI SP 09/2026 não desonerado', undefined, undefined])
+    expect(r.avisos).toEqual(['2 linha(s) da planilha com equipe ou fonte inválida voltaram à equipe padrão (serventes por oficial).'])
+  })
+
+  it('o mesmo saneamento vale para um registro do esquema 4 adulterado com os campos novos (nada passa por estar numa versão antiga)', () => {
+    const e = esquema5()
+    const r = migrarRegistro(registro(JSON.stringify({ ...e, meta: { ...e.meta, recorteSinapi: { chave: 'lixo' } } }), 4))
+    if (r.tipo !== 'ok') throw new Error(r.mensagem)
+    expect(r.estado.meta.recorteSinapi).toBeUndefined()
+    expect(r.avisos).toContain(AVISO_REF)
+  })
+
+  it('P-4: o esquema 6 é recusado e nunca sobrescrito', () => {
+    expect(migrarRegistro(registro(JSON.stringify(esquema5()), 6))).toEqual({ tipo: 'erro', mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 6).' })
   })
 })

@@ -6,13 +6,16 @@ import { UID_CALENDARIO_PADRAO, calendarioPadrao, diasParaMinutos, erroDoCalenda
 import type { CalendarioObra, ChavePremissa, VersaoPremissas } from '@/types/domain'
 import { configFeriadosPadrao, sanearConfigFeriados } from './feriadosObra'
 import { premissasPadrao, versoesValidas } from './premissas'
+import { chaveRecorte, lerChaveRecorte } from './recorteSinapi'
 
 /**
  * Esquema 1 = formato do `cronoai-state-v1`; esquema 2 = o mesmo estado dentro de um registro por obra;
  * esquema 3 = tempo em minutos inteiros e calendários por intervalo (ciclo 00004, ADR 00003);
- * esquema 4 = premissas versionadas e feriados da obra (ciclo 00005).
+ * esquema 4 = premissas versionadas e feriados da obra (ciclo 00005);
+ * esquema 5 = referência ao recorte SINAPI da obra e equipe por função nas linhas da planilha (ciclo 00006): sem conversão de dado,
+ * só o saneamento dos campos novos lidos do armazenamento.
  */
-export const ESQUEMA_ATUAL = 4
+export const ESQUEMA_ATUAL = 5
 
 /** Estado como foi lido do armazenamento, ainda sem forma garantida. */
 export type EstadoBruto = Record<string, unknown>
@@ -118,11 +121,80 @@ function migrar3Para4(estado: EstadoBruto): EstadoBruto {
   return saida
 }
 
+const SHA256 = /^[0-9a-f]{64}$/
+// eslint-disable-next-line no-control-regex -- é justamente o que se quer recusar
+const CONTROLE = /[\u0000-\u001f\u007f-\u009f]/
+const MAX_FUNCAO_EQUIPE = 60
+const MAX_ITENS_EQUIPE = 16
+const MAX_FONTE_LINHA = 80
+
+/** Referência da obra ao recorte: forma, chave `UF|regime|AAAA-MM`, SHA-256 e data válidos, e chave igual à da UF/regime/data-base da obra. */
+function referenciaDeRecorteValida(r: unknown, meta: Record<string, unknown>): { chave: string; sha256Origem: string; importadoEm: string } | undefined {
+  if (!eObjeto(r) || typeof r.chave !== 'string' || typeof r.sha256Origem !== 'string' || typeof r.importadoEm !== 'string') return undefined
+  const partes = lerChaveRecorte(r.chave)
+  if (!partes || !SHA256.test(r.sha256Origem) || r.importadoEm.length > 40 || Number.isNaN(Date.parse(r.importadoEm))) return undefined
+  // A referência de uma obra cujos dados SINAPI não batem com a chave é inconsistente: some, em vez de apontar para a tabela errada
+  if (typeof meta.uf !== 'string' || typeof meta.regimeSinapi !== 'string' || typeof meta.dataBaseSinapi !== 'string') return undefined
+  if (chaveRecorte(meta.uf, meta.regimeSinapi, meta.dataBaseSinapi) !== r.chave) return undefined
+  return { chave: r.chave, sha256Origem: r.sha256Origem, importadoEm: r.importadoEm }
+}
+
+/** Equipe por função de uma linha da planilha: até 16 itens, recurso de 1 a 60 caracteres e proporção finita > 0. Inválida: `undefined`. */
+function equipeDeLinhaValida(e: unknown): { recurso: string; proporcao: number }[] | undefined {
+  if (!Array.isArray(e) || e.length > MAX_ITENS_EQUIPE) return undefined
+  const out: { recurso: string; proporcao: number }[] = []
+  for (const i of e) {
+    if (!eObjeto(i) || typeof i.recurso !== 'string' || i.recurso.length < 1 || i.recurso.length > MAX_FUNCAO_EQUIPE || CONTROLE.test(i.recurso)) return undefined
+    if (!eNumero(i.proporcao) || i.proporcao <= 0 || i.proporcao > 10_000) return undefined
+    out.push({ recurso: i.recurso, proporcao: i.proporcao })
+  }
+  return out
+}
+
+/**
+ * Saneamento dos campos do esquema 5 lidos do armazenamento (dado externo): a referência ao recorte e, em cada linha da planilha,
+ * a equipe por função e a fonte. Campo inválido é REMOVIDO com aviso (a obra volta ao catálogo ilustrativo e a linha, ao `helperRatio`),
+ * nunca corrigido pela metade. Roda em todo registro que chega ao esquema atual, inclusive os migrados de 4.
+ */
+function sanearCamposDoRecorte(estado: EstadoBruto): string[] {
+  const avisos: string[] = []
+  if (eObjeto(estado.meta) && 'recorteSinapi' in estado.meta) {
+    const ok = referenciaDeRecorteValida(estado.meta.recorteSinapi, estado.meta)
+    if (ok) estado.meta.recorteSinapi = ok
+    else {
+      delete estado.meta.recorteSinapi
+      avisos.push('A referência ao recorte SINAPI do estado salvo estava inválida e foi removida: a obra usa o catálogo ilustrativo.')
+    }
+  }
+  let linhas = 0
+  for (const l of Array.isArray(estado.budget) ? estado.budget : []) {
+    if (!eObjeto(l)) continue
+    let alterada = false
+    if ('equipe' in l) {
+      const e = equipeDeLinhaValida(l.equipe)
+      if (e) l.equipe = e
+      else {
+        delete l.equipe
+        alterada = true
+      }
+    }
+    if ('fonte' in l && !(typeof l.fonte === 'string' && l.fonte.length >= 1 && l.fonte.length <= MAX_FONTE_LINHA && !CONTROLE.test(l.fonte))) {
+      delete l.fonte
+      alterada = true
+    }
+    if (alterada) linhas++
+  }
+  if (linhas) avisos.push(`${linhas} linha(s) da planilha com equipe ou fonte inválida voltaram à equipe padrão (serventes por oficial).`)
+  return avisos
+}
+
 export const MIGRACOES: PassoMigracao[] = [
   // v1 → v2: só embrulha o estado num registro por obra; o conteúdo não muda.
   { de: 1, para: 2, aplicar: (estado) => estado },
   { de: 2, para: 3, aplicar: migrar2Para3 },
   { de: 3, para: 4, aplicar: migrar3Para4 },
+  // 4 → 5: o conteúdo não muda (nenhum número muda); os campos novos são saneados em `levarAoAtual`
+  { de: 4, para: 5, aplicar: (estado) => estado },
 ]
 
 export type LeituraV1 =
@@ -292,10 +364,11 @@ function levarAoAtual(bruto: EstadoBruto, de: number, anoPadrao: number): Result
     estado = passo.aplicar(estado)
   }
   const descartes = descartarCalendariosInvalidos(estado, anoPadrao)
+  const avisosRecorte = sanearCamposDoRecorte(estado)
   if (!eEstado(estado) || !tarefasCompletas(estado.tasks)) {
     return { tipo: 'erro', mensagem: 'Os dados desta obra estão ilegíveis.' }
   }
-  return { tipo: 'ok', estado, avisos: [...avisoDePreenchidas(preenchidas), ...avisosChaves, ...avisosPremissas, ...descartes] }
+  return { tipo: 'ok', estado, avisos: [...avisoDePreenchidas(preenchidas), ...avisosChaves, ...avisosPremissas, ...descartes, ...avisosRecorte] }
 }
 
 /** Lê o texto gravado em `cronoai-state-v1`. */

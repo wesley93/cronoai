@@ -2,6 +2,7 @@
 // busca e conversão da composição em item/linha da calculadora e da planilha.
 import { REGIMES_SINAPI, ROTULO_REGIME_SINAPI, UFS, type RegimeSinapi } from '@/data/ufs'
 import type { ProjectMeta } from '@/types/domain'
+import type { RegistroRecorte } from '@/types/obra'
 import {
   FORMATO_RECORTE,
   VERSAO_RECORTE,
@@ -260,6 +261,67 @@ export function conferirRecorteComObra(recorte: Pick<RecorteSinapi, 'uf' | 'regi
   if (chaveRecorte(recorte.uf, recorte.regime, recorte.dataBase) === chaveRecorte(meta.uf, meta.regimeSinapi, meta.dataBaseSinapi)) return undefined
   const comPontos = (uf: string, regime: RegimeSinapi, dataBase: string) => descreverChave(uf, regime, dataBase).replace(/ /g, ' · ').replace('não · desonerado', 'não desonerado')
   return `O recorte é de ${comPontos(recorte.uf, recorte.regime, recorte.dataBase)}; esta obra é ${comPontos(meta.uf, meta.regimeSinapi, meta.dataBaseSinapi)}. Nada foi importado.`
+}
+
+/** Chave `UF|regime|AAAA-MM` dos dados SINAPI de uma obra; `undefined` se faltar UF, regime ou data-base (nunca se assume nenhum). */
+export function chaveDaObra(meta: Pick<ProjectMeta, 'uf' | 'regimeSinapi' | 'dataBaseSinapi'>): string | undefined {
+  return meta.uf && meta.regimeSinapi && meta.dataBaseSinapi ? chaveRecorte(meta.uf, meta.regimeSinapi, meta.dataBaseSinapi) : undefined
+}
+
+/** "SINAPI SP 09/2026 não desonerado" → "SINAPI SP 09/2026" (chip curto da planilha). */
+export function rotuloCurtoDaFonte(fonte: string): string {
+  return fonte.replace(/ (não )?desonerado$/, '')
+}
+
+/** "SINAPI SP 09/2026 não desonerado" → "SP 09/2026 não desonerado" (como entra nas notas da tarefa). */
+export function fonteParaNotas(fonte: string): string {
+  return fonte.replace(/^SINAPI /, '')
+}
+
+/** Monta o registro da store `recortesSinapi` a partir do recorte já validado (JSON compacto). */
+export function montarRegistroDeRecorte(recorte: RecorteSinapi, importadoEm: string): RegistroRecorte {
+  return {
+    chave: chaveRecorte(recorte.uf, recorte.regime, recorte.dataBase),
+    versaoFormato: recorte.versao,
+    json: JSON.stringify(recorte),
+    sha256Origem: recorte.fonte.sha256,
+    importadoEm,
+    composicoes: recorte.composicoes.length,
+  }
+}
+
+export type LeituraDeRegistroRecorte =
+  | { ok: true; recorte: RecorteSinapi; sha256Origem: string; importadoEm: string }
+  | { ok: false; motivo: 'mais-novo' | 'invalido'; mensagem: string }
+
+/**
+ * Lê o registro da store `recortesSinapi` (dado externo: o IndexedDB pode estar adulterado). Confere forma e tamanho ANTES de interpretar o JSON,
+ * valida de novo o recorte e exige que a chave, o SHA-256 e o número de composições do registro batam com o conteúdo.
+ * Formato mais novo que o do app: `mais-novo` (o registro nunca é sobrescrito).
+ */
+export function lerRegistroDeRecorte(reg: unknown, chaveEsperada: string): LeituraDeRegistroRecorte {
+  const invalido = (mensagem: string): LeituraDeRegistroRecorte => ({ ok: false, motivo: 'invalido', mensagem })
+  if (!eObj(reg)) return invalido('O recorte SINAPI salvo neste navegador está ilegível: a obra usa o catálogo ilustrativo.')
+  const versaoFormato = campo(reg, 'versaoFormato')
+  if (typeof versaoFormato === 'number' && Number.isInteger(versaoFormato) && versaoFormato > VERSAO_RECORTE) {
+    return { ok: false, motivo: 'mais-novo', mensagem: `O recorte SINAPI salvo foi gerado por uma versão mais nova do CronoAI (formato ${versaoFormato}): a obra usa o catálogo ilustrativo e o recorte não foi alterado.` }
+  }
+  const json = campo(reg, 'json')
+  const sha = campo(reg, 'sha256Origem')
+  const em = campo(reg, 'importadoEm')
+  const n = campo(reg, 'composicoes')
+  if (campo(reg, 'chave') !== chaveEsperada || versaoFormato !== VERSAO_RECORTE) return invalido('O recorte SINAPI salvo não corresponde a esta obra: a obra usa o catálogo ilustrativo.')
+  if (typeof json !== 'string' || json.length > MAX_RECORTE_BYTES) return invalido('O recorte SINAPI salvo tem tamanho inválido: a obra usa o catálogo ilustrativo.')
+  if (typeof sha !== 'string' || !REGEX_SHA.test(sha) || typeof em !== 'string' || em.length > 40 || Number.isNaN(Date.parse(em)) || typeof n !== 'number') {
+    return invalido('O recorte SINAPI salvo está com os dados de controle inválidos: a obra usa o catálogo ilustrativo.')
+  }
+  const lido = lerRecorteDeTexto(json)
+  if (!lido.ok) return invalido('O recorte SINAPI salvo está corrompido: a obra usa o catálogo ilustrativo.')
+  const r = lido.recorte
+  if (chaveRecorte(r.uf, r.regime, r.dataBase) !== chaveEsperada || r.fonte.sha256 !== sha || r.composicoes.length !== n) {
+    return invalido('O recorte SINAPI salvo não confere com o registro: a obra usa o catálogo ilustrativo.')
+  }
+  return { ok: true, recorte: r, sha256Origem: sha, importadoEm: em }
 }
 
 /** M2 → m², M3 → m³, KG → kg, M → m, UN → un; o resto como publicado. */

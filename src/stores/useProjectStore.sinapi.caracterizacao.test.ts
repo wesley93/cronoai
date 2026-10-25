@@ -35,7 +35,7 @@ describe('SINAPI antes do 00006: caracterização', () => {
     expect(laborCost).toBeCloseTo(16478.72 + 6500.8, 2) // R$ 22.979,52
   })
 
-  it('buildSinapiTask: o BAC da tarefa gravada é arredondado a R$ inteiro (79.334,40 → 79.334) e a duração usa os minutos por dia da obra', () => {
+  it('buildSinapiTask: o BAC da tarefa guarda os centavos (D-19: ANTES 79.334, DEPOIS 79.334,40) e a duração usa os minutos por dia da obra', () => {
     const store = useProjectStore()
     const res = store.addSinapiTask({
       name: 'Alvenaria teste', code: '103332', unit: 'm²', quantity: 640, unitCost: 123.96, durationDays: 33,
@@ -43,7 +43,8 @@ describe('SINAPI antes do 00006: caracterização', () => {
       parentWbs: '03', linkType: 'FS', lagDays: 0,
     })
     if (!res.ok) throw new Error(res.erro)
-    expect(res.task.bac).toBe(79334) // ANTES do ciclo (D-19)
+    // ANTES do ciclo (base 281a99a): Math.round gravava 79.334. DEPOIS (D-19, EO-4): q × custo sem arredondar
+    expect(res.task.bac).toBeCloseTo(79334.4, 2)
     expect(res.task.duracaoMin).toBe(33 * 480)
     expect(res.task.notes).toBe('Gerado pelo CronoAI a partir do SINAPI 103332: 640 m².')
   })

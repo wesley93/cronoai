@@ -30,6 +30,8 @@ export interface ResumoObra {
   atualizadoEm: string
   /** Marcada quando o registro não pôde ser lido (ausente, JSON inválido ou esquema mais novo). */
   ilegivel?: boolean
+  /** Chave `UF|regime|AAAA-MM` do recorte SINAPI da obra (ciclo 00006): permite apagar o recorte órfão sem ler todas as obras. */
+  recorteSinapi?: string
 }
 
 export interface MigracaoV1 {
@@ -54,4 +56,31 @@ export interface RegistroObra {
   versaoEsquema: number
   json: string
   atualizadoEm: string
+}
+
+/**
+ * Entrada da store `recortesSinapi` do IndexedDB (estrutura 2), uma por UF/regime/data-base, compartilhada entre as obras
+ * (ADR 00002). Dado externo na leitura: quem lê valida de novo (`validarRecorteSinapi`).
+ */
+export interface RegistroRecorte {
+  /** `UF|regime|AAAA-MM`. */
+  chave: string
+  /** Versão do formato do recorte (`versao` do JSON). */
+  versaoFormato: number
+  /** JSON compacto do recorte validado. */
+  json: string
+  /** SHA-256 da planilha de origem, para saber se o recorte foi substituído. */
+  sha256Origem: string
+  /** Data e hora ISO da importação. */
+  importadoEm: string
+  /** Número de composições (conferência barata sem ler o JSON). */
+  composicoes: number
+}
+
+/** Mudanças que acompanham a gravação de uma obra, na MESMA transação (ou tudo, ou nada). */
+export interface ExtrasDeGravacao {
+  /** Recorte a gravar (importação). */
+  gravarRecorte?: RegistroRecorte
+  /** Chaves de recortes que ficaram órfãos (nenhuma obra do índice os usa mais). */
+  excluirRecortes?: string[]
 }

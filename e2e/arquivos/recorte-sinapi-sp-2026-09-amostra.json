@@ -1,0 +1,101 @@
+{
+  "formato": "cronoai-recorte-sinapi",
+  "versao": 1,
+  "uf": "SP",
+  "regime": "nao-desonerado",
+  "dataBase": "2026-09",
+  "fonte": {
+    "publicacao": "SINAPI — Caixa — Relatórios mensais (formato a partir de 2025)",
+    "arquivo": "SINAPI_Referencia_2026_09.xlsx",
+    "sha256": "9f1a69dfbe103bdaecb39b871a74435c364b4e6652fdbc677d8537e6742cf0d2",
+    "bytes": 13631798,
+    "dataEmissao": "2026-10-09",
+    "abaCustos": "CSD",
+    "layout": "2025"
+  },
+  "encargos": {
+    "horista": 1.1501,
+    "mensalista": 0.7118
+  },
+  "filtro": {
+    "codigos": [
+      "103332",
+      "104658",
+      "103681"
+    ],
+    "grupos": []
+  },
+  "totais": {
+    "composicoes": 3,
+    "excluidasSemCusto": 0,
+    "excluidasCustoZeroNaUf": 0
+  },
+  "geradoEm": "2026-10-25T20:42:02.350Z",
+  "composicoes": [
+    {
+      "codigo": "103332",
+      "descricao": "ALVENARIA DE VEDAÇÃO DE BLOCOS CERÂMICOS FURADOS NA HORIZONTAL DE 9X14X19 CM (ESPESSURA 9 CM) E ARGAMASSA DE ASSENTAMENTO COM PREPARO EM BETONEIRA. AF_08/2026",
+      "unidade": "M2",
+      "grupo": "Alvenaria de Vedação",
+      "custoUnitario": 123.96,
+      "maoDeObra": [
+        {
+          "codigo": "88316",
+          "funcao": "SERVENTE",
+          "coeficiente": 0.8112688
+        },
+        {
+          "codigo": "88309",
+          "funcao": "PEDREIRO",
+          "coeficiente": 1.6225376
+        }
+      ],
+      "percentualAS": 0
+    },
+    {
+      "codigo": "104658",
+      "descricao": "PISO PODOTÁTIL DE ALERTA OU DIRECIONAL, DE CONCRETO, ASSENTADO SOBRE ARGAMASSA. AF_03/2024",
+      "unidade": "M2",
+      "grupo": "Acessibilidade",
+      "custoUnitario": 208.85,
+      "maoDeObra": [
+        {
+          "codigo": "88316",
+          "funcao": "SERVENTE",
+          "coeficiente": 1.279
+        },
+        {
+          "codigo": "88309",
+          "funcao": "PEDREIRO",
+          "coeficiente": 0.639
+        }
+      ],
+      "percentualAS": 0
+    },
+    {
+      "codigo": "103681",
+      "descricao": "CONCRETAGEM DE VIGAS E LAJES, FCK=25 MPA, PARA LAJES MACIÇAS OU NERVURADAS COM GRUA DE CAÇAMBA DE 500 L EM EDIFICAÇÃO DE MULTIPAVIMENTOS ATÉ 16 ANDARES - LANÇAMENTO, ADENSAMENTO E ACABAMENTO. AF_02/2022",
+      "unidade": "M3",
+      "grupo": "Concretagem para Estruturas de Concreto Armado",
+      "custoUnitario": 732.45,
+      "maoDeObra": [
+        {
+          "codigo": "88316",
+          "funcao": "SERVENTE",
+          "coeficiente": 1.145
+        },
+        {
+          "codigo": "88309",
+          "funcao": "PEDREIRO",
+          "coeficiente": 1.428
+        },
+        {
+          "codigo": "88262",
+          "funcao": "CARPINTEIRO DE FORMAS",
+          "coeficiente": 0.357
+        }
+      ],
+      "percentualAS": 0
+    }
+  ]
+}

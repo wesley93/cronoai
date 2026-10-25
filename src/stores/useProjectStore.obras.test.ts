@@ -4,6 +4,9 @@ import { createPinia, setActivePinia } from 'pinia'
 import aurora from '@/lib/__fixtures__/estado-v1-aurora.json?raw'
 import aurora75 from '@/lib/__fixtures__/estado-v1-aurora-75.json?raw'
 import auroraCenarios from '@/lib/__fixtures__/estado-v2-aurora-cenarios.json?raw'
+import fixtureEsquema4 from '@/lib/__fixtures__/registro-esquema4-aurora-cenarios.json?raw'
+import { createHash } from 'node:crypto'
+import type { RegistroObra } from '@/types/obra'
 import fixtureCalendarios from '@/lib/__fixtures__/mspdi-calendarios-restricoes.xml?raw'
 import { MIGRACOES, lerEstadoV1 } from '@/lib/migracaoEstado'
 import { analyzeSupplies } from '@/lib/supplies'
@@ -78,8 +81,8 @@ describe('useProjectStore · multiobra', () => {
       expect(store.migracaoV1?.resultado).toBe('migrado')
       expect(store.avisosCarga).toEqual([])
       expect(store.estadoGravacao).toBe('salvo')
-      // gravada no esquema 4 e com a v1 intocada
-      expect(adaptador.obras.get(store.obraAtivaId)?.versaoEsquema).toBe(4)
+      // gravada no esquema 5 (ciclo 00006: 1 → 5) e com a v1 intocada
+      expect(adaptador.obras.get(store.obraAtivaId)?.versaoEsquema).toBe(5)
       expect(JSON.parse(adaptador.obras.get(store.obraAtivaId)!.json)).toEqual(JSON.parse(JSON.stringify(migrado.estado)))
       expect(adaptador.v1).toBe(aurora)
       expect(adaptador.indice?.migracaoV1?.resultado).toBe('migrado')
@@ -101,9 +104,9 @@ describe('useProjectStore · multiobra', () => {
       expect(store.state.calendarios[0].excecoes.filter((x) => x.intervalos.length > 0)).toEqual([]) // sem 24/10 e 31/10
       expect(store.schedule.projectFinish).toBe('2027-06-23')
       expect(store.state.undo).toEqual([])
-      // A próxima gravação já é no esquema 4
+      // A próxima gravação já é no esquema 5
       expect(await store.salvarAgora()).toBe(true)
-      expect(adaptador.obras.get('o2')?.versaoEsquema).toBe(4)
+      expect(adaptador.obras.get('o2')?.versaoEsquema).toBe(5)
     })
 
     it('hora extra aplicada e desfeita deixa o calendário padrão exatamente como estava', async () => {
@@ -117,7 +120,7 @@ describe('useProjectStore · multiobra', () => {
       expect(JSON.parse(JSON.stringify(store.state.calendarios))).toEqual(antes)
     })
 
-    it('P-6: hora extra aplicada no esquema 3 (ciclo 00004) abre no esquema 4 e é desfeita com a entrega de 2027-06-23', async () => {
+    it('P-6: hora extra aplicada no esquema 3 (ciclo 00004) abre no esquema 5 e é desfeita com a entrega de 2027-06-23', async () => {
       const { store: origem } = await carregarCom(aurora)
       origem.applyScenario(origem.scenarios.overtime)
       expect(origem.schedule.projectFinish).toBe('2027-06-21')
@@ -140,7 +143,7 @@ describe('useProjectStore · multiobra', () => {
       expect(store.schedule.projectFinish).toBe('2027-06-23')
       expect(store.state.calendarios[0].excecoes.filter((x) => x.intervalos.length > 0)).toEqual([])
       expect(await store.salvarAgora()).toBe(true)
-      expect(adaptador.obras.get('o3')?.versaoEsquema).toBe(4)
+      expect(adaptador.obras.get('o3')?.versaoEsquema).toBe(5)
     })
 
     /** Registro REAL do esquema 3 (formato do ciclo 00004): fixture do esquema 2 com os 3 cenários aplicados, passada pelo passo 2 → 3. */
@@ -953,5 +956,80 @@ describe('useProjectStore · multiobra', () => {
       expect(store.estadoGravacao).toBe('salvo')
       expect(JSON.parse(adaptador.obras.get(idA)!.json).tasks.find((t: { uid: number }) => t.uid === 104).percentComplete).toBe(60)
     })
+  })
+})
+
+describe('useProjectStore · obra salva no esquema 4 abre no 5 igual (ciclo 00006, AC-15, P-1)', () => {
+  beforeEach(() => {
+    globalThis.localStorage?.clear?.() // Node 26 pode expor localStorage indefinido
+    usarArmazenamento(undefined)
+    setActivePinia(createPinia())
+  })
+  afterEach(() => usarArmazenamento(undefined))
+
+  interface Esperado {
+    entrega: string
+    atrasoDias: number
+    spi: number
+    cpi: number
+    bac: number
+    ac: number
+    undo: number
+    cenariosAplicados: number
+    calendarios: string[]
+    premissas: number
+    tarefas: number
+    sha256Exportacao: string
+    aposDesfazer: { entrega: string; spi: number; cpi: number; undo: number; calendarios: string[] }
+  }
+
+  it('registro REAL do esquema 4 (gerado na base 281a99a): mesmos números (N-1), mesma exportação MSPDI e o undo funciona; a próxima gravação é no esquema 5', async () => {
+    const fx = JSON.parse(fixtureEsquema4) as { registro: RegistroObra; esperado: Esperado }
+    const adaptador = criarArmazenamentoMemoria()
+    adaptador.obras.set('o-esquema4', structuredClone(fx.registro))
+    adaptador.indice = { versaoIndice: 1, obraAtivaId: 'o-esquema4', obras: [{ id: 'o-esquema4', nome: 'Aurora (esquema 4)', atualizadoEm: fx.registro.atualizadoEm }] }
+    const store = await recarregar(adaptador)
+    const e = fx.esperado
+    expect(store.obraAtivaId).toBe('o-esquema4')
+    expect(store.avisosCarga).toEqual([])
+    expect(store.schedule.projectFinish).toBe(e.entrega) // 2027-06-16 (v2 das premissas, crashing e hora extra por frente)
+    expect(store.delay.delayDays).toBe(e.atrasoDias)
+    expect(store.evm.spi).toBe(e.spi)
+    expect(store.evm.cpi).toBe(e.cpi)
+    expect(store.evm.bac).toBe(e.bac)
+    expect(store.evm.ac).toBe(e.ac)
+    expect(store.state.undo).toHaveLength(e.undo)
+    expect(store.state.appliedScenarios).toHaveLength(e.cenariosAplicados)
+    expect(store.state.calendarios.map((c) => c.nome)).toEqual(e.calendarios)
+    expect(store.state.premissas).toHaveLength(e.premissas)
+    expect(store.state.tasks).toHaveLength(e.tarefas)
+    // A obra é gravada no esquema 5, com o conteúdo igual (antes de exportar: a exportação registra uma linha no log)
+    expect(await store.salvarAgora()).toBe(true)
+    expect(adaptador.obras.get('o-esquema4')?.versaoEsquema).toBe(5)
+    expect(JSON.parse(adaptador.obras.get('o-esquema4')!.json)).toEqual(JSON.parse(fx.registro.json))
+    // A exportação sai igual à da base (normalizando CreationDate e LastSaved)
+    const xml = store.exportXml().xml.replace(/<(CreationDate|LastSaved)>[^<]*<\/\1>/g, '<$1>X</$1>')
+    expect(createHash('sha256').update(xml).digest('hex')).toBe(e.sha256Exportacao)
+    // O undo funciona: hora extra e crashing voltam à entrega de antes
+    expect(store.undoScenario('overtime')).toEqual({ ok: true })
+    expect(store.undoScenario('crashing')).toEqual({ ok: true })
+    expect(store.schedule.projectFinish).toBe(e.aposDesfazer.entrega) // 2027-06-23
+    expect(store.evm.spi).toBe(e.aposDesfazer.spi)
+    expect(store.evm.cpi).toBe(e.aposDesfazer.cpi)
+    expect(store.state.undo).toHaveLength(e.aposDesfazer.undo)
+    expect(store.state.calendarios.map((c) => c.nome)).toEqual(e.aposDesfazer.calendarios)
+  })
+
+  it('obra no esquema 6 (de uma versão mais nova) é recusada e o registro nunca é sobrescrito', async () => {
+    const fx = JSON.parse(fixtureEsquema4) as { registro: RegistroObra }
+    const adaptador = criarArmazenamentoMemoria()
+    const futuro = { ...structuredClone(fx.registro), versaoEsquema: 6 }
+    adaptador.obras.set('o-futuro', futuro)
+    adaptador.indice = { versaoIndice: 1, obraAtivaId: 'o-futuro', obras: [{ id: 'o-futuro', nome: 'Do futuro', atualizadoEm: fx.registro.atualizadoEm }] }
+    const store = await recarregar(adaptador)
+    expect(store.obras.find((o) => o.id === 'o-futuro')?.ilegivel).toBe(true)
+    expect(store.obraAtivaId).not.toBe('o-futuro')
+    expect(await store.salvarAgora()).toBe(true)
+    expect(adaptador.obras.get('o-futuro')).toEqual(futuro)
   })
 })

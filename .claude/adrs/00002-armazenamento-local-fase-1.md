@@ -18,12 +18,12 @@ Volume estimado (caracteres de JSON; o `localStorage` conta a chave e o valor):
 | Fotos dos relatos | Data URL JPEG de 360 px (`ReportComposer.vue:31-42`). Estimativa: ~35 mil caracteres por foto | 50 fotos: ~1,75 milhão |
 | Materiais, orçamento (até 200 linhas), log | Estimativa | 0,1 a 0,3 milhão |
 | **Uma obra grande, em uso** | Soma | **2 a 4 milhões** |
-| Recorte SINAPI (00006), compartilhado por UF/regime/data-base | Estimativa: ~250 caracteres por composição | Filtrado (500 composições): ~0,13 milhão. UF inteira (~10.600 composições): ~2,7 milhões |
+| Recorte SINAPI (00006), compartilhado por UF/regime/data-base | **Medido em 25/10/2026** (SP, não desonerado, 09/2026): ~410 caracteres por composição (a estimativa anterior, ~250, ficou baixa) | Filtrado (500 composições): ~0,2 milhão. UF inteira (8.443 composições com custo): **~3,46 milhões** de caracteres compactos (~3,5 MB); limite do arquivo importado: 6 MiB |
 | Snapshots (00007) | Estimativa: ~120 caracteres por tarefa num snapshot compacto | 104 × 3.000 × 120: **~37 milhões por obra** |
 | Premissas versionadas (00005), mapeamento (00010) | Estimativa | < 0,05 milhão |
 
 Cenários da Fase 1:
-- **5 obras grandes, 2 recortes de UF inteira, snapshots em 1 obra:** ~15 + ~5,4 + ~37 = **~57 milhões de caracteres**.
+- **5 obras grandes, 2 recortes de UF inteira, snapshots em 1 obra:** ~15 + ~6,9 + ~37 = **~59 milhões de caracteres** (com o recorte medido no 00006: 2 × 3,46).
 - **RNF-14.1 (50 obras de 3.000 tarefas), só as tarefas:** ~80 a 85 milhões.
 
 Limites (prática documentada, [MDN — Storage quotas and eviction criteria](https://developer.mozilla.org/en-US/docs/Web/API/Storage_API/Storage_quotas_and_eviction_criteria); confirmar no navegador usado pela empresa):
@@ -47,7 +47,7 @@ A Fase 1 guarda as obras no **IndexedDB**, a partir do ciclo 00002: banco `crono
 |---|---|---|---|
 | `meta` | `'indice'` | `{ versaoIndice: 1, obraAtivaId, obras: ResumoObra[], migracaoV1? }` | 00002 |
 | `obras` | `id` (keyPath) | `{ id, versaoEsquema, json, atualizadoEm }` | 00002 |
-| `recortesSinapi` | `uf\|regime\|dataBase` | recorte JSON + metadados (fonte, hash) | 00006 (estrutura 2) |
+| `recortesSinapi` | `chave` = `uf\|regime\|dataBase` (keyPath) | `{ chave, versaoFormato, json, sha256Origem, importadoEm, composicoes }` (recorte JSON compacto + metadados da fonte) | 00006 (estrutura 2, implementada) |
 | `snapshots` | `[obraId, dataStatus]` | snapshot imutável | 00007 (estrutura 3) |
 
 Cada ciclo que acrescenta store sobe a versão de estrutura; cada ciclo que muda o formato da obra acrescenta um passo à cadeia de esquema e o teste com o formato anterior.

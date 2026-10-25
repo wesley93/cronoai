@@ -8,7 +8,8 @@ import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import { downloadText } from '@/lib/download'
 import SectionCard from '@/components/common/SectionCard.vue'
-import { fmtBRL, fmtDate, fmtNum } from '@/lib/format'
+import { fmtBRLCents, fmtDate, fmtNum } from '@/lib/format'
+import { rotuloCurtoDaFonte } from '@/lib/recorteSinapi'
 import { horasPorDia } from '@/lib/calendarioTrabalho'
 import { formatPredecessors } from '@/lib/wbs'
 
@@ -101,7 +102,11 @@ const cell =
         </thead>
         <tbody>
           <tr v-for="l in lines" :key="l.id">
-            <td class="mono">{{ l.code || '—' }}</td>
+            <td class="mono">
+              {{ l.code || '—' }}
+              <!-- Fonte do custo e da RUP da linha: o recorte da obra ou o catálogo ilustrativo -->
+              <div class="mt-0.5"><span :class="l.fonte ? 'chip-ok' : 'chip-warn'" :title="l.fonte ?? 'Custo e RUP ilustrativos: valide na tabela SINAPI da UF e da data-base'" data-testid="fonte-da-linha">{{ l.fonte ? rotuloCurtoDaFonte(l.fonte) : 'ilustrativo' }}</span></div>
+            </td>
             <td>
               <div class="truncate" :title="l.description">{{ l.description }}</div>
               <input :value="l.location" class="mt-0.5 w-full rounded border border-transparent bg-transparent px-1 text-[11px] text-zinc-500 hover:border-zinc-300 focus:border-amber-400 focus:outline-none dark:hover:border-zinc-700" placeholder="local / frente" maxlength="60" aria-label="Local do serviço" @change="project.updateBudgetLine(l.id, { location: ($event.target as HTMLInputElement).value })" />
@@ -121,7 +126,7 @@ const cell =
             </td>
             <td class="text-right font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{{ lineDuration(l, horasPorDia(project.minutosPorDia)) }} d.u.</td>
             <td class="text-right"><input :value="l.unitCost" :class="cell" class="w-16" aria-label="Custo unitário" @change="edit(l, 'unitCost', ($event.target as HTMLInputElement).value)" /></td>
-            <td class="text-right tabular-nums">{{ fmtBRL(l.quantity * l.unitCost) }}</td>
+            <td class="text-right tabular-nums">{{ fmtBRLCents(l.quantity * l.unitCost) }}</td>
             <td class="mono text-[10.5px]">
               <template v-if="previewByName.get(lineName(l))">
                 {{ formatPredecessors(previewByName.get(lineName(l))!.task, project.minutosPorDia) || '—' }}
@@ -153,7 +158,7 @@ const cell =
           <span class="tabular-nums">{{ opts.overlapPct }}% da anterior</span>
         </template>
       </div>
-      <div class="text-zinc-500">Total: <strong class="text-zinc-800 dark:text-zinc-100">{{ fmtNum(totals.hh) }} HH</strong> · BAC <strong class="text-zinc-800 dark:text-zinc-100">{{ fmtBRL(totals.bac) }}</strong></div>
+      <div class="text-zinc-500">Total: <strong class="text-zinc-800 dark:text-zinc-100">{{ fmtNum(totals.hh) }} HH</strong> · BAC <strong class="text-zinc-800 dark:text-zinc-100">{{ fmtBRLCents(totals.bac) }}</strong></div>
       <div v-if="preview?.erro" class="text-coral-600 dark:text-coral-400" role="alert" data-testid="erro-previa">{{ preview.erro }}</div>
       <div v-else-if="preview && preview.erro === undefined" class="flex items-center gap-1.5">
         <KeyRound class="h-3.5 w-3.5 text-amber-500" /> Entrega: {{ fmtDate(preview.projectFinish) }}

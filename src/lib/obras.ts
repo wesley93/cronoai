@@ -6,6 +6,7 @@ import { diffCalendarDays, parseISO, toISO } from './calendar'
 import { JANELA_ANOS_DATAS, UID_CALENDARIO_PADRAO, calendarioPadrao } from './calendarioTrabalho'
 import { configFeriadosPadrao } from './feriadosObra'
 import { premissasPadrao } from './premissas'
+import { lerChaveRecorte } from './recorteSinapi'
 
 export const MAX_NOME_OBRA = 120
 export const MAX_MUNICIPIO = 80
@@ -192,10 +193,13 @@ export type ValidacaoIndice = { tipo: 'ok'; indice: IndiceObras } | { tipo: 'inv
 
 const eObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
+/** A chave do recorte guardada no índice é opcional, mas, se existir, tem a forma `UF|regime|AAAA-MM` (índice adulterado não pode apagar nem apontar para qualquer coisa). */
+const chaveDoIndiceValida = (v: unknown): boolean => v === undefined || lerChaveRecorte(v) !== undefined
+
 /** Confere a forma do índice (dado externo): versão 1, id ativo em texto e obras com id, nome e data em texto. */
 function formaDoIndice(v: Record<string, unknown>): v is Record<string, unknown> & IndiceObras {
   if (v.versaoIndice !== 1 || typeof v.obraAtivaId !== 'string' || !Array.isArray(v.obras)) return false
-  if (!v.obras.every((o) => eObj(o) && typeof o.id === 'string' && o.id !== '' && typeof o.nome === 'string' && typeof o.atualizadoEm === 'string')) return false
+  if (!v.obras.every((o) => eObj(o) && typeof o.id === 'string' && o.id !== '' && typeof o.nome === 'string' && typeof o.atualizadoEm === 'string' && chaveDoIndiceValida(o.recorteSinapi))) return false
   const mig = v.migracaoV1
   return mig === undefined || (eObj(mig) && typeof mig.em === 'string' && (mig.resultado === 'migrado' || mig.resultado === 'ilegivel'))
 }
@@ -228,7 +232,17 @@ export function resumirObra(id: string, estado: PersistedState, atualizadoEm: st
   if (meta.uf) resumo.uf = meta.uf
   if (meta.municipio) resumo.municipio = meta.municipio
   if (meta.manager) resumo.responsavel = meta.manager
+  if (meta.recorteSinapi) resumo.recorteSinapi = meta.recorteSinapi.chave
   return resumo
+}
+
+/**
+ * Recortes SINAPI órfãos depois de uma mudança no índice: chaves que `antes` usava e `depois` não usa mais em nenhuma obra.
+ * Obra ilegível mantém a chave no índice (o resumo não perde o campo), então o recorte dela nunca é apagado.
+ */
+export function recortesOrfaos(antes: readonly Pick<ResumoObra, 'recorteSinapi'>[], depois: readonly Pick<ResumoObra, 'recorteSinapi'>[]): string[] {
+  const usadas = new Set(depois.map((o) => o.recorteSinapi).filter((c): c is string => !!c))
+  return [...new Set(antes.map((o) => o.recorteSinapi).filter((c): c is string => !!c && !usadas.has(c)))]
 }
 
 const cotaValida = (uso?: number, cota?: number): uso is number => uso !== undefined && cota !== undefined && Number.isFinite(uso) && Number.isFinite(cota) && cota > 0

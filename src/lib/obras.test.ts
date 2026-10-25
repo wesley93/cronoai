@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { UFS } from '@/data/ufs'
 import { compilarCalendarios } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
-import { avaliarCota, dataLocalISO, descreverTabelaSinapi, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, validarIndice, type DadosObra } from './obras'
+import { avaliarCota, dataLocalISO, descreverTabelaSinapi, estadoObraVazia, nomeDaCopia, percentualCota, recortesOrfaos, resumirObra, validarDadosObra, validarIndice, type DadosObra } from './obras'
 
 const valido: DadosObra = {
   nome: 'Residencial Teste',
@@ -243,5 +243,38 @@ describe('cota de armazenamento', () => {
   it('calcula o percentual', () => {
     expect(percentualCota(50, 200)).toBe(25)
     expect(percentualCota(1, 0)).toBeUndefined()
+  })
+})
+
+describe('recorte SINAPI no índice das obras (ciclo 00006)', () => {
+  const meta = { name: 'Obra', manager: '', company: '', startDate: '2026-11-03', statusDate: '2026-11-03' }
+
+  it('resumirObra leva a chave do recorte da obra', () => {
+    const estado = { ...estadoObraVazia({ nome: 'Obra', dataInicio: '2026-11-03', dataStatus: '2026-11-03' }) }
+    expect(resumirObra('o1', estado, '2026-11-03T10:00:00.000Z').recorteSinapi).toBeUndefined()
+    estado.meta = { ...meta, uf: 'SP', regimeSinapi: 'nao-desonerado', dataBaseSinapi: '2026-09', recorteSinapi: { chave: 'SP|nao-desonerado|2026-09', sha256Origem: 'a'.repeat(64), importadoEm: '2026-11-03T10:00:00.000Z' } }
+    expect(resumirObra('o1', estado, '2026-11-03T10:00:00.000Z').recorteSinapi).toBe('SP|nao-desonerado|2026-09')
+  })
+
+  it('recortesOrfaos: só as chaves que o índice de antes usava e o de depois não usa mais (1 → 1 → 0)', () => {
+    const a = { recorteSinapi: 'SP|nao-desonerado|2026-09' }
+    const b = { recorteSinapi: 'SP|nao-desonerado|2026-09' }
+    const c = { recorteSinapi: 'BA|desonerado|2026-09' }
+    const semRecorte = {}
+    expect(recortesOrfaos([a, b], [a, semRecorte])).toEqual([]) // outra obra ainda usa
+    expect(recortesOrfaos([a, semRecorte], [semRecorte, semRecorte])).toEqual(['SP|nao-desonerado|2026-09'])
+    expect(recortesOrfaos([a, b, c], [a, b])).toEqual(['BA|desonerado|2026-09'])
+    expect(recortesOrfaos([a, b], [])).toEqual(['SP|nao-desonerado|2026-09']) // sem repetir a chave
+    expect(recortesOrfaos([], [a])).toEqual([])
+    expect(recortesOrfaos([semRecorte], [semRecorte])).toEqual([])
+  })
+
+  it('o índice com chave de recorte inválida é recusado (índice adulterado não aponta para qualquer coisa)', () => {
+    const indice = (recorteSinapi: unknown) => ({ versaoIndice: 1, obraAtivaId: 'o1', obras: [{ id: 'o1', nome: 'Obra', atualizadoEm: '2026-11-03T10:00:00.000Z', recorteSinapi }] })
+    expect(validarIndice(indice(undefined)).tipo).toBe('ok')
+    expect(validarIndice(indice('SP|nao-desonerado|2026-09')).tipo).toBe('ok')
+    for (const ruim of ['lixo', 7, 'XX|desonerado|2026-09', 'SP|desonerado|2026-13', ['SP|desonerado|2026-09'], null]) {
+      expect(validarIndice(indice(ruim)).tipo).toBe('invalido')
+    }
   })
 })

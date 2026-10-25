@@ -4,7 +4,12 @@ import { fmtPct } from './format'
 import {
   MAX_RECORTE_BYTES,
   buscarComposicoes,
+  chaveDaObra,
   chaveRecorte,
+  fonteParaNotas,
+  lerRegistroDeRecorte,
+  montarRegistroDeRecorte,
+  rotuloCurtoDaFonte,
   conferirRecorteComObra,
   descreverFonte,
   indexarRecorte,
@@ -288,5 +293,37 @@ describe('composição → item e linha da planilha (CR-1, CR-2)', () => {
     expect(item.rup).toBe(0)
     expect(item.equipe).toBeUndefined()
     expect(linhaDoRecorte(r.composicoes[2]!, r, 10, 2).equipe).toBeUndefined()
+  })
+})
+
+describe('chave da obra, rótulos da fonte e registro salvo', () => {
+  it('chave da obra só existe com UF, regime e data-base', () => {
+    expect(chaveDaObra({ uf: 'SP', regimeSinapi: 'nao-desonerado', dataBaseSinapi: '2026-09' })).toBe('SP|nao-desonerado|2026-09')
+    expect(chaveDaObra({ uf: 'SP', regimeSinapi: 'nao-desonerado' })).toBeUndefined()
+    expect(chaveDaObra({})).toBeUndefined()
+  })
+
+  it('chip curto da planilha e fonte das notas', () => {
+    expect(rotuloCurtoDaFonte('SINAPI SP 09/2026 não desonerado')).toBe('SINAPI SP 09/2026')
+    expect(rotuloCurtoDaFonte('SINAPI BA 09/2026 desonerado')).toBe('SINAPI BA 09/2026')
+    expect(fonteParaNotas('SINAPI SP 09/2026 não desonerado')).toBe('SP 09/2026 não desonerado')
+  })
+
+  it('o registro montado volta como o mesmo recorte e confere chave, SHA-256 e contagem', () => {
+    const r = recorte()
+    const reg = montarRegistroDeRecorte(r, '2026-10-25T12:00:00.000Z')
+    expect(reg).toMatchObject({ chave: 'SP|nao-desonerado|2026-09', versaoFormato: 1, sha256Origem: SHA, composicoes: 3, importadoEm: '2026-10-25T12:00:00.000Z' })
+    const lido = lerRegistroDeRecorte(reg, reg.chave)
+    expect(lido.ok).toBe(true)
+    if (lido.ok) expect(lido.recorte).toEqual(r)
+  })
+
+  it('registro que não é objeto, de formato mais novo ou com forma errada é recusado sem lançar', () => {
+    const reg = montarRegistroDeRecorte(recorte(), '2026-10-25T12:00:00.000Z')
+    for (const ruim of [null, 'x', 5, []]) expect(lerRegistroDeRecorte(ruim, reg.chave)).toMatchObject({ ok: false, motivo: 'invalido' })
+    expect(lerRegistroDeRecorte({ ...reg, versaoFormato: 2 }, reg.chave)).toMatchObject({ ok: false, motivo: 'mais-novo' })
+    expect(lerRegistroDeRecorte({ ...reg, importadoEm: 'x' }, reg.chave)).toMatchObject({ ok: false, motivo: 'invalido' })
+    expect(lerRegistroDeRecorte({ ...reg, composicoes: 'três' }, reg.chave)).toMatchObject({ ok: false, motivo: 'invalido' })
+    expect(lerRegistroDeRecorte(reg, 'BA|desonerado|2026-09')).toMatchObject({ ok: false, motivo: 'invalido' })
   })
 })

@@ -1,6 +1,6 @@
 // Estado global reativo da obra: toda ação (apontamento, cenário, SINAPI, XML) recalcula CPM, EVM e suprimentos.
 import { defineStore } from 'pinia'
-import { computed, nextTick, reactive, ref, toRaw, watch } from 'vue'
+import { computed, markRaw, nextTick, reactive, ref, shallowRef, toRaw, watch } from 'vue'
 import type {
   CalendarioObra,
   ConfigFeriadosObra,
@@ -22,7 +22,7 @@ import type {
   VersaoPremissas,
 } from '@/types/domain'
 import type { MSProjectPredecessor, MSProjectTask } from '@/types/msProject'
-import type { IndiceObras, MigracaoV1, PersistedState, ResumoObra, ScenarioUndo } from '@/types/obra'
+import type { IndiceObras, MigracaoV1, PersistedState, RegistroRecorte, ResumoObra, ScenarioUndo } from '@/types/obra'
 import { SEED_MATERIALS, SEED_META, SEED_PREMISSAS, SEED_REPORTS, SEED_TASKS } from '@/data/seed'
 import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
 import {
@@ -91,14 +91,29 @@ import {
   type NovoFeriadoManual,
 } from '@/lib/feriadosObra'
 import { compararCronogramas } from '@/lib/previaImpacto'
-import { fmtBRL, fmtMonth, uid } from '@/lib/format'
+import { fmtBRL, fmtBRLCents, fmtMonth, uid } from '@/lib/format'
 import { calcularDivergencias } from '@/lib/divergencias'
 import type { PreviaImpacto, PreviaPlanilha, PreviaProgresso, PreviaSinapi } from '@/types/previas'
 import { calcularObra, mensagemDoCalculo, verificarCalculo } from '@/lib/horizonte'
+import {
+  MAX_RECORTE_BYTES,
+  chaveDaObra,
+  conferirRecorteComObra,
+  descreverFonte,
+  fonteParaNotas,
+  indexarRecorte,
+  itemCatalogoDoRecorte,
+  lerRecorteDeTexto,
+  lerRegistroDeRecorte,
+  montarRegistroDeRecorte,
+  type IndiceRecorte,
+} from '@/lib/recorteSinapi'
+import { notasDaTarefaSinapi } from '@/lib/sinapiRup'
+import { VERSAO_RECORTE, type FuncaoMaoDeObra, type ItemCatalogoSinapi, type RecorteSinapi } from '@/types/sinapi'
 import { ROTULO_RESTRICAO, calendarioExiste, montarRestricao, tarefasManuaisAlteradas, validarPrazoFinal, validarRestricao, type TipoRestricaoTela } from '@/lib/restricoes'
 import { lagEmDias, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
 import { criarRegistro, lerEstadoV1, migrarRegistro } from '@/lib/migracaoEstado'
-import { avaliarCota, erroDoRegistroDeDesfazer, erroDeStatusForaDaJanela, estadoObraVazia, nomeDaCopia, percentualCota, resumirObra, validarDadosObra, validarIndice, validarOpcoesCronograma, type DadosObra } from '@/lib/obras'
+import { avaliarCota, erroDoRegistroDeDesfazer, erroDeStatusForaDaJanela, estadoObraVazia, nomeDaCopia, percentualCota, recortesOrfaos, resumirObra, validarDadosObra, validarIndice, validarOpcoesCronograma, type DadosObra } from '@/lib/obras'
 import { obterArmazenamento, type ArmazenamentoObras } from './armazenamentoObras'
 import { useUiStore } from './ui'
 
@@ -117,6 +132,25 @@ export interface PreviaTrocaLocal {
   semFeriadosLocais: boolean
   impactoDeRemover?: PreviaImpacto
 }
+/** Recorte SINAPI da obra ativa, carregado e validado (fora do estado reativo profundo: ~8 mil composições, D-13). */
+export interface RecorteAtivo {
+  recorte: RecorteSinapi
+  indice: IndiceRecorte
+  /** "SINAPI SP 09/2026 não desonerado". */
+  fonte: string
+  /** SHA-256 do registro salvo e da referência da obra: diferentes = o recorte foi substituído depois do vínculo desta obra. */
+  sha256Origem: string
+  importadoEm: string
+  substituidoEm?: string
+}
+export type ResultadoRecorte = { ok: true } | { ok: false; erro: string; erros?: string[]; precisaConfirmar?: boolean }
+export interface OpcoesSalvar {
+  /** Recorte gravado na MESMA transação da obra e do índice. */
+  gravarRecorte?: RegistroRecorte
+  /** Aplica a mudança no estado imediatamente antes de gravar e devolve como desfazê-la se a gravação falhar. */
+  mutar?: () => () => void
+}
+
 export type ResultadoCriacao = { ok: true; id: string } | { ok: false; erro: string; erros?: string[] }
 export type NovaObra = { modelo: 'exemplo' } | { modelo: 'branco'; dados: DadosObra }
 
@@ -203,6 +237,10 @@ export interface SinapiInsert {
   predecessorUid?: number
   linkType: LinkType
   lagDays: number
+  /** Fonte do recorte ("SINAPI SP 09/2026 não desonerado"); ausente = catálogo ilustrativo. */
+  fonte?: string
+  /** Mão de obra da composição do recorte, só para as notas da tarefa (supervisão não alocada). */
+  maoDeObra?: readonly FuncaoMaoDeObra[]
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -223,6 +261,15 @@ export const useProjectStore = defineStore('project', () => {
   const carregado = ref(false)
   /** Carga sem segurança (índice ilegível, leitura falhou): nada é gravado até recarregar a página. */
   const gravacaoBloqueada = ref(false)
+
+  // ---------------------------------------------------------------- recorte SINAPI (ciclo 00006)
+  /** O recorte (~3,4 MB) fica FORA do `state`: o observador profundo o percorreria a cada alteração e o regravaria a cada 300 ms (D-13). */
+  const recorteAtual = shallowRef<RecorteAtivo | undefined>(undefined)
+  /** Aviso do cartão SINAPI: recorte ausente, ilegível ou de formato mais novo (a obra usa o catálogo ilustrativo). */
+  const avisoRecorte = ref('')
+  /** Chave de um recorte já salvo neste navegador com a UF, o regime e a data-base desta obra, ainda não vinculado ("Usar nesta obra"). */
+  const recorteDisponivel = ref<string | undefined>(undefined)
+  let tokenRecorte = 0
 
   let armazenamento: ArmazenamentoObras | undefined
   let indice: IndiceObras | undefined
@@ -315,17 +362,26 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /** Grava agora a obra ativa (cancela o atraso). Devolve false se falhar; as gravações seguem em fila, na ordem. */
-  function salvarAgora(): Promise<boolean> {
+  function salvarAgora(opcoes: OpcoesSalvar = {}): Promise<boolean> {
     if (gravacaoBloqueada.value) return Promise.resolve(false)
     clearTimeout(saveTimer)
     timerPendente = false
     const gravar = async (): Promise<boolean> => {
-      if (!armazenamento || !obraAtivaId.value) return true
+      if (!armazenamento || !obraAtivaId.value) {
+        opcoes.mutar?.()
+        return true
+      }
+      let desfazer: (() => void) | undefined
       try {
+        // A mudança entra no estado aqui, na vez desta gravação na fila: nenhuma outra gravação grava a referência sem o recorte
+        desfazer = opcoes.mutar?.()
+        if (desfazer) await nextTick() // o observador do estado conta a mudança agora: esta gravação já a leva, então termina "salva"
         const rev = revisao
         const em = agora()
         const novoIndice = indiceComAtiva(em)
-        await armazenamento.gravarObra(criarRegistro(obraAtivaId.value, state, em), novoIndice)
+        // Recorte órfão (nenhuma obra do índice o usa mais) sai na mesma transação
+        const orfaos = recortesOrfaos(indice?.obras ?? [], novoIndice.obras).filter((c) => c !== opcoes.gravarRecorte?.chave)
+        await armazenamento.gravarObra(criarRegistro(obraAtivaId.value, state, em), novoIndice, { gravarRecorte: opcoes.gravarRecorte, excluirRecortes: orfaos })
         aceitarIndice(novoIndice)
         // Sem IndexedDB o "salvo" é só na memória da sessão: o aviso de indisponibilidade continua.
         // Alteração feita durante a escrita (rev mudou) continua "pendente": o observador já agendou outra gravação.
@@ -336,6 +392,7 @@ export const useProjectStore = defineStore('project', () => {
         void consultarCota().catch(() => undefined)
         return true
       } catch (err) {
+        desfazer?.() // a transação não gravou nada: a referência volta ao que era
         registrarFalhaDeGravacao(err)
         return false
       }
@@ -475,6 +532,7 @@ export const useProjectStore = defineStore('project', () => {
     }
     await aplicarEstado(inicial)
     avisosCarga.value = avisos
+    await carregarRecorteDaObra()
 
     if (precisaGravar) {
       // Índice e obra na mesma transação. Se falhar, o índice não existe e a v1 fica intacta: a próxima carga tenta de novo (M-4).
@@ -493,6 +551,54 @@ export const useProjectStore = defineStore('project', () => {
       }
     }
     carregado.value = true
+  }
+
+  function ativoDe(recorte: RecorteSinapi, sha256Origem: string, importadoEm: string): RecorteAtivo {
+    const ref = state.meta.recorteSinapi
+    return {
+      recorte: markRaw(recorte),
+      indice: markRaw(indexarRecorte(recorte)),
+      fonte: descreverFonte(recorte),
+      sha256Origem,
+      importadoEm,
+      ...(ref && ref.sha256Origem !== sha256Origem ? { substituidoEm: importadoEm } : {}),
+    }
+  }
+
+  /**
+   * Carrega o recorte da obra ativa (e, sem vínculo, vê se há um com a mesma chave salvo neste navegador). O registro é dado externo:
+   * forma, tamanho e conteúdo são validados de novo; se falhar, a obra abre com o catálogo ilustrativo e um aviso, sem alterar nada salvo.
+   */
+  async function carregarRecorteDaObra(): Promise<void> {
+    const token = ++tokenRecorte
+    const obra = obraAtivaId.value
+    recorteAtual.value = undefined
+    avisoRecorte.value = ''
+    recorteDisponivel.value = undefined
+    if (!armazenamento) return
+    const ref = state.meta.recorteSinapi
+    const chave = ref?.chave ?? chaveDaObra(state.meta)
+    if (!chave) return
+    try {
+      if (ref) {
+        const reg = await armazenamento.lerRecorte(chave)
+        if (token !== tokenRecorte || obra !== obraAtivaId.value) return
+        if (!reg) {
+          avisoRecorte.value = 'O recorte SINAPI desta obra não foi encontrado neste navegador: a obra usa o catálogo ilustrativo. Importe o recorte de novo.'
+          return
+        }
+        const r = lerRegistroDeRecorte(reg, chave)
+        if (!r.ok) {
+          avisoRecorte.value = r.mensagem
+          return
+        }
+        recorteAtual.value = ativoDe(r.recorte, r.sha256Origem, r.importadoEm)
+      } else if (await armazenamento.existeRecorte(chave)) {
+        if (token === tokenRecorte && obra === obraAtivaId.value) recorteDisponivel.value = chave
+      }
+    } catch {
+      if (token === tokenRecorte && obra === obraAtivaId.value) avisoRecorte.value = 'Não foi possível ler o recorte SINAPI deste navegador: a obra usa o catálogo ilustrativo.'
+    }
   }
 
   // ---------------------------------------------------------------- derivados
@@ -1074,7 +1180,7 @@ export const useProjectStore = defineStore('project', () => {
     // Linha de base da inclusão de escopo = datas calculadas no momento da inclusão
     const s = schedule.value.byUid.get(task.uid)
     if (s) patchTask(task.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin })
-    log('sinapi', `Pacote incluído na EAP: [UID ${task.uid}] ${task.wbs}`, `${input.name} — ${input.durationDays} dias úteis, BAC ${fmtBRL(task.bac)}.`)
+    log('sinapi', `Pacote incluído na EAP: [UID ${task.uid}] ${task.wbs}`, `${input.name} — ${input.durationDays} dias úteis, BAC ${fmtBRLCents(task.bac)}.`)
     return { ok: true, task }
   }
 
@@ -1102,12 +1208,20 @@ export const useProjectStore = defineStore('project', () => {
         ? [{ uid: input.predecessorUid, type: input.linkType, lag: { tipo: 'util', minutos: diasParaMinutos(input.lagDays, minutosPorDia.value) } }]
         : [],
       percentComplete: 0,
-      bac: Math.round(input.quantity * input.unitCost),
+      // BAC = quantidade × custo, sem arredondar (arredonda só na exibição; D-19, EO-4). Antes: Math.round (CR-1 gravava 79.334 em vez de 79.334,40)
+      bac: input.quantity * input.unitCost,
       actualCost: 0,
       resources: input.resources.filter((r) => r.units > 0),
       sinapi: input.code,
       floors: parseFloorRange(input.name),
-      notes: `Gerado pelo CronoAI a partir do SINAPI ${input.code}: ${input.quantity.toLocaleString('pt-BR')} ${input.unit}.`,
+      notes: notasDaTarefaSinapi({
+        codigo: input.code,
+        quantidade: input.quantity,
+        unidade: input.unit,
+        fonte: input.fonte ? fonteParaNotas(input.fonte) : undefined,
+        maoDeObra: input.maoDeObra,
+        recursos: input.resources.filter((r) => r.units > 0),
+      }),
     }
     return { task, parentWbs, group }
   }
@@ -1172,8 +1286,14 @@ export const useProjectStore = defineStore('project', () => {
     state.budget = []
   }
 
+  /** Catálogo da planilha: o recorte da obra quando há vínculo (custo e RUP publicados); sem vínculo, o catálogo ilustrativo. */
+  function catalogoDaPlanilha(): readonly ItemCatalogoSinapi[] {
+    const a = recorteAtual.value
+    return a ? a.recorte.composicoes.map((c) => itemCatalogoDoRecorte(c, a.recorte)) : SINAPI_CATALOG
+  }
+
   function importBudgetCsv(text: string) {
-    const result = parseBudgetCsv(text)
+    const result = parseBudgetCsv(text, catalogoDaPlanilha())
     const room = MAX_BUDGET_LINES - state.budget.length
     for (const l of result.lines.slice(0, room)) state.budget.push({ ...l, id: uid('b') })
     if (result.lines.length > room) result.errors.push(`Limite de ${MAX_BUDGET_LINES} linhas na planilha atingido.`)
@@ -1214,6 +1334,8 @@ export const useProjectStore = defineStore('project', () => {
           predecessorUid,
           linkType,
           lagDays,
+          fonte: l.fonte,
+          maoDeObra: maoDeObraDaLinha(l),
         },
         tasks,
       )
@@ -1227,6 +1349,14 @@ export const useProjectStore = defineStore('project', () => {
       lastInGroup.set(parentWbs ?? '__novo__', task)
     }
     return { tasks, created }
+  }
+
+  /** Mão de obra da composição da linha, só se a linha vem do recorte vigente da obra (para as notas da tarefa). */
+  function maoDeObraDaLinha(l: Pick<BudgetLine, 'code' | 'fonte'>): readonly FuncaoMaoDeObra[] | undefined {
+    const a = recorteAtual.value
+    if (!a || !l.fonte || l.fonte !== a.fonte) return undefined
+    const i = a.indice.porCodigo.get(l.code)
+    return i === undefined ? undefined : a.indice.composicoes[i]?.maoDeObra
   }
 
   function previewBudgetBatch(opts: BatchOptions = DEFAULT_BATCH_OPTIONS): PreviaPlanilha | undefined {
@@ -1267,7 +1397,7 @@ export const useProjectStore = defineStore('project', () => {
       if (s) patchTask(t.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin })
     }
     const bac = created.reduce((a, t) => a + t.bac, 0)
-    log('sinapi', `Cronograma gerado da planilha SINAPI (${created.length} pacotes)`, `Vínculos ${opts.mode === 'SS' ? `SS com defasagem de ${opts.overlapPct}%` : 'FS em série'} · BAC +${fmtBRL(bac)}.`)
+    log('sinapi', `Cronograma gerado da planilha SINAPI (${created.length} pacotes)`, `Vínculos ${opts.mode === 'SS' ? `SS com defasagem de ${opts.overlapPct}%` : 'FS em série'} · BAC +${fmtBRLCents(bac)}.`)
     state.budget = []
     return { ok: true, created }
   }
@@ -1722,6 +1852,7 @@ export const useProjectStore = defineStore('project', () => {
     aceitarIndice(novoIndice)
     obraAtivaId.value = id
     await aplicarEstado(r.estado)
+    await carregarRecorteDaObra()
     return { ok: true }
   }
 
@@ -1753,6 +1884,7 @@ export const useProjectStore = defineStore('project', () => {
     aceitarIndice(novoIndice)
     obraAtivaId.value = id
     await aplicarEstado(estado)
+    await carregarRecorteDaObra()
     return { ok: true, id }
   }
 
@@ -1817,7 +1949,8 @@ export const useProjectStore = defineStore('project', () => {
       obras: atual.obras.filter((o) => o.id !== id),
     }
     try {
-      await armazenamento.excluirObra(id, novoIndice)
+      // O recorte que só esta obra usava sai na mesma transação (obra ilegível mantém a chave no índice: o dela não é apagado)
+      await armazenamento.excluirObra(id, novoIndice, recortesOrfaos(atual.obras, novoIndice.obras))
     } catch (err) {
       return { ok: false, erro: mensagemDeFalha(err) }
     }
@@ -1825,8 +1958,110 @@ export const useProjectStore = defineStore('project', () => {
     if (proxima) {
       obraAtivaId.value = proxima.id
       await aplicarEstado(proxima.estado)
+      await carregarRecorteDaObra()
       estadoGravacao.value = armazenamentoIndisponivel.value ? 'erro' : 'salvo'
     }
+    return { ok: true }
+  }
+
+  // ---------------------------------------------------------------- recorte SINAPI: importar, usar, remover
+  const erroBloqueioRecorte = () => (gravacaoBloqueada.value ? ERRO_BLOQUEADO : !armazenamento ? 'As obras ainda não foram carregadas.' : undefined)
+
+  /** Vincula a obra ao recorte (e grava, na mesma transação, o recorte novo se houver); se a gravação falhar, a referência volta ao que era. */
+  async function vincularRecorte(chave: string, sha256Origem: string, importadoEm: string, gravarRecorte?: RegistroRecorte): Promise<ResultadoRecorte> {
+    const anterior = state.meta.recorteSinapi ? { ...state.meta.recorteSinapi } : undefined
+    const ok = await salvarAgora({
+      gravarRecorte,
+      mutar: () => {
+        state.meta.recorteSinapi = { chave, sha256Origem, importadoEm }
+        return () => {
+          if (anterior) state.meta.recorteSinapi = anterior
+          else delete state.meta.recorteSinapi
+        }
+      },
+    })
+    return ok ? { ok: true } : { ok: false, erro: mensagemGravacao.value || 'Não foi possível gravar o recorte no armazenamento do navegador.' }
+  }
+
+  /**
+   * Importa o recorte (texto do arquivo JSON) na obra ativa: valida o esquema, confere UF, regime e data-base com a obra e grava, numa só
+   * transação, o recorte, a referência da obra e o índice. Recorte de formato mais novo já salvo nunca é sobrescrito.
+   * Substituir um recorte usado por outras obras pede confirmação (`precisaConfirmar`).
+   */
+  async function importarRecorteSinapi(texto: string, opcoes: { confirmarSubstituicao?: boolean } = {}): Promise<ResultadoRecorte> {
+    const bloqueio = erroBloqueioRecorte()
+    if (bloqueio) return { ok: false, erro: bloqueio }
+    if (texto.length > MAX_RECORTE_BYTES) return { ok: false, erro: 'O arquivo do recorte passa de 6 MiB.' }
+    const lido = lerRecorteDeTexto(texto)
+    if (!lido.ok) return { ok: false, erro: lido.erros[0] ?? 'Recorte inválido.', erros: lido.erros.slice(0, 3) }
+    const recorte = lido.recorte
+    const recusa = conferirRecorteComObra(recorte, state.meta)
+    if (recusa) return { ok: false, erro: recusa }
+    const chave = chaveDaObra(state.meta)!
+    let existente: RegistroRecorte | undefined
+    try {
+      existente = await armazenamento!.lerRecorte(chave)
+    } catch {
+      return { ok: false, erro: 'Não foi possível ler o armazenamento do navegador. Nada foi importado.' }
+    }
+    if (existente && typeof existente.versaoFormato === 'number' && existente.versaoFormato > VERSAO_RECORTE) {
+      return { ok: false, erro: `O recorte salvo para esta chave é de um formato mais novo do CronoAI (formato ${existente.versaoFormato}). Nada foi sobrescrito.` }
+    }
+    const outras = (indice?.obras ?? obras.value).filter((o) => o.id !== obraAtivaId.value && o.recorteSinapi === chave).length
+    if (existente && outras > 0 && existente.sha256Origem !== recorte.fonte.sha256 && !opcoes.confirmarSubstituicao) {
+      return { ok: false, precisaConfirmar: true, erro: `Este recorte é usado por mais ${outras} obra(s): substituí-lo muda as tabelas delas nas próximas tarefas.` }
+    }
+    const registro = montarRegistroDeRecorte(recorte, agora())
+    const r = await vincularRecorte(chave, registro.sha256Origem, registro.importadoEm, registro)
+    if (!r.ok) return r
+    recorteAtual.value = ativoDe(recorte, registro.sha256Origem, registro.importadoEm)
+    avisoRecorte.value = ''
+    recorteDisponivel.value = undefined
+    log('sinapi', 'Recorte SINAPI importado', `${descreverFonte(recorte)}: ${recorte.composicoes.length.toLocaleString('pt-BR')} composições do arquivo ${recorte.fonte.arquivo}.`)
+    return { ok: true }
+  }
+
+  /** Vincula a obra a um recorte já salvo neste navegador com a mesma chave (Q3: nunca automático, só por esta ação). */
+  async function usarRecorteDisponivel(): Promise<ResultadoRecorte> {
+    const bloqueio = erroBloqueioRecorte()
+    if (bloqueio) return { ok: false, erro: bloqueio }
+    const chave = recorteDisponivel.value
+    if (!chave || chave !== chaveDaObra(state.meta)) return { ok: false, erro: 'Não há recorte salvo para a UF, o regime e a data-base desta obra.' }
+    let leitura
+    try {
+      leitura = lerRegistroDeRecorte(await armazenamento!.lerRecorte(chave), chave)
+    } catch {
+      return { ok: false, erro: 'Não foi possível ler o armazenamento do navegador.' }
+    }
+    if (!leitura.ok) return { ok: false, erro: leitura.mensagem }
+    const recusa = conferirRecorteComObra(leitura.recorte, state.meta)
+    if (recusa) return { ok: false, erro: recusa }
+    const r = await vincularRecorte(chave, leitura.sha256Origem, leitura.importadoEm)
+    if (!r.ok) return r
+    recorteAtual.value = ativoDe(leitura.recorte, leitura.sha256Origem, leitura.importadoEm)
+    avisoRecorte.value = ''
+    recorteDisponivel.value = undefined
+    log('sinapi', 'Recorte SINAPI vinculado', `${descreverFonte(leitura.recorte)}: usado nesta obra sem reimportar.`)
+    return { ok: true }
+  }
+
+  /** Remove o vínculo desta obra com o recorte; o recorte sai do navegador na mesma transação se nenhuma outra obra o usa. */
+  async function removerRecorteSinapi(): Promise<ResultadoRecorte> {
+    const bloqueio = erroBloqueioRecorte()
+    if (bloqueio) return { ok: false, erro: bloqueio }
+    const anterior = state.meta.recorteSinapi ? { ...state.meta.recorteSinapi } : undefined
+    if (!anterior) return { ok: true }
+    const ok = await salvarAgora({
+      mutar: () => {
+        delete state.meta.recorteSinapi
+        return () => {
+          state.meta.recorteSinapi = anterior
+        }
+      },
+    })
+    if (!ok) return { ok: false, erro: mensagemGravacao.value || 'Não foi possível gravar no armazenamento do navegador.' }
+    log('sinapi', 'Recorte SINAPI removido desta obra', 'A obra voltou ao catálogo ilustrativo.')
+    await carregarRecorteDaObra()
     return { ok: true }
   }
 
@@ -1850,6 +2085,7 @@ export const useProjectStore = defineStore('project', () => {
     const estouro = erroSeAplicar(state.tasks, { ...state.meta, startDate: dados.dataInicio, statusDate: dados.dataStatus, opcoesCronograma: opcoesNovas })
     if (estouro) return { ok: false, erros: [estouro] }
     const meta = state.meta
+    const chaveAntes = chaveDaObra(meta)
     meta.name = dados.nome.trim()
     meta.manager = (dados.responsavel ?? '').trim()
     if (dados.dataInicio !== meta.startDate) {
@@ -1875,12 +2111,20 @@ export const useProjectStore = defineStore('project', () => {
         log('sistema', 'Feriados de outro local removidos', `${fora.length} feriado(s) estadual(is) ou municipal(is) de outra UF ou município saíram da obra.`)
       }
     }
+    // Mudou a UF, o regime ou a data-base: o recorte deixa de valer para esta obra (o recorte órfão sai na próxima gravação)
+    const mudouSinapi = !!meta.recorteSinapi && meta.recorteSinapi.chave !== chaveDaObra(meta)
+    if (mudouSinapi) {
+      delete meta.recorteSinapi
+      log('sinapi', 'Recorte SINAPI desvinculado', 'Recorte SINAPI desvinculado: UF/regime/data-base mudaram. A obra voltou ao catálogo ilustrativo.')
+    }
     if (dados.dataStatus !== meta.statusDate) setStatusDate(dados.dataStatus)
     if (dados.logicaProgresso !== undefined || dados.moverRestante !== undefined) {
       const atual = meta.opcoesCronograma
       gravarOpcoesCronograma({ logica: dados.logicaProgresso ?? atual?.logica ?? 'retida', moverRestante: dados.moverRestante ?? atual?.moverRestante ?? true })
     }
     obras.value = obras.value.map((o) => (o.id === obraAtivaId.value ? resumirObra(o.id, state, o.atualizadoEm) : o))
+    // Troca de dados SINAPI: refaz a carga (sem vínculo, vê se há recorte salvo com a nova chave)
+    if (mudouSinapi || chaveAntes !== chaveDaObra(meta)) void carregarRecorteDaObra()
     return { ok: true }
   }
 
@@ -1992,5 +2236,11 @@ export const useProjectStore = defineStore('project', () => {
     duplicarObra,
     excluirObra,
     atualizarDadosObra,
+    recorteAtual,
+    avisoRecorte,
+    recorteDisponivel,
+    importarRecorteSinapi,
+    usarRecorteDisponivel,
+    removerRecorteSinapi,
   }
 })

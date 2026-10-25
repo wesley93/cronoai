@@ -1,5 +1,6 @@
 // Tipos de domínio do CronoAI (cronograma, EVM, suprimentos e apontamentos de canteiro)
 import type { RegimeSinapi, UF } from '@/data/ufs'
+import type { RefRecorteObra } from './sinapi'
 
 export type LinkType = 'FS' | 'SS' | 'FF' | 'SF'
 
@@ -172,6 +173,8 @@ export interface ProjectMeta {
   regimeSinapi?: RegimeSinapi
   /** Data-base da tabela SINAPI (AAAA-MM). */
   dataBaseSinapi?: string
+  /** Recorte SINAPI importado nesta obra (o recorte em si fica numa store própria do IndexedDB, ciclo 00006). Ausente = catálogo ilustrativo. */
+  recorteSinapi?: RefRecorteObra
   /** Minutos de trabalho por dia, só para exibir dias (ausente = 480). */
   minutosPorDia?: number
   /** Opções de cronograma (ausente = lógica retida e mover o restante para depois da data de status). */

@@ -66,3 +66,27 @@ export const obraAtivaSalvaContem = (page: Page, trecho: string): Promise<boolea
       }),
     trecho,
   )
+
+/**
+ * Número de recortes SINAPI gravados no IndexedDB (store `recortesSinapi`, estrutura 2) e a versão da estrutura do banco.
+ * `recortes` é -1 se a store não existe (banco ainda na estrutura 1).
+ */
+export const estadoDoBanco = (page: Page): Promise<{ versao: number; recortes: number; obras: number }> =>
+  page.evaluate(
+    () =>
+      new Promise<{ versao: number; recortes: number; obras: number }>((resolve, reject) => {
+        const abrir = indexedDB.open('cronoai')
+        abrir.onerror = () => reject(abrir.error)
+        abrir.onsuccess = () => {
+          const db = abrir.result
+          const nomes = ['obras', 'recortesSinapi'].filter((n) => db.objectStoreNames.contains(n))
+          const tx = db.transaction(nomes, 'readonly')
+          const contar = (n: string) => new Promise<number>((r) => (nomes.includes(n) ? (tx.objectStore(n).count().onsuccess = (e) => r((e.target as IDBRequest<number>).result)) : r(-1)))
+          Promise.all([contar('obras'), contar('recortesSinapi')]).then(([obras, recortes]) => {
+            const versao = db.version
+            db.close()
+            resolve({ versao, recortes, obras })
+          })
+        }
+      }),
+  )
