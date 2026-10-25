@@ -24,7 +24,7 @@ inicio: 2026-10-25
   - abrir o PR e conferir o job "Backend: build e testes (.NET)" e o CodeQL C# verdes (AC-8, AC-10);
   - depois da 1ª execução verde, incluir o job novo na proteção da `master`;
   - levar à **Segurança da Informação**, ao **Jurídico** e à **Infraestrutura** os itens da última seção.
-- **Estado:** aprovado na validação local; auditoria independente abaixo; AC-8 e AC-10 só no PR.
+- **Estado:** aprovado. Validadores e auditoria independente aprovados (adfb2f3); AC-8 e AC-10 só no PR.
 
 ## Pedido
 "Pode fazer todas as fases" → PLANO-FASE-2, ciclo 00011.
@@ -54,7 +54,7 @@ inicio: 2026-10-25
 | 02 (2840245/d654714) | só AC-8/AC-10 NOT_RUN (PR) | APROVADO, com a emenda 03 registrada | — | APROVADO (1 baixo: R08, corrigido em 0d89b9f) |
 | auditoria r01 (0d89b9f) | — | — | — | REPROVADO: 1 médio (AC-13 E2E) + 8 baixos → rodada 03 (0fbecb6) e registro |
 
-### Matriz de verificação (HEAD 0d89b9f)
+### Matriz de verificação (HEAD adfb2f3; reexecutada pela auditoria)
 
 | Item | Requisito | Verificação | Obrig. | Estado | Evidência |
 |---|---|---|---|---|---|
@@ -85,7 +85,7 @@ inicio: 2026-10-25
 | S-4 | Workflow mínimo | actionlint + leitura | sim | PASS | `contents: read`; `persist-credentials: false`; sem `secrets.`, deploy ou push; Ryuk por digest no job |
 | S-5 | Compose endurecido | leitura + subida real | sim | PASS | 127.0.0.1, `no-new-privileges`, `cap_drop ALL` + mínimos, `read_only` + tmpfs, `restart: "no"`, healthcheck exige o papel |
 | S-6 / S-7 | Logs sem dado sensível; sem detalhe interno | greps + testes | sim | PASS | sem `EnableSensitiveDataLogging`/`UseHttpLogging`; `IncludeErrorDetail` só em dev |
-| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | (pendente) | — |
+| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | PASS | **APROVADO** na reauditoria (adfb2f3): nenhum achado; EVIDENCIAS-CONFERIDAS 24 de 25. A 25ª é o E2E, que o auditor não pôde reexecutar por instrução (porta compartilhada); entre 0d89b9f e adfb2f3 nenhum arquivo de `src/`, `e2e/`, `Dockerfile`, `nginx` ou `package*.json` mudou. Reexecutou: restore travado, format, build Release (0 avisos), `dotnet test` 24/24, diff do OpenAPI vazio, modelo sem pendência, sem vulneráveis, `validar-regras` 0 bloqueia, R08 16/16 + 16/16 + 12/12, `docker build` do front sem `server/` (uid 101) |
 
 ## Ressalvas dos validadores e destino
 | Origem | Ressalva | Destino |
@@ -120,6 +120,8 @@ inicio: 2026-10-25
 | auditoria r01 | `Ssl Mode` desligado só no local | `SSL Mode=Disable` só nas strings locais e na fixture; produção com a Infra (0fbecb6) |
 
 ## Pendências registradas
+- **Teste da R08 fora da CI:** roda só pelo comando do `.claude/scripts/README.md`. Levar para a CI num ciclo de processo.
+- **Region fora da lista do ADR:** `ErrosTestes.cs` usa "Tipos auxiliares", que o ADR 00004 não lista. É estilo; alinhar no 00012.
 - **Cobertura do backend não é coletada:** o `coverlet.collector` foi removido porque não mede sob o Microsoft.Testing.Platform. A extensão de cobertura do MTP é dependência nova, num próximo ciclo.
 - **Ryuk:** publica a porta em 0.0.0.0 na máquina do dev (comportamento do Testcontainers). Mitigação de estação (IP padrão do Docker, firewall) com Infra/Segurança.
 - **Não idempotente:** o bootstrap só roda em volume vazio; `docker compose up -d` sem `--wait` sai 0 com o `db` em `Exited (1)`. O `--wait` está documentado.
