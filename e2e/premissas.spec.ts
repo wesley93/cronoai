@@ -49,3 +49,35 @@ test('suprimentos: a margem da DLP é só leitura e vem das premissas', async ({
   await expect(page.getByText('dias (definida nas premissas da obra)')).toBeVisible()
   await expect(page.getByLabel('Margem de segurança em dias')).toHaveText('3')
 })
+
+test('hora extra por frente: escolher a 03.01.02 custa R$ 4.162 e recupera 2 d.u.; aplicar e desfazer volta a 23/06/27', async ({ page }) => {
+  await page.goto('/#/caminho-critico')
+  const he = cartaoCenario(page, 'Hora Extra (Sábados)')
+  await expect(he).toContainText(`R$${ESPACO}22.315`) // todas as frentes: o resultado de sempre
+  await he.getByLabel('Escolher as frentes').check()
+  await he.getByLabel(/^Frente 03\.01\.02/).check()
+  await expect(he).toContainText(`+ R$${ESPACO}4.162`) // R$ 4.161,60
+  await expect(he).toContainText('−2')
+  await expect(he).toContainText('nas frentes 03.01.02')
+  await he.getByRole('button', { name: 'Aplicar no cronograma' }).click()
+  await expect(kpi(page, 'Entrega das chaves')).toContainText('21/06/27')
+  // o calendário derivado aparece na aba de calendários
+  await page.getByRole('navigation').getByRole('button', { name: /Premissas/ }).click()
+  await page.getByRole('tab', { name: 'Calendários' }).click()
+  await expect(page.getByLabel('Calendário', { exact: true })).toContainText('Padrão Obra (seg-sex, 8h) + HE 24/10 e 31/10')
+  await page.getByRole('navigation').getByRole('button', { name: /Caminho Crítico/ }).click()
+  await cartaoCenario(page, 'Hora Extra (Sábados)').getByRole('button', { name: 'Desfazer cenário' }).click()
+  await expect(kpi(page, 'Entrega das chaves')).toContainText('23/06/27')
+  await page.getByRole('navigation').getByRole('button', { name: /Premissas/ }).click()
+  await page.getByRole('tab', { name: 'Calendários' }).click()
+  await expect(page.getByLabel('Calendário', { exact: true })).not.toContainText('HE 24/10')
+})
+
+test('hora extra em meio período: 1 d.u. e R$ 11.158 (4 h de sábado, adicional de 50%)', async ({ page }) => {
+  await page.goto('/#/caminho-critico')
+  const he = cartaoCenario(page, 'Hora Extra (Sábados)')
+  await he.getByLabel('Jornada do sábado').selectOption('meio')
+  await expect(he).toContainText('(4 h, adicional de 50%)')
+  await expect(he).toContainText(`+ R$${ESPACO}11.158`)
+  await expect(he).toContainText('−1')
+})

@@ -82,3 +82,13 @@ describe('PR-1: DLP e EVM do Aurora', () => {
     expect(forecast.projectFinish).toBe('2027-06-23')
   })
 })
+
+describe('PR-7: hora extra com todas as frentes e sábado inteiro reproduz o PR-1', () => {
+  it('{ saturdays: 2, jornada: integral, frentes: todas }: 2 d.u., R$ 22.315,20, 64 profissionais-dia, 2027-06-21', () => {
+    const h = simulateAll(ctx, { crashing: { addOfficials: 2, addServentes: 1 }, fastTracking: { lagDays: 3 }, overtime: { saturdays: 2, jornada: 'integral', frentes: 'todas' } }).overtime
+    expect(h.addedWorkingDays).toEqual(['2026-10-24', '2026-10-31'])
+    expect([h.daysRecovered, h.newFinish, h.details[0].value]).toEqual([2, '2027-06-21', '64'])
+    expect(h.extraCost).toBeCloseTo(22315.2, 2)
+    expect(h.netImpact).toBeCloseTo(2615.2, 2)
+  })
+})

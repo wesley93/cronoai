@@ -47,6 +47,7 @@ import {
   compilarCalendarios,
   copiarCalendario,
   diasParaMinutos,
+  intervalosDaPredefinicao,
   erroDoCalendario,
   erroDoNomeCalendario,
   proximoUidCalendario,
@@ -63,6 +64,7 @@ import {
   analyzeDelay,
   crashingTargets,
   fastTrackOptions,
+  overtimeTargets,
   recommendScenario,
   simulateAll,
   workingVariance,
@@ -629,8 +631,8 @@ export const useProjectStore = defineStore('project', () => {
   )
   const scenarioOptions = computed(() =>
     tentar(
-      () => ({ crashing: crashingTargets(scenarioCtx.value), fastTracking: fastTrackOptions(scenarioCtx.value) }),
-      () => ({ crashing: [], fastTracking: [] }),
+      () => ({ crashing: crashingTargets(scenarioCtx.value), fastTracking: fastTrackOptions(scenarioCtx.value), overtime: overtimeTargets(scenarioCtx.value, scenarioParams.overtime.saturdays) }),
+      () => ({ crashing: [], fastTracking: [], overtime: [] }),
     ),
   )
   const recommendation = computed(() => recommendScenario(scenarios.value, state.appliedScenarios))
@@ -849,15 +851,26 @@ export const useProjectStore = defineStore('project', () => {
 
   function applyScenario(result: ScenarioResult): ResultadoAcao {
     if (!result.applicable || state.appliedScenarios.includes(result.kind)) return { ok: false, erro: 'Este cenário não pode ser aplicado agora.' }
-    // Hipótese: a tarefa alterada e o calendário com os dias extras; recusa se estourar o horizonte
-    const tarefasHipotese = result.taskPatch ? state.tasks.map((t) => (t.uid === result.taskPatch!.uid ? { ...t, ...clone(result.taskPatch!.patch) } : t)) : state.tasks
-    const calendariosHipotese = result.addedWorkingDays?.length
-      ? state.calendarios.map((c) => (c.uid === state.calendarioPadraoUid ? comDiasExtras(c, result.addedWorkingDays!) : c))
-      : state.calendarios
+    // Hora extra: sábados no calendário padrão (todas as frentes; meio período = 08:00–12:00) ou calendários derivados só para as frentes escolhidas
+    const he = result.horaExtra
+    const expedienteHE = he?.jornada === 'meio' ? intervalosDaPredefinicao('quatro-horas') : undefined
+    const novos = he?.calendariosNovos ?? []
+    const atribuicoes = he?.atribuicoes ?? []
+    if (novos.some((n) => state.calendarios.some((c) => c.uid === n.uid))) return { ok: false, erro: 'Os calendários mudaram desde a simulação: confira o cenário e aplique de novo.' }
+    // Hipótese: a tarefa alterada e os calendários com os dias extras; recusa se estourar o horizonte
+    const comPatch = result.taskPatch ? state.tasks.map((t) => (t.uid === result.taskPatch!.uid ? { ...t, ...clone(result.taskPatch!.patch) } : t)) : state.tasks
+    const tarefasHipotese = atribuicoes.length ? comPatch.map((t) => { const a = atribuicoes.find((x) => x.uid === t.uid); return a ? { ...t, calendarioUid: a.calendarioUid } : t }) : comPatch
+    const calendariosHipotese = [
+      ...(result.addedWorkingDays?.length ? state.calendarios.map((c) => (c.uid === state.calendarioPadraoUid ? comDiasExtras(c, result.addedWorkingDays!, expedienteHE) : c)) : state.calendarios),
+      ...clone(novos),
+    ]
     const erro = erroSeAplicar(tarefasHipotese, state.meta, calendariosHipotese)
     if (erro) return { ok: false, erro }
     const costId = uid('cost')
-    const undo: ScenarioUndo = { kind: result.kind, costId, result: clone(result) }
+    // O resultado guardado para o "desfazer" e o comparativo não leva os calendários inteiros (ficam só na obra)
+    const guardado = clone(result)
+    if (guardado.horaExtra) guardado.horaExtra.calendariosNovos = []
+    const undo: ScenarioUndo = { kind: result.kind, costId, result: guardado }
     if (result.taskPatch) {
       const t = taskByUid.value.get(result.taskPatch.uid)!
       const before: Partial<Task> = {}
@@ -868,7 +881,13 @@ export const useProjectStore = defineStore('project', () => {
     }
     if (result.addedWorkingDays?.length) {
       undo.addedDays = [...result.addedWorkingDays]
-      atualizarCalendarioPadrao((c) => comDiasExtras(c, result.addedWorkingDays!))
+      atualizarCalendarioPadrao((c) => comDiasExtras(c, result.addedWorkingDays!, expedienteHE))
+    }
+    if (novos.length) {
+      undo.calendariosCriados = novos.map((n) => n.uid)
+      undo.calendariosAntes = atribuicoes.map((a) => ({ uid: a.uid, ...(taskByUid.value.get(a.uid)?.calendarioUid !== undefined ? { calendarioUid: taskByUid.value.get(a.uid)!.calendarioUid } : {}) }))
+      state.calendarios = [...state.calendarios, ...clone(novos)]
+      state.tasks = state.tasks.map((t) => { const a = atribuicoes.find((x) => x.uid === t.uid); return a ? { ...t, calendarioUid: a.calendarioUid } : t })
     }
     const amount = Math.round(result.extraCost)
     state.recoveryCosts.push({ id: costId, scenario: result.kind, label: result.title, amount })
@@ -888,6 +907,16 @@ export const useProjectStore = defineStore('project', () => {
     const u = state.undo[idx]
     if (u.taskUid !== undefined && u.before) patchTask(u.taskUid, clone(u.before))
     if (u.addedDays) atualizarCalendarioPadrao((c) => semDiasExtras(c, u.addedDays!))
+    // Hora extra por frente: cada tarefa volta ao calendário de antes e os calendários derivados saem da obra
+    if (u.calendariosAntes?.length) {
+      state.tasks = state.tasks.map((t) => {
+        const antes = u.calendariosAntes!.find((a) => a.uid === t.uid)
+        if (!antes) return t
+        const { calendarioUid: _derivado, ...resto } = t
+        return antes.calendarioUid === undefined ? resto : { ...resto, calendarioUid: antes.calendarioUid }
+      })
+    }
+    if (u.calendariosCriados?.length) state.calendarios = state.calendarios.filter((c) => !u.calendariosCriados!.includes(c.uid))
     state.recoveryCosts = state.recoveryCosts.filter((c) => c.id !== u.costId)
     state.appliedScenarios = state.appliedScenarios.filter((k) => k !== kind)
     state.undo.splice(idx, 1)

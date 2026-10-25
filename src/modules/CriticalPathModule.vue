@@ -40,6 +40,27 @@ const fastLink = computed({
     params.fastTracking.succUid = s
   },
 })
+// Hora extra: jornada do sábado (inteira ou meio período) e frentes (todas no calendário padrão, ou só as escolhidas)
+const modoFrentes = computed({
+  get: () => (Array.isArray(params.overtime.frentes) ? 'escolher' : 'todas'),
+  set: (v: string) => {
+    params.overtime.frentes = v === 'escolher' ? [] : 'todas'
+  },
+})
+const frentesEscolhidas = computed(() => (Array.isArray(params.overtime.frentes) ? params.overtime.frentes : []))
+const frentesDisponiveis = computed(() =>
+  project.scenarioOptions.overtime.map((o) => ({ ...o, uid: Number(o.value), wbs: project.taskByUid.get(Number(o.value))?.wbs ?? '' })),
+)
+const pacotesDasFrentes = computed(() => project.tasksByWbs.filter((t) => t.isSummary && frentesDisponiveis.value.some((f) => f.wbs.startsWith(t.wbs + '.'))))
+function alternarFrente(uid: number, marcada: boolean) {
+  const atuais = frentesEscolhidas.value.filter((u) => u !== uid)
+  params.overtime.frentes = marcada ? [...atuais, uid] : atuais
+}
+function selecionarPacote(wbs: string) {
+  if (!wbs) return
+  const doPacote = frentesDisponiveis.value.filter((f) => f.wbs.startsWith(wbs + '.')).map((f) => f.uid)
+  params.overtime.frentes = [...new Set([...frentesEscolhidas.value, ...doPacote])]
+}
 const crashTrade = computed(() => {
   const uid = project.scenarios.crashing.targetUid
   const t = uid !== undefined ? project.taskByUid.get(uid) : undefined
@@ -192,6 +213,37 @@ const shortName = (name: string) => name.replace('Alvenaria de vedação bloco c
           <template v-else #controls>
             <div class="flex justify-between text-[11px]"><span class="text-zinc-500">Sábados convocados (a partir da data de status)</span><strong class="tabular-nums">{{ params.overtime.saturdays }}</strong></div>
             <input v-model.number="params.overtime.saturdays" type="range" min="1" max="8" class="w-full" aria-label="Quantidade de sábados" />
+            <div>
+              <label class="label" for="he-jornada">Jornada do sábado</label>
+              <select id="he-jornada" v-model="params.overtime.jornada" class="input py-1.5 text-xs">
+                <option value="integral">Dia inteiro (jornada do dia útil)</option>
+                <option value="meio">Meio período (4 h, 08:00–12:00)</option>
+              </select>
+            </div>
+            <fieldset class="space-y-1.5 text-[12px]">
+              <legend class="label">Frentes convocadas</legend>
+              <label class="flex items-start gap-2"><input v-model="modoFrentes" type="radio" value="todas" class="mt-0.5 accent-amber-500" /> Todas as frentes (os sábados entram no calendário padrão)</label>
+              <label class="flex items-start gap-2"><input v-model="modoFrentes" type="radio" value="escolher" class="mt-0.5 accent-amber-500" /> Escolher as frentes</label>
+            </fieldset>
+            <div v-if="modoFrentes === 'escolher'" class="space-y-2" data-testid="he-frentes">
+              <p class="text-[11px] text-zinc-500">Só as frentes com trabalho nos sábados convocados aparecem (● = no caminho crítico). Sábado já útil no calendário da frente não é hora extra.</p>
+              <div v-if="pacotesDasFrentes.length">
+                <label class="label" for="he-pacote">Selecionar um pacote inteiro</label>
+                <select id="he-pacote" class="input py-1.5 text-xs" @change="selecionarPacote(($event.target as HTMLSelectElement).value)">
+                  <option value="">Escolha um pacote</option>
+                  <option v-for="p in pacotesDasFrentes" :key="p.uid" :value="p.wbs">{{ p.wbs }} {{ p.name }}</option>
+                </select>
+              </div>
+              <ul class="max-h-40 space-y-1 overflow-auto">
+                <li v-for="f in frentesDisponiveis" :key="f.uid">
+                  <label class="flex items-start gap-2 text-[12px]">
+                    <input type="checkbox" class="mt-0.5 accent-amber-500" :checked="frentesEscolhidas.includes(f.uid)" :aria-label="`Frente ${f.label}`" @change="alternarFrente(f.uid, ($event.target as HTMLInputElement).checked)" />
+                    <span>{{ f.critical ? '● ' : '' }}{{ f.label }}</span>
+                  </label>
+                </li>
+                <li v-if="!frentesDisponiveis.length" class="text-[11px] text-zinc-500">Nenhuma frente com trabalho nos sábados convocados.</li>
+              </ul>
+            </div>
           </template>
         </ScenarioCard>
       </div>

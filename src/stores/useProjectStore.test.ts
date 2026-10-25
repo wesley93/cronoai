@@ -480,3 +480,102 @@ describe('useProjectStore · feriados da obra, calendários e prévias (ciclo 00
     expect(store.previaAplicarFeriados(99)).toEqual({ erro: 'O calendário não existe nesta obra.' })
   })
 })
+
+describe('useProjectStore · hora extra por frente e meio período (ciclo 00005, E4)', () => {
+  beforeEach(() => {
+    globalThis.localStorage?.clear?.() // Node 26 pode expor localStorage indefinido
+    setActivePinia(createPinia())
+  })
+
+  it('PR-13: aplicar a hora extra na frente {104} cria o calendário derivado e desfazer devolve tudo (entrega 23/06/2027, custo removido)', () => {
+    const store = useProjectStore()
+    store.scenarioParams.overtime.frentes = [104]
+    const r = store.scenarios.overtime
+    expect(r.extraCost).toBeCloseTo(4161.6, 2)
+    const antes = JSON.parse(JSON.stringify(store.state.calendarios))
+    expect(store.applyScenario(r)).toEqual({ ok: true })
+    // calendário derivado uid 2 só no 104; o padrão e as outras tarefas não mudam
+    expect(store.state.calendarios.map((c) => [c.uid, c.nome, c.origem, c.derivadoDe])).toEqual([
+      [1, 'Padrão Obra (seg-sex, 8h)', undefined, undefined],
+      [2, 'Padrão Obra (seg-sex, 8h) + HE 24/10 e 31/10', 'hora-extra', 1],
+    ])
+    expect(store.state.calendarios[0]).toEqual(antes[0])
+    expect(store.taskByUid.get(104)?.calendarioUid).toBe(2)
+    expect(store.taskByUid.get(302)?.calendarioUid).toBeUndefined()
+    expect(store.schedule.projectFinish).toBe('2027-06-21')
+    expect(store.schedule.byUid.get(104)!.finish).toBe('2026-11-03')
+    expect(store.state.recoveryCosts.map((c) => c.amount)).toEqual([4162]) // Math.round(4.161,60): dívida registrada
+    // o resultado guardado para o desfazer não leva o calendário inteiro
+    expect(store.appliedResult('overtime')?.horaExtra?.calendariosNovos).toEqual([])
+    expect(store.state.undo[0]).toMatchObject({ kind: 'overtime', calendariosCriados: [2], calendariosAntes: [{ uid: 104 }] })
+    expect(store.excluirCalendario(2).ok).toBe(false) // só sai pelo desfazer
+    store.undoScenario('overtime')
+    expect(store.state.calendarios).toEqual(antes)
+    expect(store.taskByUid.get(104)?.calendarioUid).toBeUndefined()
+    expect(store.schedule.projectFinish).toBe('2027-06-23')
+    expect(store.state.recoveryCosts).toEqual([])
+    expect(store.state.appliedScenarios).toEqual([])
+  })
+
+  it('desfazer devolve a frente ao calendário que ela tinha antes (calendário próprio)', () => {
+    const store = useProjectStore()
+    store.criarCalendario({ nome: 'Fachada' })
+    store.atribuirCalendario([104], 2)
+    store.scenarioParams.overtime.frentes = [104]
+    const r = store.scenarios.overtime
+    expect(r.applicable).toBe(true)
+    expect(r.horaExtra?.calendariosNovos[0].nome).toBe('Fachada + HE 24/10 e 31/10')
+    expect(r.horaExtra?.calendariosNovos[0].uid).toBe(3)
+    expect(store.applyScenario(r)).toEqual({ ok: true })
+    expect(store.taskByUid.get(104)?.calendarioUid).toBe(3)
+    store.undoScenario('overtime')
+    expect(store.taskByUid.get(104)?.calendarioUid).toBe(2)
+    expect(store.state.calendarios.map((c) => c.uid)).toEqual([1, 2])
+  })
+
+  it('meio período, todas as frentes: sábados 08:00–12:00 no padrão, 1 d.u., entrega 22/06/2027; desfazer deixa o calendário como estava', () => {
+    const store = useProjectStore()
+    store.scenarioParams.overtime.jornada = 'meio'
+    const r = store.scenarios.overtime
+    expect([r.daysRecovered, r.newFinish]).toEqual([1, '2027-06-22'])
+    expect(r.extraCost).toBeCloseTo(11157.6, 2)
+    const antes = JSON.parse(JSON.stringify(store.state.calendarios))
+    expect(store.applyScenario(r)).toEqual({ ok: true })
+    const extras = store.state.calendarios[0].excecoes.filter((e) => e.intervalos.length > 0)
+    expect(extras.map((e) => [e.data, e.intervalos])).toEqual([
+      ['2026-10-24', [{ de: 480, ate: 720 }]],
+      ['2026-10-31', [{ de: 480, ate: 720 }]],
+    ])
+    expect(store.schedule.projectFinish).toBe('2027-06-22')
+    expect(store.schedule.byUid.get(104)!.finish).toBe('2026-11-04')
+    store.undoScenario('overtime')
+    expect(store.state.calendarios).toEqual(antes)
+    expect(store.schedule.projectFinish).toBe('2027-06-23')
+  })
+
+  it('o PV não conta o sábado de hora extra, nem o derivado: EVM igual antes e depois (CR-2d)', () => {
+    const store = useProjectStore()
+    const pv = store.evm.pv
+    store.scenarioParams.overtime.frentes = [104]
+    store.applyScenario(store.scenarios.overtime)
+    expect(store.evm.pv).toBeCloseTo(pv, 2)
+  })
+
+  it('aplicar um resultado cujos calendários já existem na obra é recusado (a simulação ficou velha)', () => {
+    const store = useProjectStore()
+    store.scenarioParams.overtime.frentes = [104]
+    const r = store.scenarios.overtime
+    store.criarCalendario({ nome: 'Outro' }) // ocupa o UID 2 depois da simulação
+    expect(store.applyScenario(r)).toEqual({ ok: false, erro: 'Os calendários mudaram desde a simulação: confira o cenário e aplique de novo.' })
+    expect(store.state.appliedScenarios).toEqual([])
+  })
+
+  it('as frentes disponíveis da hora extra vêm da store e o reset volta a "todas as frentes"', () => {
+    const store = useProjectStore()
+    expect(store.scenarioOptions.overtime.map((o) => o.value)).toEqual(['104', '302'])
+    store.scenarioParams.overtime.frentes = [302]
+    store.scenarioParams.overtime.jornada = 'meio'
+    store.resetScenarioParams()
+    expect(store.scenarioParams.overtime).toEqual({ saturdays: 2, jornada: 'integral', frentes: 'todas' })
+  })
+})

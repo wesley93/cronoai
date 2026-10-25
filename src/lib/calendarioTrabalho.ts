@@ -416,9 +416,12 @@ export function calendarioDeDias(cal: CalendarioCompilado): WorkCalendar {
 
 const porData = (a: ExcecaoCalendario, b: ExcecaoCalendario) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0)
 
-/** Cópia do calendário com dias úteis extras (exceções úteis no expediente de um dia útil comum). */
-export function comDiasExtras(cal: CalendarioObra, dias: string[]): CalendarioObra {
-  const expediente = expedienteDoDiaUtil(cal)
+/**
+ * Cópia do calendário com dias úteis extras (exceções úteis). Sem `expedienteDoDia`, no expediente de um dia útil comum do calendário
+ * (jornada integral); com ele, nesse horário (ex.: sábado de meio período, 08:00–12:00).
+ */
+export function comDiasExtras(cal: CalendarioObra, dias: string[], expedienteDoDia?: readonly IntervaloTrabalho[]): CalendarioObra {
+  const expediente = expedienteDoDia ?? expedienteDoDiaUtil(cal)
   const novos = new Set(dias)
   const mantidas = cal.excecoes.filter((ex) => !novos.has(ex.data))
   return {

@@ -585,3 +585,40 @@ describe('propriedades do cálculo (RNF-05.2, 200 redes aleatórias com semente 
     }
   })
 })
+
+// Ciclo 00005, PR-15: o lag útil que chega a uma frente com calendário derivado de hora extra é contado no calendário da sucessora
+// (regra P1 emendada do ciclo 00004) e consome o sábado de hora extra.
+describe('lag com calendário derivado de hora extra (PR-15)', () => {
+  const base = calendarioPadrao([])
+  const comSabado = (uid: number, intervalos: { de: number; ate: number }[]): CalendarioObra => ({
+    ...base,
+    uid,
+    nome: `Derivado ${uid}`,
+    excecoes: [{ data: '2026-10-24', intervalos }],
+  })
+  const inteiro = comSabado(2, [{ de: 480, ate: 720 }, { de: 780, ate: 1020 }])
+  const meio = comSabado(3, [{ de: 480, ate: 720 }])
+  const a = tarefa(1, 5) // 5 d desde seg 19/10 08:00: termina sex 23/10 17:00
+  const b = (calendarioUid?: number) => tarefa(2, 1, { predecessors: [liga(1, 'FS', 1)], ...(calendarioUid ? { calendarioUid } : {}) }) // lag útil de 1 d (480 min)
+  const inicioDeB = (calendarios: CalendarioObra[], calendarioUid?: number) => {
+    const s = computeSchedule([a, b(calendarioUid)], compilarCalendarios('2026-10-19', calendarios, 1), { mode: 'baseline' }).byUid.get(2)!
+    return `${s.start} ${s.inicioHora}`
+  }
+
+  it('B no calendário derivado com o sábado inteiro: o lag consome o sábado e B começa seg 26/10 08:00', () => {
+    expect(inicioDeB([base, inteiro], 2)).toBe('2026-10-26 08:00')
+  })
+  it('B no derivado de meio período (sábado 08:00–12:00): 4 h no sábado e 4 h na segunda; B começa seg 26/10 13:00', () => {
+    expect(inicioDeB([base, meio], 3)).toBe('2026-10-26 13:00')
+  })
+  it('B no padrão sem hora extra: o lag de 1 d é a segunda inteira e B começa ter 27/10 08:00', () => {
+    expect(inicioDeB([base])).toBe('2026-10-27 08:00')
+  })
+  it('hora extra "todas as frentes" (sábado no calendário padrão) e B no padrão: B começa seg 26/10 08:00', () => {
+    const padraoComSabado: CalendarioObra = { ...base, excecoes: [{ data: '2026-10-24', intervalos: [{ de: 480, ate: 720 }, { de: 780, ate: 1020 }] }] }
+    expect(inicioDeB([padraoComSabado])).toBe('2026-10-26 08:00')
+  })
+  it('lag que chega a tarefa no padrão não conta o sábado do derivado de outra frente', () => {
+    expect(inicioDeB([base, inteiro])).toBe('2026-10-27 08:00') // B no padrão; o derivado existe mas não é o dela
+  })
+})
