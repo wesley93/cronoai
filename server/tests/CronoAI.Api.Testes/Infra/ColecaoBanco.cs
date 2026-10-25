@@ -4,5 +4,9 @@ namespace CronoAI.Api.Testes.Infra;
 [CollectionDefinition(Nome)]
 public sealed class ColecaoBanco : ICollectionFixture<BancoPostgresFixture>
 {
+    #region Campos
+
     public const string Nome = "Banco";
+
+    #endregion
 }

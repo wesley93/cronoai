@@ -28,6 +28,12 @@ public sealed class ErrosTestes
         Assert.DoesNotContain("detalhe-secreto", corpo, StringComparison.Ordinal);
         Assert.DoesNotContain("at ", corpo, StringComparison.Ordinal);
         Assert.DoesNotContain("InvalidOperationException", corpo, StringComparison.Ordinal);
+
+        // AC-7: a resposta de erro (o handler limpa os cabeçalhos antes de escrever o ProblemDetails) também os traz.
+        Assert.Equal("nosniff", Assert.Single(resposta.Headers.GetValues("X-Content-Type-Options")));
+        Assert.Equal("no-store", Assert.Single(resposta.Headers.GetValues("Cache-Control")));
+        Assert.Equal("default-src 'none'; frame-ancestors 'none'", Assert.Single(resposta.Headers.GetValues("Content-Security-Policy")));
+        Assert.Equal("no-referrer", Assert.Single(resposta.Headers.GetValues("Referrer-Policy")));
     }
 
     [Fact]

@@ -137,6 +137,8 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
             Database = _bancoNome,
             Username = usuario,
             Password = senha,
+            // TLS desligado só aqui: PostgreSQL descartável em 127.0.0.1, sem TLS. Em produção o TLS é da Infraestrutura.
+            SslMode = SslMode.Disable,
             Timeout = 15,
             CommandTimeout = 30,
             MaxPoolSize = 20,

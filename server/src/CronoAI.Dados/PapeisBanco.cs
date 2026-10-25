@@ -7,6 +7,8 @@ namespace CronoAI.Dados;
 /// </summary>
 public static class PapeisBanco
 {
+    #region Campos
+
     /// <summary>Schema único da aplicação; dono: <see cref="Migrador"/>.</summary>
     public const string Schema = "cronoai";
 
@@ -18,4 +20,6 @@ public static class PapeisBanco
 
     /// <summary>Nome fixo da tabela de histórico de migrações, no schema <see cref="Schema"/>.</summary>
     public const string HistoricoMigracoes = "__ef_migrations_history";
+
+    #endregion
 }

@@ -370,15 +370,36 @@ const SEGREDO_LITERAL = [
   { re: /\bgithub_pat_[A-Za-z0-9_]{20,}/, nome: 'token do GitHub' },
   { re: /\bxox[bp]-[A-Za-z0-9-]{10,}/, nome: 'token do Slack' },
 ]
-const SENHA_LITERAL = /\b(password|senha|passwd|pwd)\s*[:=]\s*['"][^'"\s]+['"]/i
-// String de conexao (Npgsql/ADO.NET): Password=valor / Pwd = valor (espaco opcional em volta do =).
-// So conta quando a linha tem cara de string de conexao (';' antes da chave ou outra chave como Host=/Database=),
-// para nao acusar inicializador C# (`Password = senha,`). Placeholders reais (<...>, ${...}, $VAR em maiusculas, %L, {0}) nao contam.
-const SENHA_CONEXAO = /\b([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Ww][Dd])\s*=\s*(?!<[^>]*>|\$\{|\$[A-Z_][A-Z0-9_]*(?![a-z])|%[A-Za-z]\b|\{\d*\})[^\s;'"]+/
-const CONTEXTO_CONEXAO = /(;\s*(password|pwd)\s*=)|\b(host|server|database|username|user id|uid)\s*=/i
-// JSON com chave de senha: "Password": "valor"
-const SENHA_JSON = /"(password|pwd|senha|passwd)"\s*:\s*"(?!<[^>]*>|\$\{)[^"\s]+"/i
-const senhaEmConexao = (texto) => SENHA_CONEXAO.test(texto) && CONTEXTO_CONEXAO.test(texto)
+// R08 senha literal. Três formas, todas com o VALOR extraído para decidir se é placeholder:
+//  1. atribuição com aspas (password: 'x', senha = "x");
+//  2. string de conexão (Npgsql/ADO.NET): Password=valor / Pwd = valor, valor com ou sem aspas. Só conta quando a linha tem
+//     cara de string de conexão (';' antes da chave ou outra chave como Host=/Database=), para não acusar inicializador C#
+//     (`Password = senha,`);
+//  3. JSON com chave de senha: "Password": "valor".
+const SENHA_ATRIBUICAO = /\b(?:password|senha|passwd|pwd)\s*[:=]\s*(['"])([^'"\s]+)\1/gi
+const SENHA_CONEXAO = /\b(?:password|pwd)\s*=\s*('[^']*'|"[^"]*"|[^\s;'"]+)/gi
+const CONTEXTO_CONEXAO = /(;\s*(?:password|pwd)\s*=)|\b(?:host|server|database|username|user id|uid)\s*=/i
+const SENHA_JSON = /"(?:password|pwd|senha|passwd)"\s*:\s*"([^"\s]+)"/gi
+// Valor que não é segredo: <marcador>, ${VAR}, $VAR (maiúsculas), $env:VAR (PowerShell), %L, {0} / {identificador}
+// (interpolação C#) ou palavra de exemplo NO VALOR (a palavra em outra parte da linha, ex.: host, não isenta).
+// Sem a flag i: "$VAR" só é placeholder em MAIÚSCULAS ("$ecret" é senha literal). Sem lookbehind/modificadores (Node 22).
+const VALOR_PLACEHOLDER = /^(?:<[^>]*>|\$\{[^}]*\}|\$[A-Z_][A-Z0-9_]*|\$env:\w+|%[A-Za-z]|\{[\w.]*\})$/
+const VALOR_EXEMPLO = /placeholder|exemplo|example|changeme|xxx|\*\*\*/i
+
+function valoresDeSenha(texto) {
+  const valores = []
+  for (const m of texto.matchAll(SENHA_ATRIBUICAO)) valores.push(m[2])
+  if (CONTEXTO_CONEXAO.test(texto)) {
+    for (const m of texto.matchAll(SENHA_CONEXAO)) valores.push(m[1].replace(/^(['"])(.*)\1$/, '$2'))
+  }
+  for (const m of texto.matchAll(SENHA_JSON)) valores.push(m[1])
+  return valores
+}
+
+/** Linha com senha literal (valor que não é placeholder). Exportada para o teste da regra R08. */
+export function temSenhaLiteral(texto) {
+  return valoresDeSenha(texto).some((v) => v.length > 0 && !VALOR_PLACEHOLDER.test(v) && !VALOR_EXEMPLO.test(v))
+}
 const VITE_SEGREDO = /\bVITE_\w*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|SENHA|PRIVATE|CREDENTIAL)\w*/i
 
 function achado(id, severidade, regra, arquivo, linha, mensagem, trecho) {
@@ -442,7 +463,7 @@ export function aplicarRegras({ arquivos, removidos = new Set(), novas }) {
       const seg = SEGREDO_LITERAL.find((s) => s.re.test(texto))
       if (seg) {
         achados.push(achado('R08', 'bloqueia', 'segredo no código', a, n, `${seg.nome} literal: remova, revogue a credencial e use variável de ambiente fora do bundle (CLAUDE.md › Invioláveis 5).`))
-      } else if ((SENHA_LITERAL.test(texto) || senhaEmConexao(texto) || SENHA_JSON.test(texto)) && !/(placeholder|exemplo|example|changeme|xxx|\*\*\*)/i.test(texto)) {
+      } else if (temSenhaLiteral(texto)) {
         achados.push(achado('R08', ehTeste ? 'alerta' : 'bloqueia', 'segredo no código', a, n, 'senha literal em código: nada de senha em código, fixture ou log (CLAUDE.md › Invioláveis 5).'))
       }
       // R09 VITE_ com nome de segredo: tudo que é VITE_* vai para o bundle público

@@ -8,6 +8,8 @@ namespace CronoAI.Dados;
 /// </summary>
 public static class CronoDbContextConfiguracao
 {
+    #region Métodos públicos
+
     /// <summary>Aplica Npgsql, <c>snake_case</c> e o histórico de migrações explícito no schema da aplicação.</summary>
     public static DbContextOptionsBuilder Configurar(DbContextOptionsBuilder opcoes, string stringConexao)
     {
@@ -20,4 +22,6 @@ public static class CronoDbContextConfiguracao
                 npgsql => npgsql.MigrationsHistoryTable(PapeisBanco.HistoricoMigracoes, PapeisBanco.Schema))
             .UseSnakeCaseNamingConvention();
     }
+
+    #endregion
 }

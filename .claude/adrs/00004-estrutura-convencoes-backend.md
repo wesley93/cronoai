@@ -20,11 +20,11 @@ O ciclo 00011 cria o esqueleto do backend em `server/`. Tudo o que for fixado aq
 - **Nomes no C#:** domínio em português; padrões de framework em inglês onde o framework impõe.
 
 ### Estilo do C# (aceito junto com este ADR; a regra `.claude/rules/backend-dotnet.md` apenas aponta para cá)
-- **Construtor explícito**, sem construtor primário; campos `private readonly` com nome completo derivado do tipo (ex.: `_connectionRouter` para `IConnectionRouter`).
-- **`#region`** fixos em todo tipo novo, nesta ordem quando existirem: Campos, Construtor, Propriedades, Métodos públicos, Métodos privados.
+- **Construtor explícito**, sem construtor primário; campos `private readonly` com prefixo `_` e nome descritivo e sem abreviação (ex.: `_banco`, `_stringConexao`, `_ambiente`).
+- **`#region`** fixos em todo tipo escrito à mão que tenha membros, nesta ordem quando existirem: Campos (inclui constantes), Construtor, Propriedades, Métodos públicos, Métodos protegidos, Métodos privados. Ficam de fora: código gerado (migrações e `Program.cs` com instruções de topo).
 - **Um tipo público por arquivo.**
 - Comentários em português, explicando o porquê (fórmula ou regra citada quando houver).
-- Fonte: convenção do projeto (opinião da equipe); não é exigência de framework nem regulatória. Migrações geradas pelo EF ficam fora da análise de estilo (`server/.editorconfig`).
+- Fonte: opinião da equipe (convenção do projeto); não é exigência de framework nem regulatória. Migrações geradas pelo EF ficam fora da análise de estilo (`server/.editorconfig`).
 
 ### Convenções de banco (herdadas dos ciclos 00012 a 00023; parecer do `dba`, §1)
 - **Nomes:** `snake_case` (`EFCore.NamingConventions`), tabelas no singular, sem palavras reservadas. Unidade no nome da coluna (`duracao_min`, `lag_min`, `folga_total_min`, `inicio_restricao_local`).
@@ -61,4 +61,6 @@ O ciclo 00011 cria o esqueleto do backend em `server/`. Tudo o que for fixado aq
 ## Consequências
 **Positivas:** base de segurança de banco testada em todo `dotnet test`; convenções fixadas antes da 1ª tabela; CI sem segredo.
 **Negativas / trade-offs:** exige Docker para os testes de integração; recriar papéis ou senhas locais exige `docker compose --profile backend down -v`; o `--auth-host=scram-sha-256` e a collation ICU pt-BR podem diferir do banco de produção até a Infraestrutura decidir.
+**TLS:** `SSL Mode=Disable` só nas strings de conexão **locais** documentadas no `server/README.md` (compose sem TLS), nunca no `appsettings.json`; em produção o TLS é da Infraestrutura (RF-12.7).
+**Cobertura:** o `coverlet.collector` foi removido; a cobertura do backend ainda não é coletada (extensão de cobertura do Microsoft.Testing.Platform em ciclo próprio).
 **Pendências:** revisão de segurança e licença de pacotes e imagens antes de produção; precisão de dinheiro e `time` × minutos (00015); particionamento da auditoria (00013, recomendação do `dba`: não particionar agora).

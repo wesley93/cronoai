@@ -54,14 +54,18 @@ Use `dotnet user-secrets` (fora do repositório) ou variáveis de ambiente. Nenh
 
 ```bash
 cd server/src/CronoAI.Api
-dotnet user-secrets set "ConnectionStrings:Cronoai" "Host=127.0.0.1;Port=5432;Database=cronoai;Username=cronoai_app;Password=<senha-app>;Timeout=5;Command Timeout=30;Maximum Pool Size=20"
+dotnet user-secrets set "ConnectionStrings:Cronoai" "Host=127.0.0.1;Port=5432;Database=cronoai;Username=cronoai_app;Password=<senha-app>;SSL Mode=Disable;Timeout=5;Command Timeout=30;Maximum Pool Size=20"
 ```
 
 Para as migrações use a variável do **migrador** (PowerShell: `$env:ConnectionStrings__CronoaiMigracao = "..."`):
 
 ```bash
-export ConnectionStrings__CronoaiMigracao="Host=127.0.0.1;Port=5432;Database=cronoai;Username=cronoai_migrador;Password=<senha-migrador>"
+export ConnectionStrings__CronoaiMigracao="Host=127.0.0.1;Port=5432;Database=cronoai;Username=cronoai_migrador;Password=<senha-migrador>;SSL Mode=Disable"
 ```
+
+`SSL Mode=Disable` vale **só para o PostgreSQL local** em `127.0.0.1` (o contêiner do compose não tem TLS) e fica nas strings
+locais acima, nunca no `appsettings.json`. **Em produção o TLS (e o `SSL Mode` das strings) é da Infraestrutura** (RF-12.7;
+ADR 00004).
 
 ## Comandos
 
@@ -93,7 +97,7 @@ Atualize versão e digest junto com o pacote.
 ## Pendências (fora do ciclo)
 
 - Revisão de segurança (Segurança da Informação) e de licença (Jurídico) dos pacotes e imagens antes de produção.
-- **Cobertura de testes:** o `coverlet.collector` não mede sob o Microsoft.Testing.Platform, então **hoje a cobertura do backend
-  não é coletada**. Trocar por uma extensão de cobertura do MTP é dependência nova: fica para o próximo ciclo, com revisão
-  de segurança e licença.
+- **Cobertura de testes:** o `coverlet.collector` foi removido (não mede sob o Microsoft.Testing.Platform). **A cobertura do
+  backend ainda não é coletada.** A extensão de cobertura do MTP é dependência nova: entra em ciclo próprio, com revisão de
+  segurança e licença.
 - Versão e collation do PostgreSQL de produção, TLS, HSTS e forma de aplicar migrações: Infraestrutura.

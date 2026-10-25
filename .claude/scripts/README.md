@@ -33,6 +33,9 @@ node .claude/scripts/testar-afetado.mjs --base master --pendente --lint --typech
 # Dependência nova
 node .claude/scripts/auditar-dependencias.mjs --base master
 
+# Teste da regra R08 (senha literal em string de conexão, JSON e atribuição)
+node --test .claude/scripts/lib/regras-cronoai.test.mjs
+
 # Entrega
 node .claude/scripts/gerar-changelog.mjs --base master --versao 1.1.0 > /tmp/changelog.md
 ```
