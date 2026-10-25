@@ -18,7 +18,10 @@ const avisosCarga = computed(() => (dispensado.value ? [] : project.avisosCarga)
       class="flex items-start gap-2 border-b border-coral-500/40 bg-coral-500/10 px-4 py-2 text-xs text-coral-700 dark:text-coral-300"
     >
       <TriangleAlert class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-      <p v-if="project.armazenamentoIndisponivel">
+      <p v-if="project.gravacaoBloqueada">
+        <strong>{{ project.mensagemGravacao }}</strong> Exporte para MS Project (.xml) o que não pode ser perdido e recarregue a página.
+      </p>
+      <p v-else-if="project.armazenamentoIndisponivel">
         <strong>Armazenamento local indisponível:</strong> as alterações desta sessão não serão salvas. Exporte para MS Project (.xml) antes de fechar a página.
       </p>
       <p v-else>

@@ -29,6 +29,7 @@ const dadosAtivos = computed<DadosObra>(() => {
     dataBaseSinapi: m.dataBaseSinapi ?? '',
   }
 })
+const contextoInicio = computed(() => ({ inicioOriginal: project.state.meta.startDate, primeiroInicioReal: project.primeiroInicioReal }))
 const chaveDados = computed(() => JSON.stringify(dadosAtivos.value))
 
 const unica = computed(() => project.obras.length <= 1)
@@ -153,7 +154,7 @@ function salvarDados(dados: DadosObra) {
     </div>
 
     <SectionCard title="Dados da obra ativa" subtitle="UF, município, responsável, datas e tabela SINAPI" :icon="Settings2">
-      <ObraDadosForm :key="chaveDados" :inicial="dadosAtivos" rotulo-botao="Salvar dados" id-prefixo="ativa" avisar-inicio @salvar="salvarDados" />
+      <ObraDadosForm :key="chaveDados" :inicial="dadosAtivos" rotulo-botao="Salvar dados" id-prefixo="ativa" :contexto-inicio="contextoInicio" @salvar="salvarDados" />
     </SectionCard>
   </div>
 </template>

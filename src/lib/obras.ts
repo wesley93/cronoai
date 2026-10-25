@@ -24,6 +24,13 @@ export interface DadosObra {
   dataBaseSinapi?: string
 }
 
+/** Contexto de uma edição da data de início: as regras só valem quando o início muda (obra importada já pode ter datas incoerentes). */
+export interface ContextoInicio {
+  inicioOriginal: string
+  /** Menor data de início real entre as tarefas (existe quando a obra já tem avanço). */
+  primeiroInicioReal?: string
+}
+
 export type SituacaoCota = 'ok' | 'alerta' | 'indisponivel'
 
 function dataIsoValida(iso: string): boolean {
@@ -31,7 +38,7 @@ function dataIsoValida(iso: string): boolean {
 }
 
 /** Valida os dados de uma obra; devolve as mensagens de erro em português (lista vazia = válido). */
-export function validarDadosObra(d: DadosObra): string[] {
+export function validarDadosObra(d: DadosObra, contexto?: ContextoInicio): string[] {
   const erros: string[] = []
   const nome = d.nome.trim()
   if (!nome) erros.push('Informe o nome da obra.')
@@ -41,6 +48,13 @@ export function validarDadosObra(d: DadosObra): string[] {
   if ((d.responsavel ?? '').trim().length > MAX_RESPONSAVEL) erros.push(`O responsável deve ter no máximo ${MAX_RESPONSAVEL} caracteres.`)
   if (!dataIsoValida(d.dataInicio)) erros.push('Informe uma data de início válida.')
   if (!dataIsoValida(d.dataStatus)) erros.push('Informe uma data de status válida.')
+  const inicioValido = dataIsoValida(d.dataInicio)
+  if (inicioValido && (!contexto || d.dataInicio !== contexto.inicioOriginal)) {
+    if (dataIsoValida(d.dataStatus) && d.dataInicio > d.dataStatus) erros.push('A data de início não pode ser depois da data de status.')
+    if (contexto?.primeiroInicioReal && d.dataInicio > contexto.primeiroInicioReal) {
+      erros.push(`A data de início não pode ser depois do primeiro início real da obra (${contexto.primeiroInicioReal.split('-').reverse().join('/')}).`)
+    }
+  }
   if (d.regimeSinapi && !REGIMES_SINAPI.includes(d.regimeSinapi)) erros.push('Selecione um regime SINAPI válido.')
   if (d.dataBaseSinapi && !/^\d{4}-(0[1-9]|1[0-2])$/.test(d.dataBaseSinapi)) erros.push('A data-base do SINAPI deve estar no formato AAAA-MM (ex.: 2026-09).')
   return erros

@@ -50,6 +50,33 @@ describe('validarDadosObra', () => {
   })
 })
 
+describe('validarDadosObra · data de início', () => {
+  const edicao = { inicioOriginal: '2026-05-04', primeiroInicioReal: '2026-05-06' }
+  const dados = { ...valido, dataInicio: '2026-05-04', dataStatus: '2026-10-23' }
+
+  it('na criação, o início não pode ser depois da data de status', () => {
+    expect(validarDadosObra({ ...dados, dataInicio: '2026-10-24' })).toEqual(['A data de início não pode ser depois da data de status.'])
+    expect(validarDadosObra({ ...dados, dataInicio: '2026-10-23' })).toEqual([])
+  })
+
+  it('na edição, adiar o início depois da data de status é recusado', () => {
+    expect(validarDadosObra({ ...dados, dataInicio: '2026-10-26' }, { inicioOriginal: '2026-05-04' })).toEqual([
+      'A data de início não pode ser depois da data de status.',
+    ])
+  })
+
+  it('com avanço, o início não pode passar do primeiro início real', () => {
+    expect(validarDadosObra({ ...dados, dataInicio: '2026-05-07' }, edicao)).toEqual([
+      'A data de início não pode ser depois do primeiro início real da obra (06/05/2026).',
+    ])
+    expect(validarDadosObra({ ...dados, dataInicio: '2026-05-06' }, edicao)).toEqual([])
+  })
+
+  it('sem mudar o início, datas incoerentes herdadas (ex.: .xml importado) não bloqueiam a edição de outros campos', () => {
+    expect(validarDadosObra({ ...dados, dataStatus: '2026-01-01' }, { inicioOriginal: '2026-05-04', primeiroInicioReal: '2026-01-10' })).toEqual([])
+  })
+})
+
 describe('UFS', () => {
   it('tem 27 UFs sem repetição', () => {
     expect(UFS.length).toBe(27)

@@ -27,12 +27,49 @@ describe('buildDiagnosis', () => {
     expect(args.evm.spi).toBe(1) // o número do motor não muda
     const d = buildDiagnosis(args)
     expect(d.status).toBe('sem-dados')
-    expect(d.headline).toBe('Obra sem cronograma ou orçamento para diagnosticar')
+    expect(d.headline).toBe('Obra sem cronograma para diagnosticar')
     expect(d.headline).not.toContain('sob controle')
     expect(d.paragraphs).toHaveLength(1)
-    expect(d.paragraphs[0]).toContain('não tem tarefas com orçamento (BAC)')
+    expect(d.paragraphs[0]).toContain('não tem tarefas')
     expect(d.paragraphs[0]).toContain('03/11/26')
     expect(d.actions).toEqual(['Use Importar .xml no topo para trazer o cronograma do MS Project, ou cadastre os pacotes na EAP.'])
+  })
+
+  it('tarefas sem orçamento (BAC = 0) e com atraso: some o texto de custo, o diagnóstico de prazo continua', () => {
+    const tarefa: Task = {
+      uid: 7, wbs: '01.01', name: 'Estrutura', outlineLevel: 2, isSummary: false, durationDays: 10, predecessors: [],
+      percentComplete: 0, bac: 0, actualCost: 0, resources: [], baselineStart: '2026-11-10', baselineFinish: '2026-11-23',
+    }
+    const delay: DelayAnalysis = {
+      origin: tarefa, originShift: 5, keysBaseline: '2026-12-01', keysForecast: '2026-12-08', delayDays: 5, delayCalendarDays: 7, affected: [],
+    }
+    const args = { ...argumentos([tarefa]), delay }
+    expect(args.evm.bac).toBe(0)
+    const d = buildDiagnosis(args)
+    expect(d.status).toBe('sem-orcamento')
+    expect(d.headline).toBe('Entrega prevista com atraso de 5 dias úteis — ação requerida (sem orçamento para medir custo)')
+    expect(d.headline).not.toContain('sem cronograma')
+    const texto = d.paragraphs.join(' ')
+    expect(texto).not.toContain('Importar .xml')
+    expect(d.actions.join(' ')).not.toContain('Importar .xml')
+    // custo e valor agregado não aparecem
+    expect(texto).not.toMatch(/SPI \d|CPI \d|EAC =|estouro|Valor Agregado \(EV\)/)
+    expect(d.paragraphs[0]).toContain('não têm orçamento (BAC)')
+    // prazo pelo CPM: caminho crítico com os d.u. e a ação de recuperação
+    expect(texto).toContain('No caminho crítico, [UID 7] Estrutura está a 0%')
+    expect(texto).toContain('de 01/12/26 para 08/12/26 (+5 dias úteis)')
+    expect(d.actions).toEqual(['Aprovar plano de recuperação no módulo Caminho Crítico (comparar Crashing, Fast Tracking e Hora Extra).'])
+  })
+
+  it('tarefas sem orçamento e sem atraso: prazo dentro da linha de base', () => {
+    const tarefa: Task = {
+      uid: 7, wbs: '01.01', name: 'Estrutura', outlineLevel: 2, isSummary: false, durationDays: 10, predecessors: [],
+      percentComplete: 0, bac: 0, actualCost: 0, resources: [], baselineStart: '2026-11-10', baselineFinish: '2026-11-23',
+    }
+    const d = buildDiagnosis(argumentos([tarefa]))
+    expect(d.status).toBe('sem-orcamento')
+    expect(d.headline).toBe('Prazo dentro da linha de base (sem orçamento para medir custo)')
+    expect(d.actions).toEqual(['Manter rotina semanal de apontamento e reprogramação.'])
   })
 
   it('com orçamento e sem desvio, segue o diagnóstico normal "sob controle"', () => {

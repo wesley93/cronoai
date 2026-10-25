@@ -32,6 +32,7 @@ O código vizinho tem limitações vivas, listadas no `CLAUDE.md › Dívida con
 | Testes antigos com asserção só de direção (`toBeGreaterThan`) | `lib/*.test.ts` | não imite: cálculo novo fixa o número (`testes.md`) |
 | `localStorage` indefinido no Node 26 | testes de store | `globalThis.localStorage?.clear?.()` no `beforeEach` |
 | Persistência só no navegador (IndexedDB, "best-effort": o navegador pode apagar dados sob falta de disco; duas abas na mesma obra, a última gravação vence; sem `navigator.storage.persist()`) | `stores/armazenamentoObras.ts` | não prometa durabilidade nem sincronização; o aviso de cota e a exportação para `.xml` são a rede de segurança até a SPEC-01 (backend); `persist()` fica para o ciclo dos snapshots |
+| `WorkCalendar.indexOnOrBefore` erra 1 dia para data útil anterior à data-base (`calendar.ts:119`) | `lib/calendar.ts` | correção e teste no ciclo 00004; a validação da data de início em `src/lib/obras.ts` impede alcançar o caso pela tela; não altere `calendar.ts` fora desse ciclo |
 | Horizonte do calendário de 1.600 dias úteis a partir da data-base | `WorkCalendar` | além dele, `dateAt` extrapola; obra longa precisa de teste próprio |
 
 ## Como consultar

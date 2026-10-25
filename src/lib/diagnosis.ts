@@ -6,7 +6,7 @@ import type { SupplyAnalysis } from './supplies'
 import { fmtBRL, fmtBRLCompact, fmtDate, fmtIndex } from './format'
 
 export interface Diagnosis {
-  status: 'verde' | 'amarelo' | 'vermelho' | 'sem-dados'
+  status: 'verde' | 'amarelo' | 'vermelho' | 'sem-dados' | 'sem-orcamento'
   headline: string
   paragraphs: string[]
   actions: string[]
@@ -28,17 +28,19 @@ export function buildDiagnosis(args: {
 }): Diagnosis {
   const { evm, packages, delay, tasks, restrictions, supplies, recoveryTotal } = args
 
-  // Sem orçamento (BAC = 0) o SPI e o CPI 1,00 são só o fallback do safeDiv: não é desempenho, então não há o que diagnosticar
-  if (evm.bac <= 0) {
+  // Sem cronograma (0 tarefas): não há entrega nem desempenho; SPI e CPI 1,00 são só o fallback do safeDiv
+  if (tasks.length === 0) {
     return {
       status: 'sem-dados',
-      headline: 'Obra sem cronograma ou orçamento para diagnosticar',
+      headline: 'Obra sem cronograma para diagnosticar',
       paragraphs: [
-        `O ${args.projectName} não tem tarefas com orçamento (BAC) na data de status (${fmtDate(args.statusDate)}). Sem elas, os indicadores de prazo e custo (SPI e CPI) não medem desempenho.`,
+        `O ${args.projectName} não tem tarefas na data de status (${fmtDate(args.statusDate)}). Sem elas, não há entrega prevista nem indicadores de desempenho.`,
       ],
       actions: ['Use Importar .xml no topo para trazer o cronograma do MS Project, ou cadastre os pacotes na EAP.'],
     }
   }
+  // Sem orçamento (BAC = 0, mas com tarefas): somem SPI, CPI e os textos de custo e valor; o diagnóstico de prazo pelo CPM continua
+  const semOrcamento = evm.bac <= 0
   const leaves = tasks.filter((t) => !t.isSummary)
   const active = packages.filter((p) => p.pv > 0 || p.ac > 0)
 
@@ -52,7 +54,7 @@ export function buildDiagnosis(args: {
     .sort((a, b) => a.cv - b.cv)[0]
 
   const worst = Math.min(evm.spi, evm.cpi)
-  const status: Diagnosis['status'] = worst >= 0.98 ? 'verde' : worst >= 0.9 ? 'amarelo' : 'vermelho'
+  const status: Diagnosis['status'] = semOrcamento ? 'sem-orcamento' : worst >= 0.98 ? 'verde' : worst >= 0.9 ? 'amarelo' : 'vermelho'
 
   const prazo =
     evm.spi >= 1
@@ -63,16 +65,25 @@ export function buildDiagnosis(args: {
       ? `abaixo do orçamento (CPI ${fmtIndex(evm.cpi)})`
       : `acima do orçamento (CPI ${fmtIndex(evm.cpi)}: cada R$ 1,00 gasto entrega R$ ${fmtIndex(evm.cpi)} de valor)`
 
-  const headline =
-    status === 'verde'
+  const headline = semOrcamento
+    ? delay.delayDays > 0
+      ? `Entrega prevista com atraso de ${delay.delayDays} dias úteis — ação requerida (sem orçamento para medir custo)`
+      : 'Prazo dentro da linha de base (sem orçamento para medir custo)'
+    : status === 'verde'
       ? 'Obra sob controle em prazo e custo'
       : `Obra ${evm.spi < 1 ? 'atrasada' : 'no prazo'} e ${evm.cpi < 1 ? 'com estouro de custo' : 'dentro do custo'} — ação requerida`
 
   const paragraphs: string[] = []
-  paragraphs.push(
-    `Na data de status (${fmtDate(args.statusDate)}), o ${args.projectName} apresenta avanço físico-financeiro de ${evm.earnedPct.toFixed(1).replace('.', ',')}% contra ${evm.plannedPct.toFixed(1).replace('.', ',')}% planejados. ` +
+  if (semOrcamento) {
+    paragraphs.push(
+      `Na data de status (${fmtDate(args.statusDate)}), as tarefas do ${args.projectName} não têm orçamento (BAC): os indicadores de custo e de valor agregado (SPI, CPI, EAC) não foram calculados. O diagnóstico abaixo é de prazo, pelo caminho crítico.`,
+    )
+  } else {
+    paragraphs.push(
+      `Na data de status (${fmtDate(args.statusDate)}), o ${args.projectName} apresenta avanço físico-financeiro de ${evm.earnedPct.toFixed(1).replace('.', ',')}% contra ${evm.plannedPct.toFixed(1).replace('.', ',')}% planejados. ` +
       `A obra está ${prazo} e ${custo}. Valor Agregado (EV) de ${fmtBRLCompact(evm.ev)} frente a ${fmtBRLCompact(evm.pv)} planejados (SV ${fmtBRLCompact(evm.sv)}) e custo real (AC) de ${fmtBRLCompact(evm.ac)} (CV ${fmtBRLCompact(evm.cv)}).`,
-  )
+    )
+  }
 
   if (costDrain) {
     paragraphs.push(

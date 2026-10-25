@@ -612,27 +612,49 @@ describe('useProjectStore · multiobra', () => {
       expect(store.evm.cpi).toBeCloseTo(0.9349, 4)
     })
 
-    it('mudar a data de início reprograma tarefas não iniciadas, registra no log e não mexe na linha de base', async () => {
-      const { store } = await carregarCom(aurora)
+    it('adiar o início de uma obra NÃO iniciada desloca a entrega exatamente os mesmos dias úteis', async () => {
+      // Aurora com avanço zerado e data de status no início da obra
+      const base = JSON.parse(aurora)
+      base.tasks = base.tasks.map((t: Record<string, unknown>) => ({ ...t, percentComplete: 0, actualCost: 0, actualStart: undefined, actualFinish: undefined }))
+      base.meta.statusDate = '2026-05-04'
+      const { store } = await carregarCom(JSON.stringify(base))
       const m = store.state.meta
       const dados = { nome: m.name, responsavel: m.manager, dataInicio: m.startDate, dataStatus: m.statusDate }
       const baseline = store.taskByUid.get(104)?.baselineStart
-      // Antes: início 2026-05-04
-      expect(store.schedule.projectFinish).toBe('2027-06-23')
-      expect(store.delay.delayDays).toBe(16)
-      expect(store.atualizarDadosObra({ ...dados, dataInicio: '2026-10-26' })).toEqual({ ok: true })
-      // Depois: início 2026-10-26 (depois da data de status), a entrega antecipa 1 d.u.
-      expect(store.schedule.projectFinish).toBe('2027-06-22')
-      expect(store.delay.delayDays).toBe(15)
-      expect(store.taskByUid.get(104)?.baselineStart).toBe(baseline)
-      expect(store.state.log[0]).toMatchObject({
-        title: 'Data de início alterada',
-        detail: 'Nova data de início: 26/10/2026. Tarefas não iniciadas foram reprogramadas; a linha de base não mudou.',
-      })
+      // Antes: início e status em 04/05/2026
+      expect(store.schedule.projectFinish).toBe('2027-06-02')
+      expect(store.delay.delayDays).toBe(1)
+      // Depois: início e status em 01/06/2026 (+20 d.u.) => entrega +20 d.u.
+      expect(store.atualizarDadosObra({ ...dados, dataInicio: '2026-06-01', dataStatus: '2026-06-01' })).toEqual({ ok: true })
+      expect(store.schedule.projectFinish).toBe('2027-06-30')
+      expect(store.delay.delayDays).toBe(21)
+      expect(store.taskByUid.get(104)?.baselineStart).toBe(baseline) // a linha de base não muda
+      // O log registra a mudança de início
+      expect(store.state.log.map((l) => l.title)).toContain('Data de início alterada')
+      expect(store.state.log.find((l) => l.title === 'Data de início alterada')?.detail).toBe(
+        'Nova data de início: 01/06/2026. Tarefas não iniciadas foram reprogramadas; a linha de base não mudou.',
+      )
       // Sem mudança de início, nenhuma entrada nova
       const total = store.state.log.length
-      store.atualizarDadosObra({ ...dados, dataInicio: '2026-10-26' })
+      store.atualizarDadosObra({ ...dados, dataInicio: '2026-06-01', dataStatus: '2026-06-01' })
       expect(store.state.log).toHaveLength(total)
+    })
+
+    it('a ação da store recusa início depois da data de status ou do primeiro início real', async () => {
+      const { store } = await carregarCom(aurora)
+      const m = store.state.meta
+      const dados = { nome: m.name, responsavel: m.manager, dataInicio: m.startDate, dataStatus: m.statusDate }
+      expect(store.primeiroInicioReal).toBeDefined()
+      const depoisDoStatus = store.atualizarDadosObra({ ...dados, dataInicio: '2026-10-26' })
+      expect(depoisDoStatus).toMatchObject({ ok: false })
+      const depoisDoReal = store.atualizarDadosObra({ ...dados, dataInicio: '2026-10-20' })
+      expect(depoisDoReal).toMatchObject({ ok: false })
+      if (!depoisDoReal.ok) expect(depoisDoReal.erros[0]).toContain('primeiro início real')
+      expect(store.state.meta.startDate).toBe('2026-05-04') // nada mudou
+      expect(store.schedule.projectFinish).toBe('2027-06-23')
+      expect(store.delay.delayDays).toBe(16)
+      // Editar só o nome, com o início intacto, continua permitido
+      expect(store.atualizarDadosObra({ ...dados, nome: 'Aurora Norte' })).toEqual({ ok: true })
     })
 
     it('obra sem tarefas é "sem cronograma" e sem orçamento; o Aurora não', async () => {

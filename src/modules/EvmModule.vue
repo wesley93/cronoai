@@ -70,6 +70,7 @@ const statusStyle = computed(
       amarelo: { chip: 'chip-warn', label: 'Amarelo · atenção' },
       vermelho: { chip: 'chip-critical', label: 'Vermelho · ação imediata' },
       'sem-dados': { chip: 'chip-neutral', label: 'Sem dados · sem cronograma' },
+      'sem-orcamento': { chip: 'chip-neutral', label: 'Sem orçamento · só prazo' },
     })[diagnosis.value.status],
 )
 
@@ -102,8 +103,8 @@ async function copyReport() {
       <KpiTile label="AC" :value="fmtBRLCompact(e.ac)" sub="Custo real" :icon="Wallet" hint="Custo Real incorrido" />
       <KpiTile label="SPI" :value="project.semOrcamento ? '—' : fmtIndex(e.spi)" sub="EV / PV" :tone="project.semOrcamento ? 'neutral' : idxTone(e.spi)" :icon="Gauge" />
       <KpiTile label="CPI" :value="project.semOrcamento ? '—' : fmtIndex(e.cpi)" sub="EV / AC" :tone="project.semOrcamento ? 'neutral' : idxTone(e.cpi)" :icon="Gauge" />
-      <KpiTile label="EAC" :value="fmtBRLCompact(e.eac)" sub="BAC / CPI" :tone="e.eac > e.bac ? 'critical' : 'ok'" :icon="Sigma" />
-      <KpiTile label="VAC" :value="fmtBRLCompact(e.vac)" sub="BAC − EAC" :tone="moneyTone(e.vac)" :icon="Sigma" />
+      <KpiTile label="EAC" :value="project.semOrcamento ? '—' : fmtBRLCompact(e.eac)" sub="BAC / CPI" :tone="project.semOrcamento ? 'neutral' : e.eac > e.bac ? 'critical' : 'ok'" :icon="Sigma" />
+      <KpiTile label="VAC" :value="project.semOrcamento ? '—' : fmtBRLCompact(e.vac)" sub="BAC − EAC" :tone="project.semOrcamento ? 'neutral' : moneyTone(e.vac)" :icon="Sigma" />
     </div>
 
     <div class="grid items-start gap-5 xl:grid-cols-[minmax(0,8fr)_minmax(0,5fr)]">

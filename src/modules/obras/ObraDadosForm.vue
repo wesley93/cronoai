@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { REGIMES_SINAPI, ROTULO_REGIME_SINAPI, UFS } from '@/data/ufs'
-import { MAX_MUNICIPIO, MAX_NOME_OBRA, MAX_RESPONSAVEL, validarDadosObra, type DadosObra } from '@/lib/obras'
+import { MAX_MUNICIPIO, MAX_NOME_OBRA, MAX_RESPONSAVEL, validarDadosObra, type ContextoInicio, type DadosObra } from '@/lib/obras'
 
-const props = defineProps<{ inicial: DadosObra; rotuloBotao: string; idPrefixo: string; cancelavel?: boolean; avisarInicio?: boolean }>()
+const props = defineProps<{ inicial: DadosObra; rotuloBotao: string; idPrefixo: string; cancelavel?: boolean; contextoInicio?: ContextoInicio }>()
 const emit = defineEmits<{ salvar: [dados: DadosObra]; cancelar: [] }>()
 
 const form = reactive<DadosObra>({ ...props.inicial })
-const erros = computed(() => validarDadosObra(form))
+const erros = computed(() => validarDadosObra(form, props.contextoInicio))
 const tentou = ref(false)
-const inicioMudou = computed(() => !!props.avisarInicio && form.dataInicio !== props.inicial.dataInicio)
+const inicioMudou = computed(() => !!props.contextoInicio && form.dataInicio !== props.inicial.dataInicio)
 
 function enviar() {
   tentou.value = true
@@ -63,7 +63,7 @@ function enviar() {
         <input :id="`${idPrefixo}-database`" v-model="form.dataBaseSinapi" type="month" class="input" />
       </div>
     </div>
-    <p class="text-[11px] text-zinc-500">Calendário com feriados nacionais; feriados estaduais e municipais entram no ciclo 00005.</p>
+    <p class="text-[11px] text-zinc-500">Calendário com feriados nacionais; feriados estaduais e municipais ainda não são considerados.</p>
     <ul v-if="tentou && erros.length" role="alert" class="list-disc space-y-0.5 pl-5 text-xs text-coral-600 dark:text-coral-400">
       <li v-for="e in erros" :key="e">{{ e }}</li>
     </ul>
