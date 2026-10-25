@@ -1051,8 +1051,10 @@ export const useProjectStore = defineStore('project', () => {
 
   function importXml(text: string): string[] {
     const result = parseMspdiXml(text)
+    // Jornada, HonorConstraints e Move* são do arquivo: o que o arquivo novo não traz não fica do arquivo anterior
+    const { honorConstraintsArquivo: _honor, moveArquivo: _move, minutosPorDia: _jornada, ...daObra } = state.meta
     const meta = {
-      ...state.meta,
+      ...daObra,
       ...Object.fromEntries(Object.entries(result.meta).filter(([, v]) => v !== undefined && v !== '')),
     }
     const tasks = baselineFor(result.tasks, meta, result.calendarios, result.calendarioPadraoUid, true)

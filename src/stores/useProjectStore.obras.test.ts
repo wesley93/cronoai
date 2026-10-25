@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import aurora from '@/lib/__fixtures__/estado-v1-aurora.json?raw'
 import aurora75 from '@/lib/__fixtures__/estado-v1-aurora-75.json?raw'
 import auroraCenarios from '@/lib/__fixtures__/estado-v2-aurora-cenarios.json?raw'
+import fixtureCalendarios from '@/lib/__fixtures__/mspdi-calendarios-restricoes.xml?raw'
 import { lerEstadoV1 } from '@/lib/migracaoEstado'
 import type { DadosObra } from '@/lib/obras'
 import { criarArmazenamentoMemoria, usarArmazenamento, type ArmazenamentoMemoria } from './armazenamentoObras'
@@ -664,6 +665,45 @@ describe('useProjectStore · multiobra', () => {
       expect(t.baselineStart).toBeUndefined()
       expect(t.baselineFinish).toBe('2027-01-29')
       expect(store.msProjectTask(303)!.PlannedValue).toBe(0)
+    })
+
+    it('E3: importar a fixture de calendários e restrições grava o que o arquivo trouxe e calcula CR-2b e CR-6 com os números do plano', async () => {
+      const { store } = await carregarCom(aurora)
+      const avisos = store.importXml(fixtureCalendarios)
+      expect(avisos).toContain('1 tarefa(s) agendada(s) manualmente no MS Project: o CronoAI as calcula automaticamente e preserva a marca para a exportação.')
+      // Calendários, restrições e prazo do arquivo no estado salvo
+      expect(store.state.calendarios.map((c) => c.nome)).toEqual(['Padrão', 'Sábado 4 h', 'Noturno', '24 Horas'])
+      expect(store.state.calendarioPadraoUid).toBe(1)
+      expect(store.taskByUid.get(7)!.restricao).toEqual({ tipo: 'MSO', data: '2026-08-12T08:00' })
+      expect(store.taskByUid.get(12)!.prazoFinal).toBe('2026-08-31T17:00')
+      expect(store.taskByUid.get(1)!.arquivo).toMatchObject({ inicio: '2026-08-03', termino: '2026-08-07' })
+      expect(store.state.meta).toMatchObject({ minutosPorDia: 480, honorConstraintsArquivo: 0, opcoesCronograma: { logica: 'retida', moverRestante: true } })
+      // CR-2b: A de 5 d no sábado de 4 h termina 13/08 12:00 e B (padrão) vai de 13/08 13:00 a 14/08 12:00
+      const s = store.schedule.byUid
+      expect([s.get(28)!.finish, s.get(28)!.terminoHora, s.get(29)!.start, s.get(29)!.inicioHora, s.get(29)!.finish, s.get(29)!.terminoHora]).toEqual(['2026-08-13', '12:00', '2026-08-13', '13:00', '2026-08-14', '12:00'])
+      // CR-6 (MSO 06/08 em B): B 06/08 a 07/08, folga de A de -2 d e conflito com o vínculo
+      expect([s.get(31)!.start, s.get(31)!.finish, s.get(30)!.folgaTotalMin / 480, s.get(30)!.critical, s.get(31)!.restricaoConflito]).toEqual(['2026-08-06', '2026-08-07', -2, true, true])
+      // A tarefa manual é calculada automaticamente (com a marca preservada) e o export a devolve
+      expect(s.get(27)!.start).toBe('2026-08-10')
+      const exportado = store.exportXml()
+      expect(exportado.validation.valid).toBe(true)
+      expect(exportado.validation.errors).toEqual([])
+      expect(exportado.xml).toContain('<Manual>1</Manual>')
+      expect(exportado.xml).toContain('<Name>Noturno</Name>')
+    })
+
+    it('E3: importar outro arquivo não herda a jornada, o HonorConstraints nem as opções Move* do anterior', async () => {
+      const { store } = await carregarCom(aurora)
+      const variante = fixtureCalendarios.replace('<MinutesPerDay>480</MinutesPerDay>', '<MinutesPerDay>450</MinutesPerDay>').replace('<MoveRemainingStartsForward>0<', '<MoveRemainingStartsForward>1<')
+      store.importXml(variante)
+      expect(store.state.meta.minutosPorDia).toBe(450)
+      expect(store.state.meta.moveArquivo?.remainingStartsForward).toBe(true)
+      // O .xml exportado do Aurora não traz Move* nem jornada diferente da padrão: o estado do arquivo anterior não fica
+      const { xml } = (await carregarCom(aurora)).store.exportXml()
+      store.importXml(xml)
+      expect(store.state.meta.moveArquivo).toBeUndefined()
+      expect(store.state.meta.minutosPorDia).toBe(480)
+      expect(store.state.meta.honorConstraintsArquivo).toBe(0)
     })
 
     it('adiar o início de uma obra NÃO iniciada, mantendo a data de status, desloca a entrega 19 d.u. e o atraso fica em +20 d.u.', async () => {

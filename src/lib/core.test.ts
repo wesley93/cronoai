@@ -118,7 +118,7 @@ describe('MSPDI', () => {
     expect(t104.bac).toBe(168000)
     expect(t104.resources).toEqual([{ resource: 'Pedreiro', units: 4 }, { resource: 'Servente', units: 2 }])
     const t402 = back.tasks.find((t) => t.uid === 402)!
-    expect(t402.predecessors).toEqual([{ uid: 401, type: 'SS', lag: { tipo: 'util', minutos: 4800 } }])
+    expect(t402.predecessors).toEqual([{ uid: 401, type: 'SS', lag: { tipo: 'util', minutos: 4800, codigoMspdi: 7 } }]) // o LagFormat do arquivo volta (E3)
     expect(back.meta.statusDate).toBe('2026-10-23')
     expect(back.calendarios[0].excecoes).toContainEqual({ data: '2026-09-07', intervalos: [] })
     const reCal = compilarCalendarios(seed.meta.startDate, back.calendarios, back.calendarioPadraoUid)

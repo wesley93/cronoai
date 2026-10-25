@@ -57,6 +57,24 @@ export interface OpcoesCronograma {
   moverRestante: boolean
 }
 
+/**
+ * Dados de uma tarefa como vieram do MSPDI. Só tarefas folha; ausente quando a tarefa não veio de arquivo.
+ * `inicio` e `termino` são `Start`/`Finish` do arquivo (`yyyy-mm-dd`); `restricao` e `prazoFinal` são os explícitos
+ * (a restrição inferida pelo import não entra aqui); `manual` guarda `Manual` (agendada manualmente) e `ativa`, o `Active`.
+ */
+export interface DadosDoArquivo {
+  inicio?: string
+  termino?: string
+  duracaoMin: number
+  percentComplete: number
+  restricao?: Restricao
+  prazoFinal?: string
+  manual?: boolean
+  ativa?: true
+  /** `LevelingDelay` > 0: o MS Project atrasou a tarefa por nivelamento de recursos. */
+  nivelamento?: true
+}
+
 export interface PredecessorLink {
   uid: number
   type: LinkType
@@ -115,6 +133,8 @@ export interface Task {
   prazoFinal?: string
   /** Duração em tempo corrido (relógio de 24 h, `DurationFormat` corrido do MS Project). */
   duracaoCorrida?: true
+  /** O que o arquivo MSPDI trouxe para esta tarefa (datas e marcas), para a ida e volta e o painel de divergências. */
+  arquivo?: DadosDoArquivo
   /** Pavimentos atendidos [de, até] — usado pelo match semântico. */
   floors?: [number, number]
   notes?: string
@@ -149,6 +169,18 @@ export interface ProjectMeta {
   minutosPorDia?: number
   /** Opções de cronograma (ausente = lógica retida e mover o restante para depois da data de status). */
   opcoesCronograma?: OpcoesCronograma
+  /** `HonorConstraints` do arquivo (0 ou 1), só para a volta. O cálculo sempre honra as restrições (gate P2); obra sem valor exporta 0. */
+  honorConstraintsArquivo?: number
+  /** As 4 opções `Move*` do arquivo, preservadas na ida e volta sem entrar no cálculo. */
+  moveArquivo?: MoveArquivo
+}
+
+/** Opções "Mover ..." do MS Project (Project/Move*): só preservadas, o motor não as usa. */
+export interface MoveArquivo {
+  completedEndsBack?: boolean
+  remainingStartsBack?: boolean
+  remainingStartsForward?: boolean
+  completedEndsForward?: boolean
 }
 
 export interface ScheduledTask {

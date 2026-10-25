@@ -6,6 +6,9 @@ export interface SummaryRollup {
   uid: number
   start: string
   finish: string
+  /** Hora (hh:mm) do início e do término consolidados: a da filha que começa primeiro e a da que termina por último. */
+  inicioHora: string
+  terminoHora: string
   bac: number
   actualCost: number
   percentComplete: number
@@ -49,10 +52,14 @@ export function rollupSummaries(tasks: Task[], schedule: ScheduleResult): Map<nu
     const pct = bac > 0 ? (earned / bac) * 100 : durTotal > 0 ? kids.reduce((a, k) => a + k.duracaoMin * k.percentComplete, 0) / durTotal : 0
     const bStarts = kids.map((k) => k.baselineStart).filter((x): x is string => !!x)
     const bFinishes = kids.map((k) => k.baselineFinish).filter((x): x is string => !!x)
+    const primeira = scheduled.reduce((m, x) => (x.start < m.start || (x.start === m.start && x.inicioHora < m.inicioHora) ? x : m), scheduled[0])
+    const ultima = scheduled.reduce((m, x) => (x.finish > m.finish || (x.finish === m.finish && x.terminoHora > m.terminoHora) ? x : m), scheduled[0])
     out.set(s.uid, {
       uid: s.uid,
-      start: scheduled.reduce((m, x) => (x.start < m ? x.start : m), scheduled[0].start),
-      finish: scheduled.reduce((m, x) => (x.finish > m ? x.finish : m), scheduled[0].finish),
+      start: primeira.start,
+      finish: ultima.finish,
+      inicioHora: primeira.inicioHora,
+      terminoHora: ultima.terminoHora,
       bac,
       actualCost: kids.reduce((acc, k) => acc + k.actualCost, 0),
       percentComplete: pct,

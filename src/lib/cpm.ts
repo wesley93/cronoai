@@ -336,6 +336,8 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
     const marco = fAgendado === sAgendado
     const dataTermino = (m: number) => dataDoMomento(base, cd.fimUtilAte(m) - 1)
     const inicioNorm = c.proximoUtil(sAgendado)
+    // Marco: início e término no mesmo momento (o do término da predecessora; no início do projeto, o 1º momento útil)
+    const marcoMomento = c.uteisAte(sAgendado) === 0 ? inicioNorm : cd.fimUtilAte(sAgendado)
     // Marco: data do último trecho útil até o momento (o dia da predecessora); no início do projeto, o 1º dia útil
     let finish = marco ? (c.uteisAte(sAgendado) === 0 ? dataDoMomento(base, inicioNorm) : dataTermino(sAgendado)) : dataTermino(fAgendado)
     let start = marco ? finish : dataDoMomento(base, sAgendado)
@@ -357,8 +359,8 @@ export function computeSchedule(tasks: Task[], cals: CalendariosCompilados, opts
       lateFinish: dataTermino(lf.get(uid)!),
       start,
       finish,
-      inicioHora: horaDoMomento(marco ? sAgendado : inicioNorm),
-      terminoHora: horaDoMomento(cd.fimUtilAte(fAgendado)),
+      inicioHora: horaDoMomento(marco ? marcoMomento : inicioNorm),
+      terminoHora: horaDoMomento(marco ? marcoMomento : cd.fimUtilAte(fAgendado)),
       folgaTotalMin: folgaTotal,
       folgaLivreMin,
       totalFloat: minutosParaDias(folgaTotal, unidadeDia),
