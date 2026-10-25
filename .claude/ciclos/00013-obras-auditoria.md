@@ -41,12 +41,12 @@ inicio: 2026-10-25
   - fazer merge da `master` antes do PR; o PR é empilhado em `feat/00012-identidade-empresas` se o 00012 não tiver entrado;
   - conferir os jobs do backend e o CodeQL C# verdes no PR;
   - levar à **Segurança da Informação**, ao **Jurídico** e à **Infraestrutura** os itens da última seção.
-- **Estado:** validadores aprovados na rodada 03 (5279222). Auditoria independente r01 (a238652): REPROVADO por 1 Alto (lint do CI quebrado em `regras-cronoai.test.mjs:139-140`) e 2 Baixos de registro → corrigido em 87a6206 e neste registro; reauditoria: A PREENCHER.
+- **Estado:** **aprovado.** Validadores aprovados na rodada 03 (5279222). Auditoria independente: r01 REPROVADO (achados 1 a 3, corrigidos em 87a6206 e no registro); reauditoria delta (8e5b9d9) APROVADO, sem achados. Falta o CI do PR e a conferência das UFs pelo usuário (V-1).
   - `testes`: APROVADO na r01 (409 3x) e na r02 (434 3x); r03 (451 3x).
   - `arquiteto`: REPROVADO na r01 (R-1) → APROVADO na r02 (N-1 a N-6) → APROVADO na r03 (confirmação de 5279222).
   - `dba`: OK na r01 (6 observações) e na r02.
   - `seguranca`: APROVADO na r01 → REPROVADO na r02 (1 Médio) → APROVADO na r03 (5279222), sem achados.
-  - Auditoria independente: r01 REPROVADO (achados 1 a 3, corrigidos); reauditoria: A PREENCHER.
+  - Auditoria independente: r01 REPROVADO (achados 1 a 3, corrigidos em 87a6206 e no registro); reauditoria delta (8e5b9d9) APROVADO, sem achados.
 
 ## Pedido
 "Pode fazer todas as fases" → PLANO-FASE-2 §5.3, ciclo 00013.
@@ -76,7 +76,7 @@ inicio: 2026-10-25
 | 02 (a2bbad5) | APROVADO: 434/434 3x; subida local refeita com a migração nova; 2 defeitos de teste (não bloqueiam) | APROVADO: N-1 a N-6, nenhuma bloqueia | OK: migração refeita confere com a original mais as 2 mudanças pedidas; alerta de recriar o banco local | REPROVADO: 1 Médio (número exponencial no `jsonb`); 3 Info |
 | 03 (5279222) | APROVADO: 451/451 3x; 111/111 das regras; 2 defeitos menores de teste (POST sem afirmar ausência de gravação; PUT sem afirmar a chave) | APROVADO (confirmação): ADR 00004, camadas e documentação ok; N-1 e N-6 fechados; N-2 a N-4 como registro; N-5 fechado | — (sem mudança de banco) | APROVADO: sem achados; 79/79 focados e 111/111 das regras |
 | auditoria r01 (a238652) | — | — | — | REPROVADO: 1 Alto (lint), 2 Baixos (evidência anterior a 5279222 em linhas da matriz; registro contraditório sobre a r03); 44 de 45 evidências conferidas |
-| reauditoria | — | — | — | A PREENCHER |
+| reauditoria (8e5b9d9) | — | — | — | APROVADO (delta): achados 1 a 3 da r01 conferidos como corrigidos; nenhum achado novo; lint e `npm run ci` verdes, regras 111/111, `validar-regras` 0/0 |
 
 ### Testes do backend, antes → depois
 | Ponto | Total | Fonte |
@@ -167,7 +167,7 @@ Regras do `validar-regras` (`node --test`): 40 no fim do 00012, 77 em bd508ed, 1
 | E2E | `npm run e2e` | — | não | NA | front intacto |
 | R02 | Rodada 02: 15 itens | `testes`, `arquiteto`, `dba` e `seguranca` sobre a2bbad5 | sim | PASS | `testes` r02 APROVADO (434 3x, N-1 a N-11 PASS); `arquiteto` r02 APROVADO; `dba` r02 OK; mutações do dev detectadas (cota compartilhada, sem `#fim`, contagem n+1, sem faixa de datas, sem `fk_auditoria_empresa` e outras). `seguranca` r02 REPROVADO pelo Médio novo → rodada 03 |
 | R03 | Rodada 03: exponencial, `MERGE`, aspas escapadas, README, testes de log e piso | `testes` e `seguranca` sobre 5279222 | sim | PASS | `seguranca` r03 APROVADO, sem achados (79/79 focados, 111/111). Mutação do dev: sem a recusa de exponencial, 5 falhas; sem o teto de 32, 1; sem o mapeamento, 1. `testes` r03: 451/451 3x, N-1 a N-7 PASS (recusa de `1e131071`, `1e-16383`, `1E5`, `[1,2.5e3]` e 33 caracteres; controle com 5 números de até 32 caracteres; PUT com versão e trilha intactas; `MapeadorErrosObraTestes`; R18 e detector com MERGE e aspas escapadas; piso `== 8`). `arquiteto` r03 APROVADO |
-| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | A PREENCHER | r01 (a238652): REPROVADO, achados 1 (Alto, lint) a 3 (Baixos, registro) → 87a6206 e este registro. Reauditoria: A PREENCHER |
+| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | PASS | r01 (a238652): REPROVADO, achados 1 (Alto, lint) a 3 (Baixos, registro) → 87a6206 e este registro. Reauditoria delta (8e5b9d9): APROVADO, sem achados. O diff a238652..8e5b9d9 só toca `regras-cronoai.test.mjs:139-140` e este registro. `npm run lint` exit 0; `npm run ci` exit 0 (`Test Files 10 passed (10)`, `Tests 67 passed (67)`, `Statements : 92.79% ( 1817/1958 )`, `✓ built`); `node --test` 111/111; `validar-regras` 116 arquivos, 0 bloqueia, 0 alerta. Evidências conferidas: 5 de 5 do delta (r01: 44 de 45; V-2 não reproduzida, não obrigatória) |
 
 ## Ressalvas dos validadores e destino
 | Origem | Ressalva | Destino |
@@ -232,7 +232,7 @@ Regras do `validar-regras` (`node --test`): 40 no fim do 00012, 77 em bd508ed, 1
 | auditoria r01 | 2 [Baixo]: linhas G-openapi, G-vuln, G-classif, AC-1, AC-2 e AC-18 com evidência anterior a 5279222 | corrigido neste registro com as execuções da auditoria no HEAD a238652 e do orquestrador em 87a6206 |
 | auditoria r01 | 3 [Baixo]: registro contraditório sobre a r03 (linhas de estado e de pendências) | corrigido neste registro |
 | auditoria r01 (observação) | O T31 isolado não prova rollback (o EF insere a trilha antes do UPDATE); a atomicidade é provada pelo T39, pelo conflito de nome no restaurar e pelos PUTs paralelos | registrado; lição para os testes de atomicidade do 00015 |
-| reauditoria | A PREENCHER | A PREENCHER |
+| reauditoria | Nenhum achado | — |
 
 ## Pendências registradas
 - **V-1 do usuário (bloqueia o merge):** conferir os 27 códigos de UF da migração `20261025201449_ObrasAuditoria` contra a fonte oficial do IBGE.
