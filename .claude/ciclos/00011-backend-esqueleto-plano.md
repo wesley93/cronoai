@@ -491,5 +491,9 @@ Origem: validação (arquiteto, testes e dba). O `${VAR:?}` no compose faria o `
 
 ## Emenda 03 (25/10/2026) — R08 com string de conexão
 Origem: validação da `seguranca` (rodada 01). A regra R08 do `validar-regras.mjs` só pegava senha entre aspas e não via `Password=...` em string de conexão Npgsql/ADO.NET, exatamente o formato que o backend introduz. O orquestrador pediu a extensão nesta rodada. A decisão foi dele, com autorização do usuário, **sujeita à revisão do usuário no PR**:
-- **Escopo ampliado:** `.claude/scripts/lib/regras-cronoai.mjs` ganha o padrão `SENHA_CONEXAO` (`password|pwd=` sem espaço, ignorando os marcadores `<…>`, `$VAR`, `%L` e `{x}`; em arquivo de teste, o achado é só alerta).
+- **Escopo ampliado:** `.claude/scripts/lib/regras-cronoai.mjs` passa a acusar:
+  - senha em string de conexão Npgsql/ADO.NET (`Password`/`Pwd`, com espaço opcional em volta do `=` e valor entre aspas ou não), só em linha com cara de string de conexão;
+  - chave JSON `"Password": "valor"`.
+
+  Não acusa os marcadores reais: `<…>`, `${…}`, `$VAR` em maiúsculas, `$env:VAR`, `%L`, `{identificador}` (interpolação C#), `{0}`. A exclusão por palavra (`example`, `placeholder`…) vale só para o **valor** da senha. Em arquivo de teste, o achado é só alerta. O comportamento fica fixado por teste versionado (`node --test .claude/scripts/lib/regras-cronoai.test.mjs`).
 - **Fica para o 00012:** as demais regras de .NET no `validar-regras.mjs` (`FromSqlRaw`, DDL fora de migração), como o plano já previa.
