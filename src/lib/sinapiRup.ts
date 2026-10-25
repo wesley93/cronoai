@@ -188,12 +188,15 @@ export function horasDeSupervisao(quantidade: number, supervisao: readonly Funca
   return supervisao.map((f) => ({ rotulo: rotuloFuncao(f.funcao), horas: Math.max(0, quantidade) * f.coeficiente }))
 }
 
-/** Valores que o usuário informou na linha ou na calculadora, no lugar dos publicados. */
+/**
+ * O que o usuário informou no lugar do publicado: SÓ os campos que ele mudou (os ausentes valem o publicado).
+ * Sem mão de obra publicada (composição sem equipe), a RUP e o profissional são, por natureza, informados.
+ */
 export interface ValoresInformados {
-  rup: number
-  custo: number
-  profissional: string
-  /** Custo publicado no recorte, citado só como referência. */
+  rup?: number
+  custo?: number
+  profissional?: string
+  /** Custo publicado no recorte, citado só como referência junto do custo informado. */
   custoPublicado?: number
 }
 
@@ -205,28 +208,31 @@ export interface DadosNotasSinapi {
   fonte?: string
   maoDeObra?: readonly FuncaoMaoDeObra[]
   recursos: readonly ResourceAssignment[]
-  /** RUP, custo ou profissional diferentes do publicado: as notas citam os efetivos como "informados pelo usuário" e o publicado como referência. */
+  /** Campos mudados pelo usuário: as notas os citam como "informados pelo usuário", com o publicado ao lado como referência. */
   informado?: ValoresInformados
 }
 
 /**
  * Notas da tarefa gerada (D-23): fonte, principal e coeficiente, equipe, supervisão não alocada e o aviso das subcomposições.
- * Com valores informados pelo usuário, a função, a RUP e o custo citados são os EFETIVOS (os que deram a duração e o BAC);
- * o publicado entra só como referência, e a equipe é a efetiva.
+ * Só o campo que o usuário mudou (RUP, custo ou função principal) é citado como "informado pelo usuário", com o publicado como referência;
+ * o que não mudou segue como publicado. A equipe citada é sempre a efetiva.
  */
 export function notasDaTarefaSinapi(d: DadosNotasSinapi): string {
   const base = `Gerado pelo CronoAI a partir do SINAPI ${d.codigo}${d.fonte ? ` (${d.fonte})` : ''}: ${d.quantidade.toLocaleString('pt-BR')} ${d.unidade}.`
   if (!d.fonte || (!d.maoDeObra?.length && !d.informado)) return base
   const eq = d.maoDeObra?.length ? equipeDaComposicao(d.maoDeObra) : undefined
+  const i = d.informado
   const partes = [base]
-  if (d.informado) {
-    const i = d.informado
-    partes.push(`Função principal ${i.profissional}, RUP ${numeroBR(i.rup)} h/${d.unidade} e custo R$ ${numeroBR(i.custo, 2)}/${d.unidade} informados pelo usuário.`)
-    if (eq) {
-      const ref = [`RUP ${numeroBR(eq.principal.coeficiente)} h/${d.unidade}`, i.custoPublicado !== undefined ? `R$ ${numeroBR(i.custoPublicado, 2)}/${d.unidade}` : ''].filter(Boolean).join(', ')
-      partes.push(`Publicado no SINAPI, só como referência: ${eq.principal.funcao}, ${ref}.`)
-    }
-  } else if (eq) partes.push(`Função principal ${eq.principal.funcao}, RUP ${numeroBR(eq.principal.coeficiente)} h/${d.unidade}.`)
+  if (!i) {
+    if (eq) partes.push(`Função principal ${eq.principal.funcao}, RUP ${numeroBR(eq.principal.coeficiente)} h/${d.unidade}.`)
+  } else {
+    const publicada = (texto: string | undefined) => (texto ? `; publicad${texto}` : '')
+    const funcao = i.profissional ?? eq?.principal.funcao
+    if (funcao) partes.push(`Função principal ${funcao}${i.profissional !== undefined ? ` (informada pelo usuário${publicada(eq ? `a ${eq.principal.funcao}` : undefined)})` : ''}.`)
+    const rup = i.rup ?? eq?.principal.coeficiente
+    if (rup !== undefined) partes.push(`RUP ${numeroBR(rup)} h/${d.unidade}${i.rup !== undefined ? ` (informada pelo usuário${publicada(eq ? `a ${numeroBR(eq.principal.coeficiente)}` : undefined)})` : ''}.`)
+    if (i.custo !== undefined) partes.push(`Custo R$ ${numeroBR(i.custo, 2)}/${d.unidade} (informado pelo usuário${publicada(i.custoPublicado !== undefined ? `o R$ ${numeroBR(i.custoPublicado, 2)}` : undefined)}).`)
+  }
   partes.push(`Equipe: ${d.recursos.filter((r) => r.units > 0).map((r) => `${r.resource} ${r.units}`).join(' + ')}.`)
   if (eq?.supervisao.length) {
     const s = horasDeSupervisao(d.quantidade, eq.supervisao).map((h) => `${h.rotulo}: ${numeroBR(h.horas, 2)} h, não alocado`).join('; ')

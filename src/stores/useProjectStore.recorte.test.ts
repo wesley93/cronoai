@@ -504,6 +504,8 @@ describe('linha da planilha alterada pelo usuário: fonte, equipe e notas (B2)',
   const ALTERADA = 'SINAPI SP 09/2026 não desonerado · alterado'
   const PUBLICADA = 'SINAPI SP 09/2026 não desonerado'
   const csv = (cabecalho: string, linha: string) => [`codigo;descricao;unidade;quantidade;${cabecalho}`, linha].join('\n')
+  const CAB = 'Gerado pelo CronoAI a partir do SINAPI 103332 (SP 09/2026 não desonerado · alterado): 640 m². '
+  const FIM = ' HH de subcomposições (ex.: preparo de argamassa) não incluída.'
 
   async function comLinha(cabecalho: string, linha: string) {
     const ctx = await comRecorte()
@@ -518,53 +520,73 @@ describe('linha da planilha alterada pelo usuário: fonte, equipe e notas (B2)',
     return r.created[0]!
   }
 
-  it('RUP editada na célula: a linha vira "alterada", sai a equipe do recorte e a duração usa a RUP digitada (18 d.u., e não 33); as notas citam a RUP e o custo EFETIVOS', async () => {
+  it('RUP editada na célula: a linha vira "alterada" e MANTÉM a equipe por função; a duração usa a RUP digitada (18 d.u., e não 33) e as notas citam só a RUP como informada', async () => {
     const { store, linha } = await comLinha('equipe', '103332;;m²;640;4')
     expect(linha.fonte).toBe(PUBLICADA)
     expect(linha.equipe).toEqual([{ recurso: 'Servente', proporcao: 0.5 }])
     store.updateBudgetLine(linha.id, { rup: 0.9 })
     const l = store.state.budget[0]!
     expect(l.fonte).toBe(ALTERADA)
-    expect('equipe' in l).toBe(false)
-    expect(l.helperRatio).toBe(0.5)
+    expect(l.equipe).toEqual([{ recurso: 'Servente', proporcao: 0.5 }])
     const t = gerar(store)
     expect(t.duracaoMin / 480).toBe(18) // 640 × 0,9 ÷ (4 × 8); com a RUP publicada seriam 33
     expect(t.resources).toEqual([{ resource: 'Pedreiro', units: 4 }, { resource: 'Servente', units: 2 }])
-    expect(t.notes).toBe(
-      'Gerado pelo CronoAI a partir do SINAPI 103332 (SP 09/2026 não desonerado · alterado): 640 m². Função principal Pedreiro, RUP 0,9 h/m² e custo R$ 123,96/m² informados pelo usuário. ' +
-        'Publicado no SINAPI, só como referência: PEDREIRO, RUP 1,6225376 h/m², R$ 123,96/m². Equipe: Pedreiro 4 + Servente 2. HH de subcomposições (ex.: preparo de argamassa) não incluída.',
-    )
-    expect(t.notes).not.toContain('Função principal PEDREIRO, RUP 1,6225376 h/m². Equipe')
+    expect(t.notes).toBe(CAB + 'Função principal PEDREIRO. RUP 0,9 h/m² (informada pelo usuário; publicada 1,6225376). Equipe: Pedreiro 4 + Servente 2.' + FIM)
   })
 
-  it('custo editado na célula: fonte "alterada", BAC com o custo digitado e as notas citam o custo informado e o publicado como referência', async () => {
+  it('custo editado na célula: fonte "alterada", equipe mantida, BAC com o custo digitado; só o custo é citado como informado (com o publicado)', async () => {
     const { store, linha } = await comLinha('equipe', '103332;;m²;640;4')
     store.updateBudgetLine(linha.id, { unitCost: 150 })
     expect(store.state.budget[0]!.fonte).toBe(ALTERADA)
+    expect(store.state.budget[0]!.equipe).toEqual([{ recurso: 'Servente', proporcao: 0.5 }])
     const t = gerar(store)
     expect(t.bac).toBeCloseTo(96000, 2)
-    expect(t.notes).toContain('RUP 1,6225376 h/m² e custo R$ 150/m² informados pelo usuário.')
-    expect(t.notes).toContain('Publicado no SINAPI, só como referência: PEDREIRO, RUP 1,6225376 h/m², R$ 123,96/m².')
-    expect(t.notes).toContain('(SP 09/2026 não desonerado · alterado)')
+    expect(t.notes).toBe(CAB + 'Função principal PEDREIRO. RUP 1,6225376 h/m². Custo R$ 150/m² (informado pelo usuário; publicado R$ 123,96). Equipe: Pedreiro 4 + Servente 2.' + FIM)
   })
 
-  it('profissional trocado no CSV: as notas usam a função e a equipe EFETIVAS (nunca "Função principal PEDREIRO … Equipe: Carpinteiro 4")', async () => {
+  it('profissional trocado no CSV: as notas usam a função e a equipe EFETIVAS; só a função é citada como informada', async () => {
     const { store } = await comLinha('profissional;equipe', '103332;;m²;640;Carpinteiro;4')
     expect(store.state.budget[0]!.fonte).toBe(ALTERADA)
+    expect('equipe' in store.state.budget[0]!).toBe(false)
     const t = gerar(store)
     expect(t.resources).toEqual([{ resource: 'Carpinteiro', units: 4 }, { resource: 'Servente', units: 2 }])
-    expect(t.notes).toContain('Função principal Carpinteiro, RUP 1,6225376 h/m² e custo R$ 123,96/m² informados pelo usuário.')
-    expect(t.notes).toContain('Equipe: Carpinteiro 4 + Servente 2.')
+    expect(t.notes).toBe(CAB + 'Função principal Carpinteiro (informada pelo usuário; publicada PEDREIRO). RUP 1,6225376 h/m². Equipe: Carpinteiro 4 + Servente 2.' + FIM)
     expect(t.notes).not.toContain('Função principal PEDREIRO')
   })
 
-  it('RUP e custo diferentes no CSV: mesma regra da edição na célula', async () => {
-    const { store } = await comLinha('rup;custo unitario;equipe', '103332;;m²;640;0,9;150;4')
-    expect(store.state.budget[0]!.fonte).toBe(ALTERADA)
-    expect(gerar(store).notes).toContain('RUP 0,9 h/m² e custo R$ 150/m² informados pelo usuário.')
+  it('profissional trocado na célula derruba a equipe por função e cai no servente por oficial comum (0,5)', async () => {
+    const { store, linha } = await comLinha('equipe', '103332;;m²;640;4')
+    store.updateBudgetLine(linha.id, { professional: 'Armador' })
+    const l = store.state.budget[0]!
+    expect(l).toMatchObject({ fonte: ALTERADA, professional: 'Armador', helperRatio: 0.5 })
+    expect('equipe' in l).toBe(false)
+    expect(gerar(store).resources).toEqual([{ resource: 'Armador', units: 4 }, { resource: 'Servente', units: 2 }])
   })
 
-  it('só a quantidade ou a equipe mudam: a linha segue "publicada" e a equipe do recorte continua (desvio 9 do 1º relatório)', async () => {
+  it('RUP e custo diferentes no CSV: os dois informados; o profissional segue o publicado; equipe mantida', async () => {
+    const { store } = await comLinha('rup;custo unitario;equipe', '103332;;m²;640;0,9;150;4')
+    expect(store.state.budget[0]!.fonte).toBe(ALTERADA)
+    expect(gerar(store).notes).toBe(
+      CAB + 'Função principal PEDREIRO. RUP 0,9 h/m² (informada pelo usuário; publicada 1,6225376). Custo R$ 150/m² (informado pelo usuário; publicado R$ 123,96). Equipe: Pedreiro 4 + Servente 2.' + FIM,
+    )
+  })
+
+  it('CR-2 (104658, 100 m², equipe 2) e CR-3 (103681, 320 m³, equipe 4) com custo alterado mantêm as funções do recorte (antes desta rodada: CR-2 Pedreiro 2 + Servente 1; CR-3 sem o carpinteiro)', async () => {
+    const { store } = await comRecorte()
+    store.clearBudget()
+    store.importBudgetCsv(['codigo;descricao;unidade;quantidade;custo unitario;equipe', '104658;;m²;100;300;2', '103681;;m³;320;800;4'].join('\n'))
+    expect(store.state.budget.map((l) => l.fonte)).toEqual([ALTERADA.replace('SINAPI SP', 'SINAPI SP'), ALTERADA])
+    const r = store.generateFromBudget({ mode: 'FS', overlapPct: 0 })
+    if (!r.ok) throw new Error(r.erro)
+    const cr2 = r.created.find((t) => t.sinapi === '104658')!
+    const cr3 = r.created.find((t) => t.sinapi === '103681')!
+    expect(cr2.resources).toEqual([{ resource: 'Pedreiro', units: 2 }, { resource: 'Servente', units: 4 }])
+    expect(cr2.duracaoMin / 480).toBe(4)
+    expect(cr3.resources).toEqual([{ resource: 'Pedreiro', units: 4 }, { resource: 'Servente', units: 4 }, { resource: 'Carpinteiro', units: 1 }])
+    expect(cr3.duracaoMin / 480).toBe(15)
+  })
+
+  it('só a quantidade ou a equipe mudam: a linha segue "publicada" e a equipe do recorte continua', async () => {
     const { store, linha } = await comLinha('equipe', '103332;;m²;640;4')
     store.updateBudgetLine(linha.id, { quantity: 700, team: 5 })
     const l = store.state.budget[0]!
@@ -572,7 +594,7 @@ describe('linha da planilha alterada pelo usuário: fonte, equipe e notas (B2)',
     expect(l.equipe).toEqual([{ recurso: 'Servente', proporcao: 0.5 }])
     const t = gerar(store)
     expect(t.notes).toContain('Função principal PEDREIRO, RUP 1,6225376 h/m².')
-    expect(t.notes).not.toContain('informados pelo usuário')
+    expect(t.notes).not.toContain('informad')
   })
 
   it('editar a célula com o MESMO valor não altera a linha', async () => {
@@ -581,13 +603,52 @@ describe('linha da planilha alterada pelo usuário: fonte, equipe e notas (B2)',
     expect(store.state.budget[0]!.fonte).toBe(PUBLICADA)
   })
 
-  it('a linha alterada sobrevive ao recarregar e continua alterada (fonte gravada com a marca)', async () => {
+  it('a linha alterada sobrevive ao recarregar e continua alterada, com a equipe por função', async () => {
     const { store, adaptador, linha } = await comLinha('equipe', '103332;;m²;640;4')
     store.updateBudgetLine(linha.id, { rup: 0.9 })
     expect(await store.salvarAgora()).toBe(true)
     const outra = await reabrir(adaptador)
-    expect(outra.state.budget[0]).toMatchObject({ fonte: ALTERADA, rup: 0.9, helperRatio: 0.5 })
-    expect('equipe' in outra.state.budget[0]!).toBe(false)
+    expect(outra.state.budget[0]).toMatchObject({ fonte: ALTERADA, rup: 0.9, equipe: [{ recurso: 'Servente', proporcao: 0.5 }] })
+  })
+})
+
+describe('lote da planilha com linhas de outro recorte (B1)', () => {
+  async function comLinhasSp() {
+    const ctx = await comRecorte()
+    ctx.store.clearBudget()
+    ctx.store.importBudgetCsv(['codigo;descricao;unidade;quantidade;equipe', '103332;;m²;640;4', '104658;;m²;100;2'].join('\n'))
+    expect(ctx.store.state.budget).toHaveLength(2)
+    return ctx
+  }
+
+  it('troca da data-base: as linhas ficam com a fonte do recorte antigo e o lote recusa (prévia e geração), sem criar tarefa, listando as linhas', async () => {
+    const { store } = await comLinhasSp()
+    expect(store.atualizarDadosObra({ ...sp, dataBaseSinapi: '2026-10' })).toEqual({ ok: true })
+    expect(store.recorteAtual).toBeUndefined()
+    const antes = store.state.tasks.length
+    const msg = '2 linha(s) da planilha vêm de SINAPI SP 09/2026 não desonerado, que não é o recorte desta obra (a obra não tem recorte): 103332, 104658. Remova essas linhas e inclua de novo as composições; nada foi gerado.'
+    expect(store.previewBudgetBatch()).toEqual({ erro: msg })
+    expect(store.generateFromBudget()).toEqual({ ok: false, erro: msg })
+    expect(store.state.tasks).toHaveLength(antes)
+    expect(store.state.budget).toHaveLength(2)
+  })
+
+  it('obra com OUTRO recorte (data-base 2026-10 importada): as linhas de 2026-09 também são recusadas, citando o recorte da obra', async () => {
+    const { store } = await comLinhasSp()
+    store.atualizarDadosObra({ ...sp, dataBaseSinapi: '2026-10' })
+    const novo = JSON.parse(amostraTexto)
+    novo.dataBase = '2026-10'
+    expect(await store.importarRecorteSinapi(JSON.stringify(novo))).toEqual({ ok: true })
+    const r = store.generateFromBudget()
+    expect(r).toMatchObject({ ok: false })
+    expect(r.ok ? '' : r.erro).toContain('(SINAPI SP 10/2026 não desonerado)')
+  })
+
+  it('linhas do catálogo ilustrativo (sem fonte) e do recorte vigente seguem gerando', async () => {
+    const { store } = await comLinhasSp()
+    expect(store.generateFromBudget({ mode: 'FS', overlapPct: 0 }).ok).toBe(true)
+    const { store: sem } = await abrir()
+    expect(sem.generateFromBudget({ mode: 'SS', overlapPct: 40 }).ok).toBe(true)
   })
 })
 
@@ -755,5 +816,71 @@ describe('totais do arquivo conferem com a lista (segurança, Info 3)', () => {
     r.totais.composicoes = 99
     expect(await store.importarRecorteSinapi(texto(r))).toMatchObject({ ok: false, erro: 'Os totais do recorte não conferem com a quantidade de composições.' })
     expect(adaptador.recortes.size).toBe(0)
+  })
+})
+
+describe('índice da troca de obra montado sob a fila (resíduo do R-3)', () => {
+  it('a troca de obra começa antes e grava o índice durante a importação: o recorte, a referência da obra e o índice terminam coerentes', async () => {
+    const { adaptador, store } = await abrir()
+    const idA = await obraSp(store)
+    const b = await store.criarObra({ modelo: 'exemplo' })
+    if (!b.ok) throw new Error(b.erro)
+    await store.trocarObra(idA)
+    // A troca para a B fica parada logo antes de gravar o índice (como se o armazenamento demorasse)
+    let abrirIndice!: () => void
+    const portao = new Promise<void>((r) => (abrirIndice = r))
+    const gravarIndice = adaptador.gravarIndice.bind(adaptador)
+    adaptador.gravarIndice = async (indice) => {
+      await portao
+      return gravarIndice(indice)
+    }
+    const troca = store.trocarObra(b.id)
+    const importacao = store.importarRecorteSinapi(texto())
+    abrirIndice()
+    const [rt, ri] = await Promise.all([troca, importacao])
+    expect(rt).toEqual({ ok: true })
+    // Ou a importação foi recusada (a obra mudou antes), ou foi gravada inteira: nunca "ok" sem vínculo, nem registro sem referência
+    const obraA = JSON.parse(adaptador.obras.get(idA)!.json)
+    const linhaA = adaptador.indice!.obras.find((o) => o.id === idA)!
+    if (ri.ok) {
+      expect(obraA.meta.recorteSinapi?.chave).toBe(CHAVE)
+      expect(linhaA.recorteSinapi).toBe(CHAVE)
+      expect(adaptador.recortes.size).toBe(1)
+    } else {
+      expect(ri.erro).toBe('A obra ativa mudou durante a operação. Nada foi gravado: refaça na obra desejada.')
+      expect(obraA.meta.recorteSinapi).toBeUndefined()
+      expect(linhaA.recorteSinapi).toBeUndefined()
+      expect(adaptador.recortes.size).toBe(0)
+    }
+    expect(adaptador.indice!.obraAtivaId).toBe(b.id)
+    expect(store.obraAtivaId).toBe(b.id)
+  })
+
+  it('o índice da troca é gravado depois de uma gravação já em andamento (a referência dela não se perde)', async () => {
+    const { adaptador, store } = await abrir()
+    const idA = await obraSp(store)
+    const b = await store.criarObra({ modelo: 'exemplo' })
+    if (!b.ok) throw new Error(b.erro)
+    await store.trocarObra(idA)
+    let abrirObra!: () => void
+    const portao = new Promise<void>((r) => (abrirObra = r))
+    let noPortao = false
+    const gravarObra = adaptador.gravarObra.bind(adaptador)
+    adaptador.gravarObra = async (reg, indice, extras) => {
+      if (extras?.gravarRecorte) {
+        noPortao = true
+        await portao
+      }
+      return gravarObra(reg, indice, extras)
+    }
+    const importacao = store.importarRecorteSinapi(texto())
+    await vi.waitFor(() => expect(noPortao).toBe(true))
+    const troca = store.trocarObra(b.id)
+    abrirObra()
+    expect(await importacao).toEqual({ ok: true })
+    expect(await troca).toEqual({ ok: true })
+    expect(adaptador.indice!.obras.find((o) => o.id === idA)?.recorteSinapi).toBe(CHAVE)
+    expect(adaptador.recortes.size).toBe(1)
+    expect(adaptador.indice!.obraAtivaId).toBe(b.id)
   })
 })

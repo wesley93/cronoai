@@ -304,25 +304,43 @@ describe('notas da tarefa (D-23)', () => {
   })
 })
 
-describe('notas com valores informados pelo usuário (B2)', () => {
+describe('notas com valores informados pelo usuário (B2): só o que mudou é "informado"', () => {
   const mo = [f(SERV, 'SERVENTE', 0.8112688), f(PED, 'PEDREIRO', 1.6225376)]
   const fonte = 'SP 09/2026 não desonerado · alterado'
+  const recursos = [{ resource: 'Pedreiro', units: 4 }, { resource: 'Servente', units: 2 }]
+  const nota = (informado: Parameters<typeof notasDaTarefaSinapi>[0]['informado'], rec = recursos) =>
+    notasDaTarefaSinapi({ codigo: '103332', quantidade: 640, unidade: 'm²', fonte, maoDeObra: mo, recursos: rec, informado })
+  const CAB = 'Gerado pelo CronoAI a partir do SINAPI 103332 (SP 09/2026 não desonerado · alterado): 640 m². '
+  const FIM = ' HH de subcomposições (ex.: preparo de argamassa) não incluída.'
 
-  it('cita a função, a RUP e o custo EFETIVOS como "informados pelo usuário" e o publicado só como referência', () => {
-    const recursos = [{ resource: 'Carpinteiro', units: 4 }, { resource: 'Servente', units: 2 }]
-    const n = notasDaTarefaSinapi({ codigo: '103332', quantidade: 640, unidade: 'm²', fonte, maoDeObra: mo, recursos, informado: { rup: 0.9, custo: 150, profissional: 'Carpinteiro', custoPublicado: 123.96 } })
-    expect(n).toBe(
-      'Gerado pelo CronoAI a partir do SINAPI 103332 (SP 09/2026 não desonerado · alterado): 640 m². Função principal Carpinteiro, RUP 0,9 h/m² e custo R$ 150/m² informados pelo usuário. ' +
-        'Publicado no SINAPI, só como referência: PEDREIRO, RUP 1,6225376 h/m², R$ 123,96/m². Equipe: Carpinteiro 4 + Servente 2. HH de subcomposições (ex.: preparo de argamassa) não incluída.',
+  it('só a RUP mudou: a função e o custo seguem como publicados; a RUP é "informada" com a publicada ao lado', () => {
+    expect(nota({ rup: 0.9 })).toBe(CAB + 'Função principal PEDREIRO. RUP 0,9 h/m² (informada pelo usuário; publicada 1,6225376). Equipe: Pedreiro 4 + Servente 2.' + FIM)
+  })
+
+  it('só o custo mudou: o custo é "informado" (com o publicado), a RUP segue publicada', () => {
+    expect(nota({ custo: 150, custoPublicado: 123.96 })).toBe(
+      CAB + 'Função principal PEDREIRO. RUP 1,6225376 h/m². Custo R$ 150/m² (informado pelo usuário; publicado R$ 123,96). Equipe: Pedreiro 4 + Servente 2.' + FIM,
     )
+  })
+
+  it('só o profissional mudou: a função é "informada" e a equipe citada é a efetiva (nunca "Função principal PEDREIRO … Equipe: Carpinteiro 4")', () => {
+    const n = nota({ profissional: 'Carpinteiro' }, [{ resource: 'Carpinteiro', units: 4 }, { resource: 'Servente', units: 2 }])
+    expect(n).toBe(CAB + 'Função principal Carpinteiro (informada pelo usuário; publicada PEDREIRO). RUP 1,6225376 h/m². Equipe: Carpinteiro 4 + Servente 2.' + FIM)
     expect(n).not.toContain('Função principal PEDREIRO')
   })
 
-  it('sem mão de obra publicada (RUP digitada): só os valores informados, sem linha de referência', () => {
-    const n = notasDaTarefaSinapi({ codigo: '107113', quantidade: 100, unidade: 'M', fonte, recursos: [{ resource: 'Pedreiro', units: 2 }], informado: { rup: 1.5, custo: 97.45, profissional: 'Pedreiro' } })
-    expect(n).toBe(
-      'Gerado pelo CronoAI a partir do SINAPI 107113 (SP 09/2026 não desonerado · alterado): 100 M. Função principal Pedreiro, RUP 1,5 h/M e custo R$ 97,45/M informados pelo usuário. Equipe: Pedreiro 2. HH de subcomposições (ex.: preparo de argamassa) não incluída.',
+  it('RUP e custo mudaram: os dois são citados como informados; o profissional não', () => {
+    expect(nota({ rup: 0.9, custo: 150, custoPublicado: 123.96 })).toBe(
+      CAB + 'Função principal PEDREIRO. RUP 0,9 h/m² (informada pelo usuário; publicada 1,6225376). Custo R$ 150/m² (informado pelo usuário; publicado R$ 123,96). Equipe: Pedreiro 4 + Servente 2.' + FIM,
     )
+  })
+
+  it('composição sem mão de obra publicada (calculadora): RUP e função informadas, o custo NÃO é citado como informado', () => {
+    const n = notasDaTarefaSinapi({ codigo: '107113', quantidade: 100, unidade: 'M', fonte, recursos: [{ resource: 'Pedreiro', units: 2 }], informado: { rup: 1.5, profissional: 'Pedreiro' } })
+    expect(n).toBe(
+      'Gerado pelo CronoAI a partir do SINAPI 107113 (SP 09/2026 não desonerado · alterado): 100 M. Função principal Pedreiro (informada pelo usuário). RUP 1,5 h/M (informada pelo usuário). Equipe: Pedreiro 2.' + FIM,
+    )
+    expect(n).not.toContain('Custo')
   })
 
   it('horasDeSupervisao: quantidade × coeficiente, com o rótulo da função; quantidade negativa não dá hora negativa', () => {

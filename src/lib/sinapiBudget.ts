@@ -161,7 +161,8 @@ export function parseBudgetCsv(text: string, catalog: readonly ItemCatalogoSinap
   const rows = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((r) => r.trim())
   if (!rows.length) return { lines: [], errors: ['Arquivo vazio.'] }
   const sep = (rows[0].match(/;/g)?.length ?? 0) >= (rows[0].match(/,/g)?.length ?? 0) ? ';' : ','
-  const header = splitCsvLine(rows[0], sep).map((h) => normalizeText(h))
+  // O modelo baixável usa "custo_unitario": o sublinhado vale como espaço, para casar com o apelido "custo unitario"
+  const header = splitCsvLine(rows[0], sep).map((h) => normalizeText(h).replace(/_/g, ' '))
   const col: Partial<Record<keyof typeof HEADER_ALIASES, number>> = {}
   for (const [key, aliases] of Object.entries(HEADER_ALIASES)) {
     const idx = header.findIndex((h) => aliases.includes(h))
@@ -197,8 +198,10 @@ export function parseBudgetCsv(text: string, catalog: readonly ItemCatalogoSinap
     }
     const custoFinal = Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : (item?.unitCost ?? 0)
     const profissionalFinal = (get('professional') || item?.professional || 'Pedreiro').slice(0, 40)
-    // Do recorte, mas com RUP, custo ou profissional diferentes do publicado: a linha é "alterada" e não usa mais a equipe proporcional dele
+    // Do recorte, mas com RUP, custo ou profissional diferentes do publicado: a linha é "alterada" (fonte "· alterado").
+    // RUP e custo mantêm a equipe por função (a proporção publicada); só trocar o profissional a derruba (ver `equipe` abaixo)
     const alterada = !!item?.fonte && (finalRup !== item.rup || custoFinal !== item.unitCost || profissionalFinal !== item.professional)
+    const profissionalTrocado = !!item?.fonte && profissionalFinal !== item.professional
     lines.push({
       code: code || item?.code || '',
       description,
@@ -208,11 +211,11 @@ export function parseBudgetCsv(text: string, catalog: readonly ItemCatalogoSinap
       rup: finalRup,
       unitCost: custoFinal,
       professional: profissionalFinal,
-      helperRatio: alterada ? HELPER_RATIO_PADRAO : (item?.helperRatio ?? HELPER_RATIO_PADRAO),
+      helperRatio: profissionalTrocado ? HELPER_RATIO_PADRAO : (item?.helperRatio ?? HELPER_RATIO_PADRAO),
       team: Number.isFinite(team) && team >= 1 ? Math.round(team) : defaultTeam,
       group: item?.group ?? inferGroup(description),
-      // Equipe por função só enquanto a linha é o publicado; alterada (RUP, custo ou profissional), usa o servente por oficial comum
-      ...(item?.equipe && !alterada ? { equipe: item.equipe } : {}),
+      // Equipe por função enquanto o profissional é o publicado (mesmo com RUP ou custo alterados); profissional trocado usa o servente por oficial comum
+      ...(item?.equipe && !profissionalTrocado ? { equipe: item.equipe } : {}),
       ...(item?.fonte ? { fonte: alterada ? marcarFonteAlterada(item.fonte) : item.fonte } : {}),
     })
   })

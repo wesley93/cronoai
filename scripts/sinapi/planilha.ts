@@ -96,6 +96,9 @@ interface Elemento {
   fim: number
 }
 
+/** Abertura de tag com mais que isto é recusada: os atributos reais têm algumas dezenas de caracteres, e a leitura deles não pode ficar quadrática. */
+const MAX_ABERTURA = 1000
+
 const ESPACO_OU_FIM = new Set([9, 10, 13, 32, 47, 62]) // tab, LF, CR, espaço, "/" e ">"
 
 /**
@@ -112,6 +115,7 @@ function proximoElemento(xml: string, nome: string, de: number): Elemento | unde
   }
   const fechaAbertura = xml.indexOf('>', i)
   if (fechaAbertura < 0) throw new ErroPlanilha('O XML tem uma tag que não termina.')
+  if (fechaAbertura - i > MAX_ABERTURA) throw new ErroPlanilha('O XML tem uma tag com atributos longos demais.')
   if (xml.charCodeAt(fechaAbertura - 1) === 47) return { atributos: xml.slice(i + 1 + nome.length, fechaAbertura - 1), corpo: '', fim: fechaAbertura + 1 }
   const fecha = xml.indexOf('</' + nome + '>', fechaAbertura + 1)
   if (fecha < 0) throw new ErroPlanilha('O XML tem um elemento sem fechamento.')

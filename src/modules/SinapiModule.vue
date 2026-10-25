@@ -179,7 +179,7 @@ const preview = computed(() => (valid.value ? project.previewSinapiTask(input.va
 const generated = computed(() => project.leaves.filter((t) => t.notes?.startsWith('Gerado pelo CronoAI')))
 /** Composição do recorte SEM mão de obra publicada: a RUP é a que o usuário digitou, e a fonte e as notas dizem isso. */
 const fonteEfetiva = computed(() => (item.fonte && !item.equipe ? marcarFonteAlterada(item.fonte) : item.fonte))
-const informado = computed<ValoresInformados | undefined>(() => (item.fonte && !item.equipe ? { rup: item.rup, custo: item.unitCost, profissional: item.professional } : undefined))
+const informado = computed<ValoresInformados | undefined>(() => (item.fonte && !item.equipe ? { rup: item.rup, profissional: item.professional } : undefined))
 const textoEquipe = computed(() => recursos.value.filter((r) => r.units > 0).map((r) => `${r.resource} ${r.units}`).join(' + '))
 
 function addToSheet() {

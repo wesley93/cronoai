@@ -222,3 +222,31 @@ describe('planilha: mensagem sem repetir o nome vindo do .rels', () => {
     expect(erroDe(() => [...p.linhas('A')])).toBe('Entrada "xl/worksheets/inexistente.xml" ausente no xlsx.')
   })
 })
+
+describe('planilha: abertura de tag longa é recusada rápido (atributos não quadráticos)', () => {
+  const abas: AbaSintetica[] = [{ nome: 'A', linhas: [['x']] }]
+
+  it('"<row" + ~100 KB de atributos + ">" (fechada) é recusada em menos de 1 s, no sharedStrings, na aba e no .rels', () => {
+    const longa = repetir((i) => ` a${i}="b"`, 10_000)
+    expect(longa.length).toBeGreaterThan(90_000)
+    const casos = [
+      abrir(abas, { linhasBrutas: `<row${longa}></row>` }),
+      abrir(abas, { sharedStringsBruto: `<si${longa}><t>x</t></si>` }),
+      abrir(abas, { linhasBrutas: `<row r="1"><c${longa}><v>1</v></c></row>` }),
+    ]
+    for (const p of casos) {
+      const t = performance.now()
+      expect(erroDe(() => [...p.linhas('A')])).toBe('O XML tem uma tag com atributos longos demais.')
+      expect(performance.now() - t).toBeLessThan(1000)
+    }
+    const t = performance.now()
+    expect(erroDe(() => abrir(abas, { relsBruto: `<Relationships><Relationship${longa}/></Relationships>` }))).toBe('O XML tem uma tag com atributos longos demais.')
+    expect(performance.now() - t).toBeLessThan(1000)
+  })
+
+  it('abertura de até 1.000 caracteres ainda é lida (a normal tem dezenas)', () => {
+    const quase = ' ' + 'a="' + 'b'.repeat(900) + '"'
+    const p = abrir(abas, { linhasBrutas: `<row r="1"${quase}><c r="A1"><v>7</v></c></row>` })
+    expect([...p.linhas('A')][0]!.celulas).toEqual([{ coluna: 1, valor: 7 }])
+  })
+})

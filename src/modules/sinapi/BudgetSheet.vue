@@ -3,7 +3,7 @@ import { computed, reactive, ref } from 'vue'
 import { FileSpreadsheet, Upload, Download, Trash2, Wand2, KeyRound, Eraser } from '@lucide/vue'
 import type { ScheduledTask, Task } from '@/types/domain'
 import type { BudgetLine } from '@/lib/sinapiBudget'
-import { BUDGET_CSV_TEMPLATE, DEFAULT_BATCH_OPTIONS, ehFonteAlterada, lineDuration, lineName, lineResources, parseNumberBR } from '@/lib/sinapiBudget'
+import { BUDGET_CSV_TEMPLATE, DEFAULT_BATCH_OPTIONS, ehFonteAlterada, fonteBase, lineDuration, lineName, lineResources, parseNumberBR } from '@/lib/sinapiBudget'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import { downloadText } from '@/lib/download'
@@ -20,6 +20,8 @@ const opts = reactive({ ...DEFAULT_BATCH_OPTIONS })
 const MAX_CSV_BYTES = 2 * 1024 * 1024
 
 const lines = computed(() => project.state.budget)
+/** A linha vem de um recorte que não é o da obra (outra data-base ou UF, recorte trocado ou removido). */
+const outroRecorte = (l: BudgetLine) => !!l.fonte && fonteBase(l.fonte) !== project.recorteAtual?.fonte
 const groups = computed(() => project.tasksByWbs.filter((t) => t.isSummary && t.outlineLevel === 1))
 const groupName = (wbs: string) => groups.value.find((g) => g.wbs === wbs)?.name ?? 'Novo grupo (Serviços complementares)'
 const totals = computed(() => ({
@@ -107,10 +109,18 @@ const cell =
               <!-- Fonte do custo e da RUP da linha: o recorte da obra (verde), o recorte com valores mudados pelo usuário (âmbar tracejado) ou o catálogo ilustrativo (cinza) -->
               <div class="mt-0.5">
                 <span
-                  :class="!l.fonte ? 'chip-neutral' : ehFonteAlterada(l.fonte) ? 'chip-warn border-dashed' : 'chip-ok'"
-                  :title="!l.fonte ? 'Custo e RUP ilustrativos: valide na tabela SINAPI da UF e da data-base' : ehFonteAlterada(l.fonte) ? 'RUP, custo ou profissional diferentes do publicado no recorte: valores informados pelo usuário' : 'Custo e RUP publicados no recorte SINAPI da obra'"
+                  :class="!l.fonte ? 'chip-neutral' : outroRecorte(l) ? 'chip-critical' : ehFonteAlterada(l.fonte) ? 'chip-warn border-dashed' : 'chip-ok'"
+                  :title="
+                    !l.fonte
+                      ? 'Custo e RUP ilustrativos: valide na tabela SINAPI da UF e da data-base'
+                      : outroRecorte(l)
+                        ? `Custo e RUP vêm de ${fonteBase(l.fonte)}, que não é o recorte desta obra${project.recorteAtual ? ` (${project.recorteAtual.fonte})` : ' (a obra não tem recorte)'}: o lote não gera esta linha. Remova-a e inclua a composição de novo.`
+                        : ehFonteAlterada(l.fonte)
+                          ? 'RUP, custo ou profissional diferentes do publicado no recorte: valores informados pelo usuário'
+                          : 'Custo e RUP publicados no recorte SINAPI da obra'
+                  "
                   data-testid="fonte-da-linha"
-                >{{ l.fonte ? rotuloCurtoDaFonte(l.fonte) : 'ilustrativo' }}</span>
+                >{{ l.fonte ? (outroRecorte(l) ? `${rotuloCurtoDaFonte(l.fonte)} · outro recorte` : rotuloCurtoDaFonte(l.fonte)) : 'ilustrativo' }}</span>
               </div>
             </td>
             <td>

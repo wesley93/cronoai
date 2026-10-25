@@ -112,7 +112,7 @@ import {
   montarRegistroDeRecorte,
   type IndiceRecorte,
 } from '@/lib/recorteSinapi'
-import { notasDaTarefaSinapi, type ValoresInformados } from '@/lib/sinapiRup'
+import { equipeDaComposicao, notasDaTarefaSinapi, rotuloFuncao, type ValoresInformados } from '@/lib/sinapiRup'
 import { VERSAO_RECORTE, type FuncaoMaoDeObra, type ItemCatalogoSinapi, type RecorteSinapi } from '@/types/sinapi'
 import { ROTULO_RESTRICAO, calendarioExiste, montarRestricao, tarefasManuaisAlteradas, validarPrazoFinal, validarRestricao, type TipoRestricaoTela } from '@/lib/restricoes'
 import { lagEmDias, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
@@ -397,6 +397,11 @@ export const useProjectStore = defineStore('project', () => {
         const em = agora()
         const novoIndice = indiceComAtiva(em)
         const orfaos = recortesOrfaos(indice?.obras ?? [], novoIndice.obras).filter((c) => permitidas.has(c))
+        // Última conferência antes de gravar: se a obra ativa mudou durante os awaits acima, nada é gravado (e nada é desfeito na obra nova)
+        if (opcoes.obraId !== undefined && opcoes.obraId !== obraAtivaId.value) {
+          desfazer = undefined
+          return false
+        }
         await armazenamento.gravarObra(criarRegistro(obraAtivaId.value, state, em), novoIndice, { gravarRecorte: opcoes.gravarRecorte, excluirRecortes: orfaos })
         aceitarIndice(novoIndice)
         // Sem IndexedDB o "salvo" é só na memória da sessão: o aviso de indisponibilidade continua.
@@ -408,7 +413,8 @@ export const useProjectStore = defineStore('project', () => {
         void consultarCota().catch(() => undefined)
         return true
       } catch (err) {
-        desfazer?.() // a transação não gravou nada: a referência volta ao que era
+        // A transação não gravou nada: a referência volta ao que era, mas só se a obra ativa ainda é a da ação (senão o estado já é de outra obra)
+        if (opcoes.obraId === undefined || opcoes.obraId === obraAtivaId.value) desfazer?.()
         registrarFalhaDeGravacao(err)
         return false
       }
@@ -1320,14 +1326,16 @@ export const useProjectStore = defineStore('project', () => {
   function updateBudgetLine(id: string, patch: Partial<Omit<BudgetLine, 'id'>>) {
     const l = state.budget.find((x) => x.id === id)
     if (!l) return
-    // Linha do recorte com RUP, custo ou profissional mudados: deixa de ser "o publicado" (fonte "· alterado") e não usa mais a equipe proporcional dele
+    // Linha do recorte com RUP, custo ou profissional mudados: deixa de ser "o publicado" (fonte "· alterado")
     const mudaPublicado =
       !!l.fonte &&
       !ehFonteAlterada(l.fonte) &&
       ((patch.rup !== undefined && patch.rup !== l.rup) || (patch.unitCost !== undefined && patch.unitCost !== l.unitCost) || (patch.professional !== undefined && patch.professional !== l.professional))
+    const profissionalTrocado = !!l.fonte && patch.professional !== undefined && patch.professional !== l.professional
     Object.assign(l, patch)
-    if (mudaPublicado) {
-      l.fonte = marcarFonteAlterada(l.fonte!)
+    if (mudaPublicado) l.fonte = marcarFonteAlterada(l.fonte!)
+    // Só trocar o profissional derruba a equipe por função (a proporção publicada era para a função principal do recorte)
+    if (profissionalTrocado && l.equipe) {
       delete l.equipe
       l.helperRatio = HELPER_RATIO_PADRAO
     }
@@ -1418,11 +1426,34 @@ export const useProjectStore = defineStore('project', () => {
   /** Valores da linha alterada pelo usuário, para as notas da tarefa (o publicado entra só como referência). */
   function informadoDaLinha(l: BudgetLine): ValoresInformados | undefined {
     if (!ehFonteAlterada(l.fonte)) return undefined
-    return { rup: l.rup, custo: l.unitCost, profissional: l.professional, custoPublicado: composicaoDaLinha(l)?.custoUnitario }
+    const comp = composicaoDaLinha(l)
+    const eq = comp ? equipeDaComposicao(comp.maoDeObra) : undefined
+    if (!comp) return { rup: l.rup, custo: l.unitCost, profissional: l.professional }
+    // Só o que mudou em relação ao publicado é "informado pelo usuário"
+    return {
+      ...(eq && l.rup !== eq.principal.coeficiente ? { rup: l.rup } : !eq ? { rup: l.rup } : {}),
+      ...(l.unitCost !== comp.custoUnitario ? { custo: l.unitCost, custoPublicado: comp.custoUnitario } : {}),
+      ...(eq && l.professional !== rotuloFuncao(eq.principal.funcao) ? { profissional: l.professional } : !eq ? { profissional: l.professional } : {}),
+    }
+  }
+
+  /**
+   * Linhas da planilha de OUTRO recorte (a data-base ou a UF mudou, o recorte foi trocado ou removido): o lote não as gera com o custo antigo.
+   * A mensagem lista as linhas; o BudgetSheet as marca com o chip "outro recorte".
+   */
+  function erroDeFontesDoLote(linhas: readonly BudgetLine[]): string | undefined {
+    const ruins = linhas.filter((l) => erroDeFonte(l.fonte))
+    if (!ruins.length) return undefined
+    const a = recorteAtual.value
+    const fontes = [...new Set(ruins.map((l) => fonteBase(l.fonte!)))].join(', ')
+    const lista = ruins.slice(0, 5).map((l) => l.code || l.description).join(', ') + (ruins.length > 5 ? ` e mais ${ruins.length - 5}` : '')
+    return `${ruins.length} linha(s) da planilha vêm de ${fontes}, que não é o recorte desta obra${a ? ` (${a.fonte})` : ' (a obra não tem recorte)'}: ${lista}. Remova essas linhas e inclua de novo as composições; nada foi gerado.`
   }
 
   function previewBudgetBatch(opts: BatchOptions = DEFAULT_BATCH_OPTIONS): PreviaPlanilha | undefined {
     if (!state.budget.length) return undefined
+    const erroFontes = erroDeFontesDoLote(state.budget)
+    if (erroFontes) return { erro: erroFontes }
     let lote: ReturnType<typeof buildBudgetBatch>
     try {
       lote = buildBudgetBatch(state.budget, opts)
@@ -1444,6 +1475,8 @@ export const useProjectStore = defineStore('project', () => {
   /** Gera os pacotes da planilha na EAP (com linha de base da inclusão) e esvazia a planilha. */
   function generateFromBudget(opts: BatchOptions = DEFAULT_BATCH_OPTIONS): { ok: true; created: Task[] } | { ok: false; erro: string } {
     if (!state.budget.length) return { ok: true, created: [] }
+    const erroFontes = erroDeFontesDoLote(state.budget)
+    if (erroFontes) return { ok: false, erro: erroFontes }
     let lote: ReturnType<typeof buildBudgetBatch>
     try {
       lote = buildBudgetBatch(state.budget, opts)
@@ -1905,14 +1938,22 @@ export const useProjectStore = defineStore('project', () => {
       marcarIlegivel(id, true)
       return { ok: false, erro: r.erro }
     }
-    const lista = (indice?.obras ?? obrasPlanas()).map((o) => (o.id === id ? { ...o, ilegivel: undefined } : o))
-    const novoIndice = indiceComAtivaNova(id, lista)
-    try {
-      await armazenamento.gravarIndice(novoIndice)
-    } catch (err) {
-      return { ok: false, erro: mensagemDeFalha(err) }
-    }
-    aceitarIndice(novoIndice)
+    // A lista e o índice são montados SOB A FILA, depois de qualquer gravação em andamento: um índice montado antes dela
+    // (sem a referência ao recorte que ela acabou de gravar) não pode sobrescrevê-la
+    const tarefa: Promise<{ ok: true; novoIndice: IndiceObras } | { ok: false; erro: string }> = fila.then(async () => {
+      const lista = (indice?.obras ?? obrasPlanas()).map((o) => (o.id === id ? { ...o, ilegivel: undefined } : o))
+      const novoIndice = indiceComAtivaNova(id, lista)
+      try {
+        await armazenamento!.gravarIndice(novoIndice)
+        return { ok: true as const, novoIndice }
+      } catch (err) {
+        return { ok: false as const, erro: mensagemDeFalha(err) }
+      }
+    })
+    fila = tarefa
+    const gravado = await tarefa
+    if (!gravado.ok) return { ok: false, erro: gravado.erro }
+    aceitarIndice(gravado.novoIndice)
     obraAtivaId.value = id
     await aplicarEstado(r.estado)
     await carregarRecorteDaObra()

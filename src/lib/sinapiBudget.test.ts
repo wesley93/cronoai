@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ItemCatalogoSinapi } from '@/types/sinapi'
 import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
-import { HELPER_RATIO_PADRAO, MAX_BUDGET_LINES, ehFonteAlterada, fonteBase, lineDuration, lineFromCatalog, lineResources, marcarFonteAlterada, parseBudgetCsv, parseNumberBR } from './sinapiBudget'
+import { BUDGET_CSV_TEMPLATE, HELPER_RATIO_PADRAO, MAX_BUDGET_LINES, ehFonteAlterada, fonteBase, lineDuration, lineFromCatalog, lineResources, marcarFonteAlterada, parseBudgetCsv, parseNumberBR } from './sinapiBudget'
 
 describe('planilha SINAPI: bordas do CSV', () => {
   it('arquivo vazio', () => {
@@ -102,27 +102,74 @@ describe('CSV com o código do recorte (AC-12)', () => {
     expect(r.lines[0]).toMatchObject({ fonte: 'SINAPI SP 09/2026 não desonerado', equipe: [{ recurso: 'Servente', proporcao: 0.5 }], helperRatio: 0 })
   })
 
-  it('RUP digitada diferente da publicada: fonte "· alterado", sem a equipe proporcional do recorte e com o servente por oficial comum (0,5)', () => {
-    const r = parseBudgetCsv('codigo;descricao;unidade;quantidade;rup;equipe\n103332;;m²;640;0,9;4', [item])
-    const l = r.lines[0]!
-    expect(l).toMatchObject({ rup: 0.9, fonte: ALTERADA, helperRatio: HELPER_RATIO_PADRAO })
-    expect(HELPER_RATIO_PADRAO).toBe(0.5)
-    expect('equipe' in l).toBe(false)
+  // Itens reais do recorte de SP (09/2026) para o CR-2 (104658) e o CR-3 (103681): proporções publicadas 1,279 ÷ 0,639 e 1,145 ÷ 1,428 / 0,357 ÷ 1,428
+  const cr2: ItemCatalogoSinapi = { ...item, code: '104658', description: 'PISO PODOTÁTIL', rup: 0.639, unitCost: 208.85, group: '06', equipe: [{ recurso: 'Servente', proporcao: 1.279 / 0.639 }] }
+  const cr3: ItemCatalogoSinapi = {
+    ...item,
+    code: '103681',
+    description: 'CONCRETAGEM DE VIGAS E LAJES',
+    unit: 'm³',
+    rup: 1.428,
+    unitCost: 732.45,
+    group: '02',
+    equipe: [{ recurso: 'Servente', proporcao: 1.145 / 1.428 }, { recurso: 'Carpinteiro', proporcao: 0.357 / 1.428 }],
+  }
+  const texto = (cab: string, linha: string) => `codigo;descricao;unidade;quantidade;${cab}\n${linha}`
+
+  it('RUP digitada diferente da publicada: fonte "· alterado", MANTÉM a equipe por função do recorte (duração pela RUP digitada)', () => {
+    const l = parseBudgetCsv('codigo;descricao;unidade;quantidade;rup;equipe\n103332;;m²;640;0,9;4', [item]).lines[0]!
+    expect(l).toMatchObject({ rup: 0.9, fonte: ALTERADA, helperRatio: 0, equipe: [{ recurso: 'Servente', proporcao: 0.5 }] })
     expect(lineDuration(l, 8)).toBe(18) // 640 × 0,9 ÷ (4 × 8) = 18 (com a RUP publicada seriam 33)
     expect(lineResources(l)).toEqual([{ resource: 'Pedreiro', units: 4 }, { resource: 'Servente', units: 2 }])
   })
 
-  it('custo digitado diferente do publicado: fonte "· alterado" e o custo digitado', () => {
+  it('custo digitado diferente do publicado: fonte "· alterado", o custo digitado e a equipe por função mantida', () => {
     const l = parseBudgetCsv('codigo;descricao;unidade;quantidade;custo unitario;equipe\n103332;;m²;640;150,00;4', [item]).lines[0]!
-    expect(l).toMatchObject({ unitCost: 150, rup: 1.6225376, fonte: ALTERADA, helperRatio: 0.5 })
-    expect('equipe' in l).toBe(false)
+    expect(l).toMatchObject({ unitCost: 150, rup: 1.6225376, fonte: ALTERADA, helperRatio: 0, equipe: [{ recurso: 'Servente', proporcao: 0.5 }] })
   })
 
-  it('profissional trocado no CSV: fonte "· alterado", a equipe efetiva é a do profissional informado (nunca a do recorte)', () => {
+  it('CR-2: custo ou RUP alterados mantêm Pedreiro 2 + Servente 4 (antes desta rodada: Pedreiro 2 + Servente 1, e o servente precisaria de 16 d numa tarefa de 4 d)', () => {
+    for (const cab of ['custo unitario;equipe', 'rup;equipe']) {
+      const valor = cab.startsWith('custo') ? '300' : '0,7'
+      const l = parseBudgetCsv(texto(cab, `104658;;m²;100;${valor};2`), [cr2]).lines[0]!
+      expect(l.fonte).toBe(ALTERADA)
+      expect(lineResources(l)).toEqual([{ resource: 'Pedreiro', units: 2 }, { resource: 'Servente', units: 4 }])
+    }
+    // O comportamento da rodada anterior (equipe trocada pelo helperRatio 0,5) dava 1 servente: Math.ceil(2 × 0,5 − 1e-9)
+    expect(Math.ceil(2 * HELPER_RATIO_PADRAO - 1e-9)).toBe(1)
+  })
+
+  it('CR-3: custo ou RUP alterados mantêm Pedreiro 4 + Servente 4 + Carpinteiro 1 (antes desta rodada: Pedreiro 4 + Servente 2, e o carpinteiro sumia)', () => {
+    for (const cab of ['custo unitario;equipe', 'rup;equipe']) {
+      const valor = cab.startsWith('custo') ? '800' : '1,5'
+      const l = parseBudgetCsv(texto(cab, `103681;;m³;320;${valor};4`), [cr3]).lines[0]!
+      expect(l.fonte).toBe(ALTERADA)
+      expect(lineResources(l)).toEqual([{ resource: 'Pedreiro', units: 4 }, { resource: 'Servente', units: 4 }, { resource: 'Carpinteiro', units: 1 }])
+    }
+  })
+
+  it('profissional trocado (CR-3): só aí cai no servente por oficial comum (0,5), sem as funções do recorte', () => {
+    const l = parseBudgetCsv(texto('profissional;equipe', '103681;;m³;320;Armador;4'), [cr3]).lines[0]!
+    expect(l).toMatchObject({ professional: 'Armador', fonte: ALTERADA, helperRatio: HELPER_RATIO_PADRAO })
+    expect('equipe' in l).toBe(false)
+    expect(lineResources(l)).toEqual([{ resource: 'Armador', units: 4 }, { resource: 'Servente', units: 2 }])
+  })
+
+  it('profissional trocado no CSV (CR-1): fonte "· alterado", a equipe efetiva é a do profissional informado (nunca a do recorte)', () => {
     const l = parseBudgetCsv('codigo;descricao;unidade;quantidade;profissional;equipe\n103332;;m²;640;Carpinteiro;4', [item]).lines[0]!
-    expect(l).toMatchObject({ professional: 'Carpinteiro', fonte: ALTERADA })
+    expect(l).toMatchObject({ professional: 'Carpinteiro', fonte: ALTERADA, helperRatio: 0.5 })
     expect('equipe' in l).toBe(false)
     expect(lineResources(l)).toEqual([{ resource: 'Carpinteiro', units: 4 }, { resource: 'Servente', units: 2 }])
+  })
+
+  it('cabeçalho do modelo baixável: "custo_unitario" (com sublinhado) é o custo (antes: a coluna era ignorada e valia o custo do recorte)', () => {
+    const modelo = BUDGET_CSV_TEMPLATE.split('\n').slice(0, 2).join('\n') // 103332, RUP 0,82, custo 98,50, equipe 4
+    const l = parseBudgetCsv(modelo, [item]).lines[0]!
+    expect(l.unitCost).toBe(98.5) // ANTES: 123,96 (o custo do recorte; a coluna custo_unitario era ignorada)
+    expect(l.rup).toBe(0.82)
+    expect(l.fonte).toBe(ALTERADA)
+    // E sem recorte (catálogo): o custo do modelo é o do catálogo, então nada muda
+    expect(parseBudgetCsv(modelo).lines[0]!.unitCost).toBe(98.5)
   })
 
   it('as funções da marca de alteração', () => {

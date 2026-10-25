@@ -173,3 +173,20 @@ describe('planilha: chip da fonte de cada linha (B2)', () => {
     expect(chip.className).toContain('chip-neutral')
   })
 })
+
+describe('planilha: linhas de outro recorte (B1)', () => {
+  it('troca da data-base: a linha ganha o chip vermelho "outro recorte", com o título explicativo, e o lote é recusado', async () => {
+    const store = await montar({ comRecorte: true })
+    store.clearBudget()
+    store.importBudgetCsv('codigo;descricao;unidade;quantidade;equipe\n103332;;m²;640;4')
+    await nextTick()
+    expect(por('fonte-da-linha')!.className).toContain('chip-ok')
+    expect(store.atualizarDadosObra({ ...sp, dataBaseSinapi: '2026-10' })).toEqual({ ok: true })
+    await vi.waitFor(() => expect(por('fonte-da-linha')!.textContent?.trim()).toBe('SINAPI SP 09/2026 · outro recorte'))
+    const chip = por('fonte-da-linha')!
+    expect(chip.className).toContain('chip-critical')
+    expect(chip.className).not.toContain('chip-ok')
+    expect(chip.getAttribute('title')).toContain('não é o recorte desta obra (a obra não tem recorte)')
+    expect(store.generateFromBudget()).toMatchObject({ ok: false })
+  })
+})
