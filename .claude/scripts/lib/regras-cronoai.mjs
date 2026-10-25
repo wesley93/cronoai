@@ -412,12 +412,13 @@ const DML = /\b(INSERT\s+INTO|UPDATE\s+[\w."]+\s+SET|DELETE\s+FROM)\b/i
 const CONEXAO_CRUA = /\bNpgsql(Connection|DataSource)\b/
 // R18: escrita em massa do EF e SQL de escrita nas entidades auditadas (ADR 00009)
 const EXECUTE_EM_MASSA = /\bExecute(Update|Delete)(Async)?\s*\(/
-const CHAMADA_SQL = /\b(ExecuteSql|ExecuteSqlAsync|SqlQuery|FromSql)\s*[<(]/
-const ESCRITA_EM_AUDITADA = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+cronoai\.(obra|auditoria)\b/i
+// Escrita em obra/auditoria: acusa a PRÓPRIA linha do SQL (a chamada pode estar na linha de cima ou num bloco $"""), com
+// schema, aspas e ONLY opcionais; sem schema vale porque o search_path do papel da aplicação é cronoai.
+const ESCRITA_EM_AUDITADA = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)(\s+ONLY)?\s+("?cronoai"?\s*\.\s*)?"?(obra|auditoria)"?\b/i
 // Único arquivo que usa ExecuteUpdate/ExecuteDelete: só sobre sessao, que não é auditada.
 const EXECUTE_PERMITIDO = '/CronoAI.Dados/Identidade/ConsultasIdentidade.cs'
 // R19: migração que desliga ou afrouxa as garantias da trilha (alerta; revisão humana decide)
-const AFROUXA_TRILHA = /\b(DISABLE\s+TRIGGER|DROP\s+TRIGGER|DROP\s+POLICY|ALTER\s+POLICY|GRANT|NO\s+FORCE)\b/i
+const AFROUXA_TRILHA = /\b(DISABLE\s+TRIGGER|DROP\s+TRIGGER|DROP\s+POLICY|ALTER\s+POLICY|CREATE\s+POLICY|DISABLE\s+ROW\s+LEVEL\s+SECURITY|ENABLE\s+(REPLICA\s+)?TRIGGER|CASCADE|CREATE\s+OR\s+REPLACE\s+FUNCTION|OWNER\s+TO|GRANT|NO\s+FORCE)\b/i
 
 /**
  * Regras R14 a R19 sobre UMA linha de código C# de server/src. Devolve [{ id, regra, mensagem, severidade? }]
@@ -453,14 +454,38 @@ export function regrasBackend(arquivo, texto) {
   if (EXECUTE_EM_MASSA.test(texto) && !arquivo.endsWith(EXECUTE_PERMITIDO)) {
     achados.push({ id: 'R18', regra: 'escrita fora do SaveChanges', mensagem: 'ExecuteUpdate/ExecuteDelete fora de CronoAI.Dados/Identidade/ConsultasIdentidade.cs: não passam pelo interceptor de auditoria; use o contexto e SalvarAuditadoAsync (ADR 00009).' })
   }
-  // R18 (SQL): INSERT/UPDATE/DELETE em cronoai.obra ou cronoai.auditoria por SQL do EF fora de migração
-  if (!emMigracao && CHAMADA_SQL.test(texto) && ESCRITA_EM_AUDITADA.test(texto)) {
+  // R18 (SQL): INSERT/UPDATE/DELETE em obra ou auditoria (com ou sem schema) fora de migração, em qualquer linha do SQL
+  if (!emMigracao && ESCRITA_EM_AUDITADA.test(texto)) {
     achados.push({ id: 'R18', regra: 'escrita fora do SaveChanges', mensagem: 'SQL de escrita em cronoai.obra ou cronoai.auditoria: a trilha só é gravada pelo SaveChanges auditado; a trilha é append-only (ADR 00009).' })
   }
   // R19: alerta (e não bloqueio) porque o Down() legítimo remove a tabela; a revisão humana decide
   if (emMigracao && /auditoria/i.test(texto) && AFROUXA_TRILHA.test(texto)) {
-    achados.push({ id: 'R19', severidade: 'alerta', regra: 'migração mexe nas garantias da trilha', mensagem: 'Migração que cita auditoria com DISABLE/DROP TRIGGER, DROP/ALTER POLICY, GRANT ou NO FORCE: confirme que o append-only continua valendo em três camadas (REVOKE, RLS só com SELECT e INSERT, gatilho de instrução com ENABLE ALWAYS) (ADR 00009).' })
+    achados.push({ id: 'R19', severidade: 'alerta', regra: 'migração mexe nas garantias da trilha', mensagem: 'Migração que cita auditoria com DISABLE/DROP TRIGGER, ENABLE TRIGGER sem ALWAYS, DISABLE ROW LEVEL SECURITY, CREATE/DROP/ALTER POLICY, CASCADE, CREATE OR REPLACE FUNCTION, OWNER TO, GRANT ou NO FORCE: confirme que o append-only continua valendo em três camadas (REVOKE, RLS só com SELECT e INSERT, gatilho de instrução com ENABLE ALWAYS) (ADR 00009).' })
   }
+  return achados
+}
+
+/**
+ * R19 por INSTRUÇÃO (alerta): numa migração, o SQL pode ocupar várias linhas (bloco de texto bruto). Junta as linhas de
+ * código, separa por ";" e acusa, na linha em que a instrução começa, a que cita auditoria junto de uma palavra de
+ * afrouxamento quando nenhuma linha SOZINHA já foi acusada pela regra por linha. Exportada para o teste.
+ */
+export function r19PorInstrucao(arquivo, linhas) {
+  if (!ARQ_SERVER_CS.test(arquivo) || !/\/Migrations\//.test(arquivo)) return []
+  const achados = []
+  let instrucao = []
+  const fecha = () => {
+    const texto = instrucao.map((l) => l.texto).join(' ')
+    const jaAcusada = instrucao.some((l) => regrasBackend(arquivo, l.texto).some((x) => x.id === 'R19'))
+    if (instrucao.length > 1 && !jaAcusada && /auditoria/i.test(texto) && AFROUXA_TRILHA.test(texto)) achados.push({ n: instrucao[0].n })
+    instrucao = []
+  }
+  for (const l of linhas) {
+    if (!semComentario(l.texto)) continue
+    instrucao.push(l)
+    if (l.texto.includes(';')) fecha()
+  }
+  fecha()
   return achados
 }
 
@@ -540,6 +565,14 @@ export function aplicarRegras({ arquivos, removidos = new Set(), novas }) {
       if (/^\.github\/workflows\/.*\.ya?ml$/.test(a) && codigoAtivo && /\bpull_request_target\b/.test(texto)) {
         achados.push(achado('R11', 'bloqueia', 'pull_request_target', a, n, 'pull_request_target roda código do fork com token de escrita e segredos: use pull_request (validar com Segurança da Informação).', recorte(texto)))
       }
+    }
+  }
+
+  // R19 por instrução (SQL em várias linhas): alerta
+  for (const a of arquivos) {
+    if (removidos.has(a)) continue
+    for (const x of r19PorInstrucao(a, novas.get(a) ?? [])) {
+      achados.push(achado('R19', 'alerta', 'migração mexe nas garantias da trilha', a, x.n, 'Instrução de migração (em várias linhas) que cita auditoria com DISABLE/DROP TRIGGER, ENABLE TRIGGER sem ALWAYS, DISABLE ROW LEVEL SECURITY, POLICY, CASCADE, CREATE OR REPLACE FUNCTION, OWNER TO, GRANT ou NO FORCE: confirme que o append-only continua valendo em três camadas (ADR 00009).', null))
     }
   }
 

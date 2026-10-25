@@ -19,6 +19,9 @@ public static class EscritorCsvAuditoria
     public const string Cabecalho =
         "\"id\";\"em_utc\";\"obra_id\";\"usuario_id\";\"entidade\";\"entidade_id\";\"acao\";\"origem\";\"versao_depois\";\"motivo\";\"antes\";\"depois\";\"correlacao_id\"\r\n";
 
+    /// <summary>Início da linha final de controle (<c>#fim;n</c>).</summary>
+    public const string RotuloDoRodape = "#fim";
+
     private const char Separador = ';';
 
     #endregion
@@ -33,19 +36,31 @@ public static class EscritorCsvAuditoria
         await destino.WriteAsync(Encoding.UTF8.GetBytes(Cabecalho), cancelamento);
     }
 
-    /// <summary>Escreve uma linha por registro (sem BOM nem cabeçalho).</summary>
+    /// <summary>
+    /// Escreve uma linha por registro (sem BOM nem cabeçalho), UMA a UMA no destino: nunca monta a página inteira em memória.
+    /// </summary>
     public static async Task EscreverRegistrosAsync(Stream destino, IEnumerable<RegistroAuditoria> registros, CancellationToken cancelamento)
     {
         ArgumentNullException.ThrowIfNull(destino);
         ArgumentNullException.ThrowIfNull(registros);
-        var texto = new StringBuilder();
         foreach (var registro in registros)
         {
-            texto.Append(Linha(registro));
+            await destino.WriteAsync(Encoding.UTF8.GetBytes(Linha(registro)), cancelamento);
         }
-
-        await destino.WriteAsync(Encoding.UTF8.GetBytes(texto.ToString()), cancelamento);
     }
+
+    /// <summary>
+    /// Linha final de controle <c>#fim;&lt;n&gt;</c>: o usuário distingue um arquivo completo de um cortado (erro no meio da
+    /// escrita deixa o arquivo SEM esta linha, e o status 200 já foi enviado). Fora das aspas de propósito: não é registro.
+    /// </summary>
+    public static async Task EscreverRodapeAsync(Stream destino, long linhas, CancellationToken cancelamento)
+    {
+        ArgumentNullException.ThrowIfNull(destino);
+        await destino.WriteAsync(Encoding.UTF8.GetBytes(Rodape(linhas)), cancelamento);
+    }
+
+    /// <summary>Texto da linha final de controle, terminada em <c>CRLF</c>.</summary>
+    public static string Rodape(long linhas) => string.Create(CultureInfo.InvariantCulture, $"{RotuloDoRodape}{Separador}{linhas}") + "\r\n";
 
     /// <summary>Uma linha do arquivo, terminada em <c>CRLF</c>.</summary>
     public static string Linha(RegistroAuditoria registro)

@@ -83,7 +83,7 @@ public sealed class CriarObraTestes
     [InlineData("nome-nulo", "nome")]
     [InlineData("uf-minuscula", "uf")]
     [InlineData("uf-1-letra", "uf")]
-    [InlineData("uf-inexistente", "uf|municipioIbge")]
+    [InlineData("uf-inexistente", "uf")]
     [InlineData("municipio-6-digitos", "municipioIbge")]
     [InlineData("municipio-dv-errado", "municipioIbge")]
     [InlineData("municipio-de-outra-uf", "municipioIbge")]

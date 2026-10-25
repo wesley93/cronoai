@@ -5,6 +5,7 @@ using CronoAI.Dados;
 using CronoAI.Dominio;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CronoAI.Api.Testes.Obras;
@@ -46,12 +47,20 @@ public sealed class ServicoObrasCorridaTestes
         var id = await _dados.CriarObraSemAuditoriaAsync(empresa);
         var gancho = new GanchoAntesDeSalvar(() => _banco.ConsultarComoSuperusuarioAsync($"DELETE FROM cronoai.obra WHERE id = '{id}'"));
         await using var banco = CriarContexto(usuario, empresa, gancho);
-        var servico = CriarServico(banco, usuario, empresa);
+        var logs = new LogsEmMemoria();
+        var servico = CriarServico(banco, usuario, empresa, logs);
+        var nomeNovo = "Nome Novo " + Guid.NewGuid().ToString("N")[..8];
 
-        var resultado = await servico.AtualizarAsync(id, Atualizacao(1, "Nome Novo " + Guid.NewGuid().ToString("N")[..8]), TestContext.Current.CancellationToken);
+        var resultado = await servico.AtualizarAsync(id, Atualizacao(1, nomeNovo), TestContext.Current.CancellationToken);
 
         Assert.True(gancho.Executou);
         Assert.Equal(StatusResultadoObra.NaoEncontrada, resultado.Status);
+
+        // Aviso só com o id da obra (nunca o nome).
+        var aviso = Assert.Single(logs.Linhas, l => l.Contains("[Warning]", StringComparison.Ordinal));
+        Assert.Contains(id.ToString("D"), aviso, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("404", aviso, StringComparison.Ordinal);
+        Assert.DoesNotContain(nomeNovo, logs.Tudo, StringComparison.Ordinal);
         Assert.Equal("0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.obra WHERE id = '{id}'"));
         Assert.Equal("0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.auditoria WHERE entidade_id = '{id}'"));
     }
@@ -117,11 +126,12 @@ public sealed class ServicoObrasCorridaTestes
         return new CronoDbContext(opcoes.Options, new ContextoSessaoBanco(usuario, empresa));
     }
 
-    private static ServicoObras CriarServico(CronoDbContext banco, Guid usuario, Guid empresa)
+    private static ServicoObras CriarServico(CronoDbContext banco, Guid usuario, Guid empresa, LogsEmMemoria? logs = null)
     {
         var contexto = new ContextoSessao();
         contexto.Preencher(Guid.NewGuid(), usuario, empresa);
-        return new ServicoObras(banco, contexto, TimeProvider.System, NullLogger<ServicoObras>.Instance);
+        ILogger<ServicoObras> logger = logs is null ? NullLogger<ServicoObras>.Instance : new LoggerFactory([logs]).CreateLogger<ServicoObras>();
+        return new ServicoObras(banco, contexto, TimeProvider.System, logger);
     }
 
     #endregion

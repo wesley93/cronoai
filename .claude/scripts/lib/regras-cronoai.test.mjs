@@ -119,7 +119,7 @@ test('backend R15: UPDATE solto em outra linha da mesma migração é acusado (s
 // ---------------------------------------------------------------------------------------------------------------
 const OBRAS_API = 'server/src/CronoAI.Api/Obras/ServicoObras.cs'
 const AUDITORIA_DADOS = 'server/src/CronoAI.Dados/Auditoria/ConsultasAuditoria.cs'
-const MIGRACAO_OBRAS = 'server/src/CronoAI.Dados/Migrations/20261025173934_ObrasAuditoria.cs'
+const MIGRACAO_OBRAS = 'server/src/CronoAI.Dados/Migrations/20261025201449_ObrasAuditoria.cs'
 
 const R18_ACUSA = [
   ['ExecuteUpdateAsync em Api/Obras', OBRAS_API, 'await _banco.Obras.Where(o => o.Id == id).ExecuteUpdateAsync(s => s.SetProperty(o => o.Nome, "x"));'],
@@ -129,6 +129,19 @@ const R18_ACUSA = [
   ['ExecuteSql de DELETE em cronoai.auditoria', AUDITORIA_DADOS, 'db.Database.ExecuteSql($"DELETE FROM cronoai.auditoria WHERE id = {id}");'],
   ['SqlQuery de INSERT em cronoai.auditoria', AUDITORIA_DADOS, 'db.Database.SqlQuery<int>($"INSERT INTO cronoai.auditoria (id) VALUES ({id}) RETURNING id");'],
   ['FromSql de UPDATE em cronoai.obra', OBRAS_API, 'db.Obras.FromSql($"UPDATE cronoai.obra SET nome = {x} RETURNING *");'],
+  // R-1 (rodada 02): a PRÓPRIA linha do SQL é acusada, sem exigir a chamada na mesma linha
+  ['SQL na linha seguinte à chamada (2ª linha)', OBRAS_API, '    $"UPDATE cronoai.obra SET nome = {nome} WHERE id = {id}");'],
+  ['bloco de texto bruto: DELETE na linha do bloco', AUDITORIA_DADOS, '    DELETE FROM cronoai.auditoria WHERE id = {id}'],
+  ['bloco de texto bruto: INSERT na linha do bloco', AUDITORIA_DADOS, '    INSERT INTO cronoai.auditoria (empresa_id) VALUES ({e})'],
+  ['tabela sem schema (search_path é cronoai)', OBRAS_API, '    $"UPDATE obra SET nome = {nome} WHERE id = {id}"'],
+  ['INSERT sem schema', AUDITORIA_DADOS, 'await db.Database.ExecuteSqlAsync($"INSERT INTO auditoria (id) VALUES ({id})");'],
+  ['ExecuteSqlInterpolatedAsync', OBRAS_API, 'await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE cronoai.obra SET nome = {n}");'],
+  ['identificadores entre aspas', OBRAS_API, '    $"UPDATE \"cronoai\".\"obra\" SET nome = {n}"'],
+  ['aspas só na tabela', OBRAS_API, '    $"DELETE FROM cronoai.\"auditoria\""'],
+  ['ONLY com schema', AUDITORIA_DADOS, '    DELETE FROM ONLY cronoai.auditoria'],
+  ['UPDATE ONLY sem schema', OBRAS_API, '    UPDATE ONLY obra SET nome = {n}'],
+  ['espaços em volta do ponto', OBRAS_API, '    UPDATE cronoai . obra SET nome = {n}'],
+  ['minúsculas', OBRAS_API, '    update cronoai.obra set nome = {n}'],
 ]
 
 const R18_NAO_ACUSA = [
@@ -141,6 +154,9 @@ const R18_NAO_ACUSA = [
   ['REVOKE em Migrations/', MIGRACAO_OBRAS, 'migrationBuilder.Sql("REVOKE UPDATE, DELETE, TRUNCATE ON cronoai.auditoria FROM cronoai_app;");'],
   ['SELECT em cronoai.auditoria', AUDITORIA_DADOS, 'db.Database.SqlQuery<long>($"SELECT count(*) AS \\"Value\\" FROM cronoai.auditoria WHERE obra_id = {id}");'],
   ['UPDATE em outra tabela (usuario) por ExecuteSql', 'server/src/CronoAI.Api/Desenvolvimento/SementeDesenvolvimento.cs', 'await db.Database.ExecuteSqlAsync($"UPDATE cronoai.usuario SET nome_exibicao = {n} WHERE id = {id}");'],
+  ['SELECT sem schema em obra', OBRAS_API, '    SELECT id FROM obra WHERE id = {id}'],
+  ['nome parecido: obra_arquivada', OBRAS_API, '    UPDATE obra_arquivada SET x = 1'],
+  ['nome parecido: obras', OBRAS_API, '    UPDATE obras SET x = 1'],
   ['Where/ToList em Obras', OBRAS_API, 'var obras = await _banco.Obras.Where(o => o.ArquivadaEm == null).ToListAsync(cancelamento);'],
   ['arquivo fora de server/src', 'src/lib/cpm.ts', 'x.ExecuteUpdateAsync(1) // UPDATE cronoai.obra'],
 ]
@@ -181,11 +197,19 @@ const R19_ACUSA = [
   ['ALTER POLICY da trilha', 'migrationBuilder.Sql("ALTER POLICY pol_auditoria_insert ON cronoai.auditoria WITH CHECK (true);");'],
   ['GRANT UPDATE na trilha', 'migrationBuilder.Sql("GRANT UPDATE ON cronoai.auditoria TO cronoai_app;");'],
   ['NO FORCE na trilha', 'migrationBuilder.Sql("ALTER TABLE cronoai.auditoria NO FORCE ROW LEVEL SECURITY;");'],
+  ['DISABLE ROW LEVEL SECURITY', 'migrationBuilder.Sql("ALTER TABLE cronoai.auditoria DISABLE ROW LEVEL SECURITY;");'],
+  ['CREATE POLICY na trilha', 'migrationBuilder.Sql("CREATE POLICY pol_x ON cronoai.auditoria FOR UPDATE TO cronoai_app USING (true);");'],
+  ['ENABLE TRIGGER sem ALWAYS', 'migrationBuilder.Sql("ALTER TABLE cronoai.auditoria ENABLE TRIGGER trg_auditoria_append_only;");'],
+  ['ENABLE REPLICA TRIGGER', 'migrationBuilder.Sql("ALTER TABLE cronoai.auditoria ENABLE REPLICA TRIGGER trg_auditoria_append_only;");'],
+  ['CASCADE', 'migrationBuilder.Sql("DROP TABLE cronoai.auditoria CASCADE;");'],
+  ['CREATE OR REPLACE FUNCTION da trilha', '    CREATE OR REPLACE FUNCTION cronoai.auditoria_recusa_alteracao() RETURNS trigger'],
+  ['OWNER TO', 'migrationBuilder.Sql("ALTER TABLE cronoai.auditoria OWNER TO outro_papel;");'],
   ['grant em minúsculas', 'migrationBuilder.Sql("grant delete on cronoai.auditoria to cronoai_app;");'],
 ]
 
 const R19_NAO_ACUSA = [
   ['CREATE TRIGGER da criação', 'migrationBuilder.Sql("CREATE TRIGGER trg_auditoria_append_only BEFORE UPDATE OR DELETE OR TRUNCATE ON cronoai.auditoria FOR EACH STATEMENT EXECUTE FUNCTION cronoai.auditoria_recusa_alteracao();");'],
+  ['CREATE FUNCTION (sem OR REPLACE) da criação', '    CREATE FUNCTION cronoai.auditoria_recusa_alteracao() RETURNS trigger'],
   ['ENABLE ALWAYS TRIGGER', 'migrationBuilder.Sql("ALTER TABLE cronoai.auditoria ENABLE ALWAYS TRIGGER trg_auditoria_append_only;");'],
   ['REVOKE da trilha', 'migrationBuilder.Sql("REVOKE UPDATE, DELETE, TRUNCATE ON cronoai.auditoria FROM cronoai_app;");'],
   ['DROP FUNCTION no Down', 'migrationBuilder.Sql("DROP FUNCTION IF EXISTS cronoai.auditoria_recusa_alteracao();");'],
@@ -235,4 +259,67 @@ test('backend R18 e R19: a migração real do ciclo 00013 não aciona nenhuma da
   const achados = texto.flatMap((linha) => regrasBackend(MIGRACAO_OBRAS, linha)).filter((x) => x.id === 'R18' || x.id === 'R19')
 
   assert.deepEqual(achados, [])
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// R19 por instrução: o SQL da migração pode ocupar várias linhas (R-2 da rodada 02).
+// ---------------------------------------------------------------------------------------------------------------
+import { r19PorInstrucao } from './regras-cronoai.mjs'
+
+const lin = (...textos) => textos.map((texto, i) => ({ n: 10 + i, texto }))
+
+test('backend R19 por instrução: DISABLE TRIGGER partido em linhas é acusado na linha em que a instrução começa', () => {
+  const achados = r19PorInstrucao(MIGRACAO_OBRAS, lin(
+    'migrationBuilder.Sql(',
+    '    "ALTER TABLE cronoai.auditoria "',
+    '    + "DISABLE TRIGGER trg_x;");',
+  ))
+
+  assert.deepEqual(achados, [{ n: 10 }])
+})
+
+test('backend R19 por instrução: bloco de texto bruto com a palavra numa linha e a tabela noutra', () => {
+  const achados = r19PorInstrucao(MIGRACAO_OBRAS, lin(
+    'migrationBuilder.Sql(',
+    '    """',
+    '    ALTER TABLE cronoai.auditoria',
+    '    DISABLE ROW LEVEL SECURITY;',
+    '    """);',
+  ))
+
+  assert.equal(achados.length, 1)
+})
+
+test('backend R19 por instrução: instrução inofensiva em várias linhas não é acusada', () => {
+  const achados = r19PorInstrucao(MIGRACAO_OBRAS, lin(
+    'migrationBuilder.Sql(',
+    '    "REVOKE UPDATE, DELETE, TRUNCATE ON cronoai.auditoria "',
+    '    + "FROM cronoai_app;");',
+  ))
+
+  assert.deepEqual(achados, [])
+})
+
+test('backend R19 por instrução: linha única já acusada pela regra por linha não é duplicada; fora de Migrations/ não vale', () => {
+  assert.deepEqual(r19PorInstrucao(MIGRACAO_OBRAS, lin('migrationBuilder.Sql("ALTER TABLE cronoai.auditoria DISABLE ROW LEVEL SECURITY;");')), [])
+  assert.deepEqual(r19PorInstrucao('server/src/CronoAI.Api/Obras/ServicoObras.cs', lin('x = "auditoria"', '  + " DISABLE TRIGGER x;"')), [])
+})
+
+test('backend R19 por instrução: no validar-regras a instrução em várias linhas é alerta', () => {
+  const novas = new Map([[MIGRACAO_OBRAS, lin('migrationBuilder.Sql(', '    "ALTER TABLE cronoai.auditoria "', '    + "OWNER TO outro;");')]])
+
+  const achados = aplicarRegras({ arquivos: [MIGRACAO_OBRAS], novas }).filter((x) => x.id === 'R19')
+
+  assert.equal(achados.length, 1)
+  assert.equal(achados[0].severidade, 'alerta')
+  assert.equal(achados[0].linha, 10)
+})
+
+test('backend R19 por instrução: a migração real do ciclo 00013 não aciona (regra por linha nem por instrução)', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { raizRepo } = await import('./regras-cronoai.mjs')
+  const linhas = readFileSync(`${raizRepo()}/${MIGRACAO_OBRAS}`, 'utf8').split('\n').map((texto, i) => ({ n: i + 1, texto }))
+
+  assert.deepEqual(r19PorInstrucao(MIGRACAO_OBRAS, linhas), [])
+  assert.deepEqual(linhas.flatMap((l) => regrasBackend(MIGRACAO_OBRAS, l.texto)).filter((x) => x.id === 'R19'), [])
 })

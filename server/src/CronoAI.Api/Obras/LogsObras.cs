@@ -23,5 +23,8 @@ public static partial class LogsObras
     [LoggerMessage(EventId = 24, Level = LogLevel.Information, Message = "Escrita de obra recusada por conflito obra_id={ObraId} tipo={Tipo}")]
     public static partial void EscritaRecusadaPorConflito(this ILogger logger, Guid obraId, string tipo);
 
+    [LoggerMessage(EventId = 25, Level = LogLevel.Warning, Message = "Obra sumiu no meio da escrita (resposta 404) obra_id={ObraId}")]
+    public static partial void ObraSumiuNoMeioDaEscrita(this ILogger logger, Guid obraId);
+
     #endregion
 }

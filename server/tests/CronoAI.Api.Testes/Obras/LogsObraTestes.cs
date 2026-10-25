@@ -67,5 +67,42 @@ public sealed class LogsObraTestes
         Assert.Contains(criada.Id.ToString("D"), tudo, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Em_Development_o_409_de_nome_duplicado_nao_leva_o_nome_ao_log_do_EF()
+    {
+        // Em Development o Npgsql inclui o detalhe do erro (a linha, com o nome) e o EF logaria a exceção do 23505. O
+        // appsettings.Development.json silencia as categorias Update e Database.Command do EF.
+        var logs = new LogsEmMemoria();
+        await using var api = await AmbienteApi.CriarAsync(_banco, _dados, logs: logs, ambiente: "Development");
+        var nome = "NOME-DUPLICADO-" + Guid.NewGuid().ToString("N");
+        await api.CriarObraAsync(AmbienteApi.CorpoValido(nome));
+
+        var repetida = await api.EscreverAsync(HttpMethod.Post, "/api/v1/obras", AmbienteApi.CorpoValido(nome));
+
+        Assert.Equal(HttpStatusCode.Conflict, repetida.Status);
+        Assert.DoesNotContain(nome, logs.Tudo, StringComparison.Ordinal);
+        Assert.DoesNotContain("ux_obra_empresa_nome_ativa", logs.Tudo, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Appsettings_Development_silencia_o_log_de_comandos_e_de_gravacao_do_EF()
+    {
+        // Guarda da mitigação: hoje o contexto do EF nasce de uma fábrica sem ILoggerFactory (o EF não loga), então o teste de
+        // comportamento acima não distingue; se alguém ligar o log do EF, estas duas categorias continuam silenciosas em
+        // Development (a exceção do 23505 e os parâmetros de comando levariam o nome da obra ao log).
+        var pasta = new DirectoryInfo(AppContext.BaseDirectory);
+        while (pasta is not null && !File.Exists(Path.Combine(pasta.FullName, "CronoAI.slnx")))
+        {
+            pasta = pasta.Parent;
+        }
+
+        Assert.NotNull(pasta);
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(pasta.FullName, "src", "CronoAI.Api", "appsettings.Development.json")));
+        var niveis = json.RootElement.GetProperty("Logging").GetProperty("LogLevel");
+
+        Assert.Equal("None", niveis.GetProperty("Microsoft.EntityFrameworkCore.Update").GetString());
+        Assert.Equal("None", niveis.GetProperty("Microsoft.EntityFrameworkCore.Database.Command").GetString());
+    }
+
     #endregion
 }

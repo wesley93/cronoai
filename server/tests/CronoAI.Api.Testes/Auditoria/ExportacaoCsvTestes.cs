@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using CronoAI.Api.Auditoria;
 using CronoAI.Api.Testes.Infra;
+using Microsoft.EntityFrameworkCore;
 
 namespace CronoAI.Api.Testes.Auditoria;
 
@@ -218,6 +219,116 @@ public sealed class ExportacaoCsvTestes
 
         // Controle negativo: o limite é só da exportação; o resto da API segue respondendo.
         Assert.Equal(HttpStatusCode.OK, (await api.LerAsync("/api/v1/obras")).Status);
+    }
+
+    [Fact]
+    public async Task Exportacao_termina_com_a_linha_de_fim_e_a_contagem_de_registros()
+    {
+        await using var api = await AmbienteApi.CriarAsync(_banco, _dados);
+        var obra = await CriarComAlteracoesAsync(api, 2);
+
+        var arquivo = await api.LerBytesAsync(UrlDeHoje() + $"&obraId={obra.Id}");
+        var texto = CsvTeste.TextoSemBom(arquivo.Bytes);
+
+        // 3 registros (criar + 2 alterações): a última linha é a de controle, fora das aspas, com a contagem.
+        Assert.EndsWith("\r\n#fim;3\r\n", texto, StringComparison.Ordinal);
+        Assert.Equal(4, CsvTeste.Ler(texto).Count);
+
+        // Período vazio: só o cabeçalho e "#fim;0" (arquivo completo, sem registros).
+        var ontem = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-2);
+        var vazio = CsvTeste.TextoSemBom((await api.LerBytesAsync($"/api/v1/auditoria/exportacao.csv?de={ontem:yyyy-MM-dd}&ate={ontem:yyyy-MM-dd}")).Bytes);
+        Assert.EndsWith("\r\n#fim;0\r\n", vazio, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Exportacao_cortada_no_meio_fica_sem_a_linha_de_fim()
+    {
+        // Serviço direto, com um destino que falha na 5ª escrita (BOM, cabeçalho e 2 linhas passam): o 200 já foi enviado, o
+        // arquivo sai cortado e NÃO tem o "#fim": é assim que o usuário o distingue de um completo.
+        var usuario = await _dados.CriarUsuarioAsync();
+        var empresa = await _dados.CriarEmpresaComMembrosAsync(usuario);
+        var obra = await _dados.CriarObraAsync(empresa, usuario);
+        for (var i = 0; i < 4; i++)
+        {
+            await using var banco = _dados.Fabrica.Criar(new CronoAI.Dados.ContextoSessaoBanco(usuario, empresa));
+            var carregada = await banco.Obras.SingleAsync(o => o.Id == obra.Id, TestContext.Current.CancellationToken);
+            carregada.Alterar(DadosTeste.DadosObraValidos("Edicao " + i + " " + Guid.NewGuid().ToString("N")[..8]), DateTime.UtcNow);
+            await banco.SalvarAuditadoAsync(new CronoAI.Dados.Auditoria.MetadadosEscrita("ui", null, null, DateTime.UtcNow), TestContext.Current.CancellationToken);
+        }
+
+        await using var leitura = _dados.Fabrica.Criar(new CronoAI.Dados.ContextoSessaoBanco(usuario, empresa));
+        var servico = new ServicoAuditoria(
+            new CronoAI.Dados.Auditoria.ConsultasAuditoria(leitura),
+            TimeProvider.System,
+            Microsoft.Extensions.Options.Options.Create(new OpcoesAuditoria { TamanhoPaginaExportacao = 2 }));
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+        var preparado = await servico.PrepararExportacaoAsync(hoje.AddDays(-1), hoje.AddDays(1), obra.Id, TestContext.Current.CancellationToken);
+        var exportacao = preparado.Exportacao!;
+
+        // Controle negativo: com um destino que não falha, o arquivo termina em "#fim;5".
+        using var completo = new MemoryStream();
+        await servico.EscreverExportacaoAsync(completo, exportacao, TestContext.Current.CancellationToken);
+        Assert.EndsWith("\r\n#fim;5\r\n", Encoding.UTF8.GetString(completo.ToArray()), StringComparison.Ordinal);
+
+        using var falho = new FluxoQueFalhaNaEscritaStream(5);
+        await Assert.ThrowsAsync<IOException>(() => servico.EscreverExportacaoAsync(falho, exportacao, TestContext.Current.CancellationToken));
+        var parcial = Encoding.UTF8.GetString(falho.Conteudo.ToArray());
+        Assert.Contains("\"criar\"", parcial, StringComparison.Ordinal);
+        Assert.DoesNotContain("#fim", parcial, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Exportacao_recusa_datas_fora_da_faixa_plausivel_com_400()
+    {
+        await using var api = await AmbienteApi.CriarAsync(_banco, _dados);
+        var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        // Antes dava 500 (AddDays estourava em 9999-12-31).
+        var extremas = await api.LerAsync("/api/v1/auditoria/exportacao.csv?de=9999-01-01&ate=9999-12-31");
+        var antes2000 = await api.LerAsync("/api/v1/auditoria/exportacao.csv?de=1999-12-31&ate=2000-01-02");
+        var futura = await api.LerAsync($"/api/v1/auditoria/exportacao.csv?de={hoje:yyyy-MM-dd}&ate={hoje.AddYears(1).AddDays(1):yyyy-MM-dd}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, extremas.Status);
+        Assert.Equal("ate", Assert.Single(extremas.Corpo.GetProperty("errors").EnumerateObject()).Name);
+        Assert.Equal(HttpStatusCode.BadRequest, antes2000.Status);
+        Assert.Equal("de", Assert.Single(antes2000.Corpo.GetProperty("errors").EnumerateObject()).Name);
+        Assert.Equal(HttpStatusCode.BadRequest, futura.Status);
+        Assert.Equal("ate", Assert.Single(futura.Corpo.GetProperty("errors").EnumerateObject()).Name);
+
+        // Controle negativo: os limites da faixa (2000-01-01 e hoje + 1 ano) passam.
+        Assert.Equal(HttpStatusCode.OK, (await api.LerBytesAsync("/api/v1/auditoria/exportacao.csv?de=2000-01-01&ate=2000-01-31")).Status);
+        Assert.Equal(HttpStatusCode.OK, (await api.LerBytesAsync($"/api/v1/auditoria/exportacao.csv?de={hoje.AddYears(1).AddDays(-10):yyyy-MM-dd}&ate={hoje.AddYears(1):yyyy-MM-dd}")).Status);
+    }
+
+    [Fact]
+    public async Task Exportacao_limite_e_por_usuario_e_anonimo_nao_gasta_a_cota_de_ninguem()
+    {
+        var configuracoes = new Dictionary<string, string?> { ["Borda:LimiteExportacaoPorMinuto"] = "3" };
+        await using var api = await AmbienteApi.CriarAsync(_banco, _dados, configuracoes: configuracoes);
+        var usuarioB = await api.NovoUsuarioAsync();
+        using var anonimo = api.Fabrica.CriarNavegador();
+
+        // Anônimo: 10 chamadas, todas 401 (a autorização barra antes) e nenhuma 429; não gastou cota de ninguém.
+        for (var i = 0; i < 10; i++)
+        {
+            using var resposta = await anonimo.GetAsync(UrlDeHoje(), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, resposta.StatusCode);
+        }
+
+        // O usuário A ainda tem as 3 da cota inteira; a 4ª é 429 com Retry-After.
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.Equal(HttpStatusCode.OK, (await api.LerBytesAsync(UrlDeHoje())).Status);
+        }
+
+        var quarta = await api.LerBytesAsync(UrlDeHoje());
+        Assert.Equal(HttpStatusCode.TooManyRequests, quarta.Status);
+        Assert.True(quarta.Cabecalhos.ContainsKey("Retry-After"));
+
+        // O usuário B, no MESMO host e no mesmo IP, tem a cota própria.
+        using var respostaB = await usuarioB.Navegador.GetAsync(UrlDeHoje(), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, respostaB.StatusCode);
+        usuarioB.Navegador.Dispose();
     }
 
     #endregion

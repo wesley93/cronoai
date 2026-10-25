@@ -153,6 +153,10 @@ public sealed class DadosTeste
             """);
     }
 
+    /// <summary>Objeto JSON compacto (sem espaços) com N pares <c>"kNNNN":1</c>: serve às bordas do teto de <c>opcoes_cronograma</c>.</summary>
+    public static string ParesCompactos(int quantidade) =>
+        "{" + string.Join(",", Enumerable.Range(0, quantidade).Select(i => $"\"k{i:D4}\":1")) + "}";
+
     /// <summary>Versão da obra lida do banco (como app, contexto da empresa), sem passar pelo ChangeTracker.</summary>
     public async Task<long> LerVersaoAsync(Guid empresaId, Guid obraId)
     {

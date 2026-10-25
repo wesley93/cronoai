@@ -74,6 +74,12 @@ public sealed class ServicoObras
             return ResultadoEscritaObra.Invalida(MapeadorErrosObra.CampoDoDominio(erro.ParamName), erro.Message);
         }
 
+        var ufInvalida = await ConferirUfsAsync(dados, cancelamento);
+        if (ufInvalida is not null)
+        {
+            return ufInvalida;
+        }
+
         var empresaId = _contexto.EmpresaId ?? throw new InvalidOperationException("Escrita de obra sem empresa ativa na sessão.");
         var obra = Obra.Criar(empresaId, dados, metadados.InstanteUtc);
         _banco.Obras.Add(obra);
@@ -109,6 +115,13 @@ public sealed class ServicoObras
         catch (ArgumentException erro)
         {
             return ResultadoEscritaObra.Invalida(MapeadorErrosObra.CampoDoDominio(erro.ParamName), erro.Message);
+        }
+
+        // A lista de UF é global (não revela nada de empresa): conferir antes de carregar mantém o 400 independente da obra existir.
+        var ufInvalida = await ConferirUfsAsync(dados, cancelamento);
+        if (ufInvalida is not null)
+        {
+            return ufInvalida;
         }
 
         var obra = await _banco.Obras.SingleOrDefaultAsync(o => o.Id == id, cancelamento);
@@ -249,7 +262,14 @@ public sealed class ServicoObras
         }
         catch (DbUpdateException erro) when (MapeadorErrosObra.Classificar(erro) is not null)
         {
-            return MapeadorErrosObra.Classificar(erro)!;
+            var resultado = MapeadorErrosObra.Classificar(erro)!;
+            if (resultado.Status == StatusResultadoObra.NaoEncontrada)
+            {
+                // A FK da trilha reclamou: a obra sumiu depois do meu carregamento. Só o id vai ao log.
+                _logger.ObraSumiuNoMeioDaEscrita(obra.Id);
+            }
+
+            return resultado;
         }
     }
 
@@ -262,6 +282,7 @@ public sealed class ServicoObras
         var valores = await entrada.GetDatabaseValuesAsync(cancelamento);
         if (valores is null)
         {
+            _logger.ObraSumiuNoMeioDaEscrita(((Obra)entrada.Entity).Id);
             return ResultadoEscritaObra.NaoEncontrada();
         }
 
@@ -269,6 +290,25 @@ public sealed class ServicoObras
         var tipo = atual.EstaArquivada ? ResultadoEscritaObra.ObraArquivada : ResultadoEscritaObra.ConflitoDeVersao;
         _logger.EscritaRecusadaPorConflito(atual.Id, tipo);
         return ResultadoEscritaObra.Conflito(tipo, ObraResposta.De(atual));
+    }
+
+    // A UF (e a UF do SINAPI) precisa existir na lista nacional (27 linhas): devolve 400 na chave certa, em vez de deixar a FK
+    // do banco escolher qual das FKs reclama. A FK continua valendo como rede de segurança.
+    private async Task<ResultadoEscritaObra?> ConferirUfsAsync(DadosObra dados, CancellationToken cancelamento)
+    {
+        var siglas = new[] { dados.Uf, dados.SinapiUf }.Where(sigla => sigla is not null).Select(sigla => sigla!).Distinct().ToList();
+        var existentes = await _banco.Ufs.AsNoTracking().Where(u => siglas.Contains(u.Sigla)).Select(u => u.Sigla).ToListAsync(cancelamento);
+        if (!existentes.Contains(dados.Uf))
+        {
+            return ResultadoEscritaObra.Invalida("uf", "UF inexistente.");
+        }
+
+        if (dados.SinapiUf is not null && !existentes.Contains(dados.SinapiUf))
+        {
+            return ResultadoEscritaObra.Invalida("sinapi.uf", "UF do SINAPI inexistente.");
+        }
+
+        return null;
     }
 
     // Origem "ui" (rotas com cookie de sessão), instante do TimeProvider e TraceId da requisição como correlação.

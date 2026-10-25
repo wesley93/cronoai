@@ -17,11 +17,13 @@ internal static class JsonOpcoes
 
     public const int TamanhoMaximoBytes = 16384;
 
+    private const int LimiteDoTextoBrutoEmBytes = 65536;
+
     #endregion
 
     #region Métodos públicos
 
-    /// <summary>Valida o texto (objeto, até 16 níveis, até 16 KB em UTF-8) e devolve o mesmo texto.</summary>
+    /// <summary>Valida o texto (objeto, até 16 níveis, até 16 KB no texto normalizado do jsonb) e devolve o mesmo texto.</summary>
     public static string Validar(string? json, string parametro)
     {
         if (json is null)
@@ -29,7 +31,8 @@ internal static class JsonOpcoes
             throw new ArgumentException("As opções do cronograma devem ser um objeto JSON.", parametro);
         }
 
-        if (Encoding.UTF8.GetByteCount(json) > TamanhoMaximoBytes)
+        // Só impede parsear texto enorme (o corpo da API já é limitado a 64 KB); o teto de verdade é o do texto NORMALIZADO, abaixo.
+        if (Encoding.UTF8.GetByteCount(json) > LimiteDoTextoBrutoEmBytes)
         {
             throw new ArgumentException($"As opções do cronograma excedem {TamanhoMaximoBytes} bytes.", parametro);
         }
@@ -46,6 +49,14 @@ internal static class JsonOpcoes
             if (TemCaractereNulo(documento.RootElement))
             {
                 throw new ArgumentException("As opções do cronograma não podem ter o caractere nulo.", parametro);
+            }
+
+            // O CHECK do banco mede octet_length(jsonb::text): o jsonb escreve ": " e ", " (com espaço), então um objeto compacto
+            // perto de 16 KB estoura no banco. Mede-se aqui o MESMO texto, para recusar com 400 antes de gravar (e sem a linha
+            // inteira no erro do banco).
+            if (TamanhoNormalizado(documento.RootElement) > TamanhoMaximoBytes)
+            {
+                throw new ArgumentException($"As opções do cronograma excedem {TamanhoMaximoBytes} bytes.", parametro);
             }
         }
         catch (JsonException)
@@ -68,6 +79,53 @@ internal static class JsonOpcoes
     #endregion
 
     #region Métodos privados
+
+    // Bytes do texto que o jsonb devolve: objetos e listas com ": " e ", ", textos com o escape mínimo (aspas, barra e controles).
+    private static long TamanhoNormalizado(JsonElement elemento)
+    {
+        long total;
+        switch (elemento.ValueKind)
+        {
+            case JsonValueKind.Object:
+                total = 2;
+                foreach (var propriedade in elemento.EnumerateObject())
+                {
+                    total += BytesDoTexto(propriedade.Name) + 2 + TamanhoNormalizado(propriedade.Value) + 2;
+                }
+
+                return total > 2 ? total - 2 : total;
+            case JsonValueKind.Array:
+                total = 2;
+                foreach (var item in elemento.EnumerateArray())
+                {
+                    total += TamanhoNormalizado(item) + 2;
+                }
+
+                return total > 2 ? total - 2 : total;
+            case JsonValueKind.String:
+                return BytesDoTexto(elemento.GetString()!);
+            default:
+                // Número, true, false e null: ASCII.
+                return elemento.GetRawText().Length;
+        }
+    }
+
+    private static long BytesDoTexto(string texto)
+    {
+        long bytes = 2;
+        foreach (var simbolo in texto.EnumerateRunes())
+        {
+            bytes += simbolo.Value switch
+            {
+                '"' or '\\' => 2,
+                '\n' or '\r' or '\t' or '\b' or '\f' => 2,
+                < 0x20 => 6,
+                _ => simbolo.Utf8SequenceLength,
+            };
+        }
+
+        return bytes;
+    }
 
     private static bool TemCaractereNulo(JsonElement elemento)
     {

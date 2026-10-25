@@ -78,10 +78,17 @@ public sealed class EscritorCsvTestes
     public void Csv_cabecalho_fixo_tem_13_colunas_entre_aspas_e_termina_em_crlf()
     {
         Assert.EndsWith("\r\n", EscritorCsvAuditoria.Cabecalho, StringComparison.Ordinal);
-        var colunas = CsvTeste.Ler(EscritorCsvAuditoria.Cabecalho).Single();
+        var colunas = CsvTeste.Ler(EscritorCsvAuditoria.Cabecalho, exigirRodape: false).Single();
         Assert.Equal(
             ["id", "em_utc", "obra_id", "usuario_id", "entidade", "entidade_id", "acao", "origem", "versao_depois", "motivo", "antes", "depois", "correlacao_id"],
             colunas);
+    }
+
+    [Fact]
+    public void Csv_rodape_de_controle_tem_a_contagem_e_fica_fora_das_aspas()
+    {
+        Assert.Equal("#fim;0\r\n", EscritorCsvAuditoria.Rodape(0));
+        Assert.Equal("#fim;12345\r\n", EscritorCsvAuditoria.Rodape(12345));
     }
 
     #endregion

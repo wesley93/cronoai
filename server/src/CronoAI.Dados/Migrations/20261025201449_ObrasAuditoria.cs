@@ -197,6 +197,13 @@ namespace CronoAI.Dados.Migrations
                     table.CheckConstraint("ck_auditoria_motivo_tamanho", "motivo IS NULL OR char_length(motivo) <= 500");
                     table.CheckConstraint("ck_auditoria_origem", "origem IN ('ui', 'importacao', 'whatsapp', 'api')");
                     table.ForeignKey(
+                        name: "fk_auditoria_empresa",
+                        column: x => x.empresa_id,
+                        principalSchema: "cronoai",
+                        principalTable: "empresa",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
                         name: "fk_auditoria_obra",
                         columns: x => new { x.empresa_id, x.obra_id },
                         principalSchema: "cronoai",
@@ -218,6 +225,12 @@ namespace CronoAI.Dados.Migrations
                 table: "auditoria",
                 columns: new[] { "empresa_id", "em", "id" },
                 descending: new[] { false, true, true });
+
+            migrationBuilder.CreateIndex(
+                name: "ix_auditoria_empresa_id",
+                schema: "cronoai",
+                table: "auditoria",
+                columns: new[] { "empresa_id", "id" });
 
             migrationBuilder.CreateIndex(
                 name: "ix_auditoria_empresa_obra_em",
@@ -273,7 +286,7 @@ namespace CronoAI.Dados.Migrations
             // que fuja do EF. search_path fixo: a função não depende do caminho de busca de quem a dispara.
             migrationBuilder.Sql(
                 """
-                CREATE OR REPLACE FUNCTION cronoai.obra_incrementa_versao() RETURNS trigger
+                CREATE FUNCTION cronoai.obra_incrementa_versao() RETURNS trigger
                 LANGUAGE plpgsql
                 SET search_path = pg_catalog
                 AS $$
@@ -299,7 +312,7 @@ namespace CronoAI.Dados.Migrations
             // ainda pode fazer DDL (DROP/DISABLE TRIGGER) e o superusuário contorna tudo (ADR 00009).
             migrationBuilder.Sql(
                 """
-                CREATE OR REPLACE FUNCTION cronoai.auditoria_recusa_alteracao() RETURNS trigger
+                CREATE FUNCTION cronoai.auditoria_recusa_alteracao() RETURNS trigger
                 LANGUAGE plpgsql
                 SET search_path = pg_catalog
                 AS $$

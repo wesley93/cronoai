@@ -46,7 +46,7 @@ public static class AuditoriaEndpoints
                 };
             })
             .RequireAuthorization(RequisitoEmpresaAtiva.PoliticaEmpresaAtiva)
-            .RequireRateLimiting(BordaExtensoes.PoliticaExportacao)
+            .AddEndpointFilter<LimiteDeExportacaoFilter>()
             .Produces<string>(StatusCodes.Status200OK, contentType: "text/csv")
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)

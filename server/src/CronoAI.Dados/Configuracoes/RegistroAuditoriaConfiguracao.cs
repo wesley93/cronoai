@@ -58,6 +58,9 @@ public sealed class RegistroAuditoriaConfiguracao : IEntityTypeConfiguration<Reg
             .IsRequired(false);
         builder.HasOne<Usuario>().WithMany().HasForeignKey(a => a.UsuarioId).HasConstraintName("fk_auditoria_usuario");
 
+        // Também a empresa tem FK: linha de trilha sem obra (entidades futuras) não pode apontar para empresa inexistente.
+        builder.HasOne<Empresa>().WithMany().HasForeignKey(a => a.EmpresaId).HasConstraintName("fk_auditoria_empresa");
+
         // Leitura e exportação por empresa e por obra: sempre do mais novo para o mais antigo, desempate pelo id.
         builder.HasIndex(a => new { a.EmpresaId, a.Em, a.Id })
             .IsDescending(false, true, true)
@@ -66,6 +69,10 @@ public sealed class RegistroAuditoriaConfiguracao : IEntityTypeConfiguration<Reg
             .IsDescending(false, false, true, true)
             .HasDatabaseName("ix_auditoria_empresa_obra_em");
         builder.HasIndex(a => a.UsuarioId).HasDatabaseName("ix_auditoria_usuario_id");
+
+        // Exportação: empresa + intervalo de em + id > cursor, ordenada por id (keyset de id). O (empresa_id, em, id) acima serve
+        // à leitura por tempo; este serve à ordem por id sem ordenar a empresa inteira (parecer do dba, rodada 02).
+        builder.HasIndex(a => new { a.EmpresaId, a.Id }).HasDatabaseName("ix_auditoria_empresa_id");
     }
 
     #endregion

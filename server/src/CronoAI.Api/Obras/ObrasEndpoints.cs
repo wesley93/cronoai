@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CronoAI.Api.Borda;
 using CronoAI.Api.Sessao;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -49,7 +50,10 @@ public static class ObrasEndpoints
                 {
                     StatusResultadoObra.Ok => TypedResults.Created($"/api/v1/obras/{resultado.Obra!.Id}", resultado.Obra),
                     StatusResultadoObra.Invalida => TypedResults.ValidationProblem(resultado.Erros!),
-                    _ => Conflito(resultado),
+                    StatusResultadoObra.Conflito => Conflito(resultado),
+
+                    // Criar não carrega nada: não há obra "não encontrada" aqui. Se aparecer, é defeito, e o 500 genérico o denuncia.
+                    _ => throw new UnreachableException($"Criar obra não devolve {resultado.Status}."),
                 };
             })
             .RequireAuthorization(RequisitoEmpresaAtiva.PoliticaEmpresaAtiva)

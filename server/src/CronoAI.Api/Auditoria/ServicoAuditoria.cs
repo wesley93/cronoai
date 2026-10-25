@@ -19,6 +19,8 @@ public sealed class ServicoAuditoria
 
     private const int DiasMaximosDaExportacao = 366;
 
+    private static readonly DateOnly PrimeiraDataAceita = new(2000, 1, 1);
+
     private readonly ConsultasAuditoria _consultas;
     private readonly TimeProvider _relogio;
     private readonly OpcoesAuditoria _opcoes;
@@ -87,6 +89,18 @@ public sealed class ServicoAuditoria
             return ResultadoLeituraAuditoria.Invalida("ate", "Informe a data final (ate).");
         }
 
+        // Faixa plausível: evita estouro de data (9999-12-31 + 1 dia) e consulta sem sentido.
+        var hoje = DateOnly.FromDateTime(_relogio.GetUtcNow().UtcDateTime);
+        if (inicio < PrimeiraDataAceita)
+        {
+            return ResultadoLeituraAuditoria.Invalida("de", $"A data inicial não pode ser anterior a {PrimeiraDataAceita:yyyy-MM-dd}.");
+        }
+
+        if (fim > hoje.AddYears(1))
+        {
+            return ResultadoLeituraAuditoria.Invalida("ate", "A data final não pode passar de um ano à frente.");
+        }
+
         if (inicio > fim)
         {
             return ResultadoLeituraAuditoria.Invalida("ate", "A data final não pode ser anterior à inicial.");
@@ -102,7 +116,6 @@ public sealed class ServicoAuditoria
             return ResultadoLeituraAuditoria.NaoEncontrada();
         }
 
-        var hoje = DateOnly.FromDateTime(_relogio.GetUtcNow().UtcDateTime);
         return ResultadoLeituraAuditoria.DeExportacao(new ExportacaoAuditoria(
             inicio.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
             fim.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
@@ -110,7 +123,7 @@ public sealed class ServicoAuditoria
             string.Create(CultureInfo.InvariantCulture, $"auditoria-{hoje:yyyyMMdd}.csv")));
     }
 
-    /// <summary>Escreve o CSV em fluxo: BOM e cabeçalho e, depois, uma página por consulta (keyset de id), sem acumular tudo na memória.</summary>
+    /// <summary>Escreve o CSV em fluxo: BOM e cabeçalho, depois uma página por consulta (keyset de id) escrita linha a linha com flush por página e, por fim, a linha de controle <c>#fim;n</c>.</summary>
     public async Task EscreverExportacaoAsync(Stream destino, ExportacaoAuditoria exportacao, CancellationToken cancelamento)
     {
         ArgumentNullException.ThrowIfNull(destino);
@@ -119,6 +132,7 @@ public sealed class ServicoAuditoria
         await EscritorCsvAuditoria.EscreverCabecalhoAsync(destino, cancelamento);
         var tamanhoDaPagina = Math.Max(1, _opcoes.TamanhoPaginaExportacao);
         long ultimoId = 0;
+        long escritas = 0;
         while (true)
         {
             var pagina = await _consultas.PaginaDaExportacaoAsync(exportacao.DeUtc, exportacao.AteExclusivoUtc, exportacao.ObraId, ultimoId, tamanhoDaPagina, cancelamento);
@@ -128,12 +142,18 @@ public sealed class ServicoAuditoria
             }
 
             await EscritorCsvAuditoria.EscreverRegistrosAsync(destino, pagina, cancelamento);
+            await destino.FlushAsync(cancelamento);
+            escritas += pagina.Count;
             ultimoId = pagina[^1].Id;
             if (pagina.Count < tamanhoDaPagina)
             {
                 break;
             }
         }
+
+        // Só chega aqui se TODAS as páginas foram escritas: erro no meio deixa o arquivo sem esta linha.
+        await EscritorCsvAuditoria.EscreverRodapeAsync(destino, escritas, cancelamento);
+        await destino.FlushAsync(cancelamento);
     }
 
     #endregion

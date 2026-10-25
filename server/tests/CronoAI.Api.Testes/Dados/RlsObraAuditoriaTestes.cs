@@ -100,6 +100,23 @@ public sealed class RlsObraAuditoriaTestes
     }
 
     [Fact]
+    public async Task Auditoria_de_empresa_inexistente_recusada_pela_fk_da_empresa()
+    {
+        var usuario = await _dados.CriarUsuarioAsync();
+        var inexistente = Guid.NewGuid();
+
+        // O contexto e a linha são da MESMA empresa (o WITH CHECK passa), mas ela não existe: só a FK recusa.
+        var erro = await Assert.ThrowsAsync<PostgresException>(() => _dados.InserirAuditoriaBrutaAsync(inexistente, inexistente, usuario));
+
+        Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, erro.SqlState);
+        Assert.Equal("fk_auditoria_empresa", erro.ConstraintName);
+
+        // Controle negativo: com empresa existente, o mesmo INSERT passa.
+        var empresa = await _dados.CriarEmpresaComMembrosAsync(usuario);
+        await _dados.InserirAuditoriaBrutaAsync(empresa, empresa, usuario);
+    }
+
+    [Fact]
     public async Task Obra_nao_muda_de_empresa()
     {
         var (empresaA, empresaB, usuarioA, _) = await CriarDuasEmpresasAsync();

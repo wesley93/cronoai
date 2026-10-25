@@ -1,3 +1,4 @@
+using CronoAI.Api.Testes.Infra;
 using CronoAI.Dominio;
 
 namespace CronoAI.Api.Testes.Dominio;
@@ -187,9 +188,25 @@ public sealed class ObraTestes
         Assert.Throws<InvalidOperationException>(() => obra.Alterar(Valida() with { Nome = "Outra" }, _criada.AddMinutes(2)));
     }
 
+    [Fact]
+    public void Obra_opcoes_o_teto_vale_para_o_texto_do_jsonb_nao_para_o_texto_compacto()
+    {
+        // O jsonb escreve ": " e ", ": cada par de "kNNNN":1 passa de 10 para 12 bytes. 1365 pares = 16380 bytes no banco
+        // (cabe em 16384); 1366 = 16392 (não cabe), embora o texto COMPACTO de 1366 pares (13659 bytes) caiba folgado.
+        var cabe = Obra.Criar(_empresa, Valida() with { OpcoesCronograma = DadosTeste.ParesCompactos(1365) }, _criada);
+        Assert.Equal(1365, System.Text.Json.JsonDocument.Parse(cabe.OpcoesCronograma).RootElement.EnumerateObject().Count());
+
+        var compacto = DadosTeste.ParesCompactos(1366);
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(compacto) < 16384);
+        var erro = Assert.Throws<ArgumentException>(() => Obra.Criar(_empresa, Valida() with { OpcoesCronograma = compacto }, _criada));
+        Assert.Equal("opcoesCronograma", erro.ParamName);
+    }
+
     #endregion
 
     #region Métodos privados
+
+
 
     private static DadosObra ComSinapi() =>
         Valida() with { SinapiUf = "PE", SinapiRegime = RegimesSinapi.Desonerado, SinapiDataBase = new DateOnly(2026, 9, 1) };

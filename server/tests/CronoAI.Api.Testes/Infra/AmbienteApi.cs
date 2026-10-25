@@ -13,6 +13,7 @@ public sealed class AmbienteApi : IAsyncDisposable
 {
     #region Campos
 
+    private readonly DadosTeste _dados;
     private readonly IdpEmMemoria _idp;
     private readonly ApiFactory _fabrica;
 
@@ -20,8 +21,9 @@ public sealed class AmbienteApi : IAsyncDisposable
 
     #region Construtor
 
-    private AmbienteApi(IdpEmMemoria idp, ApiFactory fabrica, CenarioLogin cenario)
+    private AmbienteApi(DadosTeste dados, IdpEmMemoria idp, ApiFactory fabrica, CenarioLogin cenario)
     {
+        _dados = dados;
         _idp = idp;
         _fabrica = fabrica;
         Cenario = cenario;
@@ -51,18 +53,22 @@ public sealed class AmbienteApi : IAsyncDisposable
         RelogioTeste? relogio = null,
         LogsEmMemoria? logs = null,
         IDictionary<string, string?>? configuracoes = null,
-        int empresas = 1)
+        int empresas = 1,
+        string ambiente = "Production")
     {
         var idp = new IdpEmMemoria();
-        var fabrica = new ApiFactory(banco.StringConexaoApp) { Idp = idp, Relogio = relogio, Logs = logs };
+        var fabrica = new ApiFactory(banco.StringConexaoApp, ambiente) { Idp = idp, Relogio = relogio, Logs = logs };
         foreach (var (chave, valor) in configuracoes ?? new Dictionary<string, string?>())
         {
             fabrica.Configuracoes[chave] = valor;
         }
 
         var cenario = await CenarioLogin.CriarAsync(fabrica, idp, dados, empresas);
-        return new AmbienteApi(idp, fabrica, cenario);
+        return new AmbienteApi(dados, idp, fabrica, cenario);
     }
+
+    /// <summary>Outro usuário logado NO MESMO host (mesmos singletons: limitadores, relógio), com a própria empresa.</summary>
+    public Task<CenarioLogin> NovoUsuarioAsync(int empresas = 1) => CenarioLogin.CriarAsync(_fabrica, _idp, _dados, empresas);
 
     /// <summary>Escrita com antiforgery; devolve o status e o corpo JSON (ou o texto, se não for JSON).</summary>
     public async Task<RespostaJson> EscreverAsync(HttpMethod metodo, string url, object? corpo = null, IDictionary<string, string>? cabecalhos = null)

@@ -20,6 +20,13 @@ public sealed partial class ArquiteturaTestes
         "src/CronoAI.Dados/CronoDbContext.cs",
     ];
 
+    // Únicos arquivos que podem usar o DbSet da trilha além de Add/AddRange: a leitura paginada e a declaração no contexto.
+    private static readonly string[] _arquivosComLeituraDaTrilha =
+    [
+        "src/CronoAI.Dados/Auditoria/ConsultasAuditoria.cs",
+        "src/CronoAI.Dados/CronoDbContext.cs",
+    ];
+
     #endregion
 
     #region Métodos públicos
@@ -140,7 +147,6 @@ public sealed partial class ArquiteturaTestes
         Assert.Empty(AcessosIndevidosAUsuario([("src/CronoAI.Api/Empresas/Qualquer.cs", "// o usuario do contexto vem da sessão\nvar usuarioId = contexto.UsuarioId;")]));
     }
 
-
     [Fact]
     public void Auditoria_so_recebe_Add()
     {
@@ -166,6 +172,35 @@ public sealed partial class ArquiteturaTestes
         }
 
         Assert.Empty(UsosIndevidosDeAuditoria([("src/CronoAI.Dados/Auditoria/AuditoriaInterceptor.cs", "banco.Auditorias.Add(registro);\nbanco.Auditorias.AddRange(lista);")]));
+    }
+
+    [Fact]
+    public void Sem_SQL_de_escrita_em_obra_ou_auditoria_fora_de_migracao()
+    {
+        // Mesmo critério da regra R18 (por LINHA, com ou sem schema, aspas e ONLY), aplicado a todo o server/src sem Migrations.
+        Assert.Empty(SqlDeEscritaEmEntidadeAuditada(ArquivosDeSrc()));
+    }
+
+    [Theory]
+    [InlineData("await db.Database.ExecuteSqlAsync($\"UPDATE cronoai.obra SET nome = {n}\");")]
+    [InlineData("    DELETE FROM cronoai.auditoria WHERE id = {id}")]
+    [InlineData("    INSERT INTO obra (id) VALUES ({id})")]
+    [InlineData("    UPDATE ONLY obra SET nome = {n}")]
+    [InlineData("    $\"UPDATE \"cronoai\".\"obra\" SET nome = {n}\"")]
+    [InlineData("await db.Database.ExecuteSqlInterpolatedAsync($\"DELETE FROM auditoria\");")]
+    public void Detector_de_SQL_de_escrita_acusa_as_formas_que_escapavam(string linha)
+    {
+        Assert.Equal(["src/CronoAI.Api/Obras/Qualquer.cs"], SqlDeEscritaEmEntidadeAuditada([("src/CronoAI.Api/Obras/Qualquer.cs", linha)]));
+    }
+
+    [Theory]
+    [InlineData("    SELECT id FROM obra WHERE id = {id}")]
+    [InlineData("// UPDATE cronoai.obra SET nome = 1 (comentário)")]
+    [InlineData("    UPDATE obra_arquivada SET x = 1")]
+    [InlineData("    UPDATE usuario SET nome_exibicao = null")]
+    public void Detector_de_SQL_de_escrita_nao_acusa_leitura_comentario_e_outras_tabelas(string linha)
+    {
+        Assert.Empty(SqlDeEscritaEmEntidadeAuditada([("src/CronoAI.Api/Obras/Qualquer.cs", linha)]));
     }
 
     [Fact]
@@ -240,12 +275,6 @@ public sealed partial class ArquiteturaTestes
 
     #region Métodos privados
 
-    private static readonly string[] _arquivosComLeituraDaTrilha =
-    [
-        "src/CronoAI.Dados/Auditoria/ConsultasAuditoria.cs",
-        "src/CronoAI.Dados/CronoDbContext.cs",
-    ];
-
     /// <summary>Todos os .cs de server/src (caminho relativo com "/"), sem obj, bin nem Migrations.</summary>
     private static List<(string Caminho, string Conteudo)> ArquivosDeSrc()
     {
@@ -276,6 +305,16 @@ public sealed partial class ArquiteturaTestes
             .Where(a => ExecuteEmMassaRegex().IsMatch(a.Conteudo) && EntidadeAuditadaRegex().IsMatch(a.Conteudo))
             .Select(a => a.Caminho)
             .ToList();
+
+    /// <summary>Arquivos com linha de SQL de escrita (não comentário) em obra ou auditoria, com ou sem schema, aspas e ONLY.</summary>
+    public static IReadOnlyList<string> SqlDeEscritaEmEntidadeAuditada(IEnumerable<(string Caminho, string Conteudo)> arquivos) =>
+        arquivos
+            .Where(a => a.Conteudo.Split('\n').Any(linha => !linha.TrimStart().StartsWith("//", StringComparison.Ordinal) && EscritaEmAuditadaRegex().IsMatch(linha)))
+            .Select(a => a.Caminho)
+            .ToList();
+
+    [GeneratedRegex(@"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)(\s+ONLY)?\s+(""?cronoai""?\s*\.\s*)?""?(obra|auditoria)""?\b", RegexOptions.IgnoreCase)]
+    private static partial Regex EscritaEmAuditadaRegex();
 
     [GeneratedRegex(@"\bExecute(?:Update|Delete)(?:Async)?\s*\(")]
     private static partial Regex ExecuteEmMassaRegex();

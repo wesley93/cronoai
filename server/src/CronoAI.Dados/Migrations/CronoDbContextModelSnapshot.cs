@@ -287,6 +287,9 @@ namespace CronoAI.Dados.Migrations
                     b.HasIndex("UsuarioId")
                         .HasDatabaseName("ix_auditoria_usuario_id");
 
+                    b.HasIndex("EmpresaId", "Id")
+                        .HasDatabaseName("ix_auditoria_empresa_id");
+
                     b.HasIndex("EmpresaId", "Em", "Id")
                         .IsDescending(false, true, true)
                         .HasDatabaseName("ix_auditoria_empresa_em");
@@ -503,6 +506,13 @@ namespace CronoAI.Dados.Migrations
 
             modelBuilder.Entity("CronoAI.Dominio.RegistroAuditoria", b =>
                 {
+                    b.HasOne("CronoAI.Dominio.Empresa", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_auditoria_empresa");
+
                     b.HasOne("CronoAI.Dominio.Usuario", null)
                         .WithMany()
                         .HasForeignKey("UsuarioId")

@@ -24,15 +24,29 @@ public static class CsvTeste
         return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
     }
 
-    /// <summary>Linhas e campos. Exige que TODO campo esteja entre aspas e que cada linha termine em CRLF.</summary>
-    public static List<string[]> Ler(string texto)
+    /// <summary>
+    /// Linhas e campos (cabeçalho incluído), SEM a linha final de controle. Exige que TODO campo esteja entre aspas, que cada
+    /// linha termine em CRLF e, com <paramref name="exigirRodape"/>, que o arquivo termine em <c>#fim;n</c> com n igual ao
+    /// número de registros (as linhas depois do cabeçalho): é assim que o teste distingue um CSV completo de um cortado.
+    /// </summary>
+    public static List<string[]> Ler(string texto, bool exigirRodape = true)
     {
+        string? rodape = null;
         var linhas = new List<string[]>();
         var campos = new List<string>();
         var campo = new StringBuilder();
         var i = 0;
         while (i < texto.Length)
         {
+            if (texto[i] == '#')
+            {
+                var fim = texto.IndexOf("\r\n", i, StringComparison.Ordinal);
+                Assert.True(fim >= 0 && fim + 2 == texto.Length, "a linha de controle deve ser a última e terminar em CRLF");
+                rodape = texto[i..fim];
+                i = texto.Length;
+                break;
+            }
+
             Assert.Equal('"', texto[i]);
             i++;
             campo.Clear();
@@ -70,6 +84,15 @@ public static class CsvTeste
         }
 
         Assert.Empty(campos);
+        if (exigirRodape)
+        {
+            Assert.Equal($"#fim;{linhas.Count - 1}", rodape);
+        }
+        else
+        {
+            Assert.Null(rodape);
+        }
+
         return linhas;
     }
 

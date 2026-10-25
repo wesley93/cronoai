@@ -87,7 +87,7 @@ public sealed class IsolamentoRotasTestes
         foreach (var rota in Rotas(fabrica).Where(r => !r.Anonima))
         {
             using var anonimo = fabrica.CriarNavegador();
-            using var resposta = await EnviarAsync(anonimo, rota, Guid.NewGuid(), antiforgery: null);
+            using var resposta = await EnviarAsync(anonimo, rota, Guid.NewGuid(), null, null);
             if (resposta.StatusCode != HttpStatusCode.Unauthorized)
             {
                 falhas.Add($"{rota.Chave} respondeu {(int)resposta.StatusCode} sem sessão");
@@ -109,7 +109,7 @@ public sealed class IsolamentoRotasTestes
         // Escritas autenticadas, sem o cabeçalho X-XSRF-TOKEN (a rota de desenvolvimento é isenta, só existe em Development).
         foreach (var rota in Rotas(fabrica).Where(r => r.EhEscrita && !r.Anonima))
         {
-            using var resposta = await EnviarAsync(navegador, rota, Guid.NewGuid(), antiforgery: null);
+            using var resposta = await EnviarAsync(navegador, rota, Guid.NewGuid(), null, null);
             if (resposta.StatusCode != HttpStatusCode.BadRequest)
             {
                 falhas.Add($"{rota.Chave} respondeu {(int)resposta.StatusCode} sem antiforgery");
@@ -145,7 +145,7 @@ public sealed class IsolamentoRotasTestes
             var rota = new RotaRegistrada(entrada.Metodo, entrada.Padrao, entrada.Cenario == CenarioIsolamento.Anonima);
             var token = rota.EhEscrita ? await ClienteAutenticado.ObterTokenAntiforgeryAsync(navegador) : null;
 
-            using var resposta = await EnviarAsync(navegador, rota, empresaB, token, entrada.Recurso == RecursoAlheio.Obra ? obraB.Id : null);
+            using var resposta = await EnviarAsync(navegador, rota, empresaB, obraB.Id, token);
             var corpo = await resposta.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
             if (entrada.Cenario == CenarioIsolamento.ComIdDeOutraEmpresa && resposta.StatusCode != HttpStatusCode.NotFound)
@@ -182,15 +182,40 @@ public sealed class IsolamentoRotasTestes
 
         foreach (var entrada in comId)
         {
-            var caminho = DetectorDeRotas.Concretizar(entrada.Padrao, obraB.Id);
-            var id = Guid.Parse(System.Text.RegularExpressions.Regex.Match(caminho, "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").Value);
+            // O MESMO montador que o X5 usa: a requisição que vai para a rede leva a obra real de B no {id}.
+            var rota = new RotaRegistrada(entrada.Metodo, entrada.Padrao, false);
+            using var requisicao = RequisicaoDeIsolamento.Montar(rota, empresaB, obraB.Id, null);
+            var id = Guid.Parse(System.Text.RegularExpressions.Regex.Match(requisicao.RequestUri!.ToString(), "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").Value);
 
             Assert.Equal(obraB.Id, id);
             Assert.Equal(empresaB.ToString("D"), await _banco.ConsultarComoSuperusuarioAsync($"SELECT empresa_id FROM cronoai.obra WHERE id = '{id}'"));
 
-            // Controle negativo: sem o recurso, o id concretizado NÃO existe (é o defeito que este meta-teste existe para barrar).
-            var aleatorio = Guid.Parse(System.Text.RegularExpressions.Regex.Match(DetectorDeRotas.Concretizar(entrada.Padrao), "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").Value);
+            // Controle negativo: sem o recurso, o id montado NÃO existe (é o defeito que este meta-teste existe para barrar).
+            using var semRecurso = RequisicaoDeIsolamento.Montar(rota, empresaB, null, null);
+            var aleatorio = Guid.Parse(System.Text.RegularExpressions.Regex.Match(semRecurso.RequestUri!.ToString(), "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").Value);
+            Assert.NotEqual(obraB.Id, aleatorio);
             Assert.Equal("0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.obra WHERE id = '{aleatorio}'"));
+        }
+    }
+
+    [Fact]
+    public async Task Toda_rota_de_obras_e_auditoria_exige_a_politica_empresa_ativa()
+    {
+        // As rotas de coleção ficam fora do grupo de /obras (MapGet("") dentro do grupo registra "/api/v1/obras/" com barra final):
+        // este teste garante que NENHUMA rota de obras ou de auditoria escapou da política de empresa ativa.
+        using var idp = new IdpEmMemoria();
+        await using var fabrica = CriarFabrica(idp);
+        var endpoints = fabrica.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>()
+            .Where(e => e.RoutePattern.RawText is { } texto
+                && (texto.StartsWith("/api/v1/obras", StringComparison.Ordinal) || texto.StartsWith("/api/v1/auditoria", StringComparison.Ordinal)))
+            .ToList();
+
+        Assert.True(endpoints.Count >= 8, $"esperava ao menos 8 endpoints de obras e auditoria, achou {endpoints.Count}");
+        foreach (var endpoint in endpoints)
+        {
+            var politicas = endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>().Select(a => a.Policy).ToList();
+            Assert.True(politicas.Contains("EmpresaAtiva"), $"{endpoint.RoutePattern.RawText} sem a política EmpresaAtiva");
+            Assert.False(endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Authorization.IAllowAnonymous>() is not null, $"{endpoint.RoutePattern.RawText} é anônima");
         }
     }
 
@@ -220,20 +245,9 @@ public sealed class IsolamentoRotasTestes
     private static IReadOnlyList<RotaRegistrada> Rotas(ApiFactory fabrica) =>
         DetectorDeRotas.Enumerar(fabrica.Services.GetRequiredService<EndpointDataSource>());
 
-    private static async Task<HttpResponseMessage> EnviarAsync(HttpClient navegador, RotaRegistrada rota, Guid empresaAlheia, string? antiforgery, Guid? obraAlheia = null)
+    private static async Task<HttpResponseMessage> EnviarAsync(HttpClient navegador, RotaRegistrada rota, Guid empresaAlheia, Guid? obraAlheia, string? antiforgery)
     {
-        var entrada = CatalogoRotas.Entradas.FirstOrDefault(e => e.Chave == rota.Chave);
-        using var requisicao = new HttpRequestMessage(new HttpMethod(rota.Metodo), DetectorDeRotas.Concretizar(rota.Padrao, obraAlheia));
-        if (antiforgery is not null)
-        {
-            requisicao.Headers.Add("X-XSRF-TOKEN", antiforgery);
-        }
-
-        if (rota.EhEscrita)
-        {
-            requisicao.Content = JsonContent.Create(entrada?.Corpo?.Invoke(empresaAlheia) ?? new { });
-        }
-
+        using var requisicao = RequisicaoDeIsolamento.Montar(rota, empresaAlheia, obraAlheia, antiforgery);
         return await navegador.SendAsync(requisicao, TestContext.Current.CancellationToken);
     }
 

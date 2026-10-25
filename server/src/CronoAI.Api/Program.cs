@@ -51,6 +51,8 @@ builder.Services.AddScoped<ServicoObras>();
 
 // Leitura e exportação da trilha (ciclo 00013, E3): scoped pelo mesmo motivo (CronoDbContext da requisição).
 builder.Services.Configure<OpcoesAuditoria>(builder.Configuration.GetSection(OpcoesAuditoria.Secao));
+// Cota da exportação por usuário (singleton sem estado de requisição; o filtro do endpoint a consulta depois da autorização).
+builder.Services.AddSingleton<LimitadorDeExportacao>();
 builder.Services.AddScoped<ConsultasAuditoria>();
 builder.Services.AddScoped<ServicoAuditoria>();
 

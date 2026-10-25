@@ -155,6 +155,19 @@ public sealed class CatalogoTestes
         Assert.Equal(esperados.OrderBy(x => x, StringComparer.Ordinal), atuais.OrderBy(x => x, StringComparer.Ordinal));
     }
 
+    [Fact]
+    public async Task Auditoria_tem_o_indice_da_exportacao_e_a_fk_da_empresa()
+    {
+        // Índice da exportação (empresa + id > cursor, ordem por id) e FK da empresa, Restrict (confdeltype 'r').
+        var indices = await ListarAsync("SELECT indexdef FROM pg_indexes WHERE schemaname = 'cronoai' AND indexname = 'ix_auditoria_empresa_id'");
+        var definicao = Assert.Single(indices);
+        Assert.Contains("(empresa_id, id)", definicao, StringComparison.Ordinal);
+
+        var fks = await ListarAsync(
+            "SELECT k.conname || '|' || k.confdeltype::text || '|' || cl.relname FROM pg_constraint k JOIN pg_class cl ON cl.oid = k.confrelid WHERE k.conname = 'fk_auditoria_empresa'");
+        Assert.Equal(["fk_auditoria_empresa|r|empresa"], fks);
+    }
+
     #endregion
 
     #region Métodos privados

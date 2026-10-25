@@ -6,9 +6,10 @@ using CronoAI.Dados.Auditoria;
 namespace CronoAI.Api.Auditoria;
 
 /// <summary>
-/// Cursor OPACO da trilha: base64url de <c>ticks:id</c>. O cliente o devolve sem interpretar. A decodificação é estrita:
-/// qualquer coisa fora do formato (base64 inválido, partes a mais ou a menos, sinal, espaço, valor fora da faixa) é recusada
-/// e vira 400, nunca uma consulta com valor inesperado.
+/// Cursor OPACO da trilha: base64url de <c>ticks:id</c>. Opaco NÃO é assinado: o cliente pode forjar um cursor, e o efeito é só
+/// mudar a posição dentro da trilha da obra que ele JÁ está autorizado a ler (a obra, a empresa e o RLS são conferidos em
+/// toda requisição, nunca pelo cursor). A decodificação é estrita: qualquer coisa fora do formato (base64 inválido, partes a
+/// mais ou a menos, sinal, espaço, valor fora da faixa) é recusada e vira 400.
 /// </summary>
 public static class CodificadorCursorAuditoria
 {
