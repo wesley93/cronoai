@@ -197,7 +197,7 @@ describe('CSV com o código do recorte (AC-12)', () => {
     expect(um('equipe', '103332;;m²;1e308;4').errors).toEqual(['Linha 2: quantidade acima do limite de 1.000.000.000.'])
     expect(um('equipe', '103332;;m²;1e999;4').errors).toEqual(['Linha 2: quantidade inválida.'])
     expect(um('custo unitario;equipe', '103332;;m²;10;1e308;4').errors).toEqual(['Linha 2: custo unitário acima do limite de 10.000.000.'])
-    expect(um('custo unitario;equipe', '103332;;m²;10;1e999;4').errors).toEqual(['Linha 2: custo unitário inválida.'])
+    expect(um('custo unitario;equipe', '103332;;m²;10;1e999;4').errors).toEqual(['Linha 2: custo unitário inválido.'])
     expect(um('rup;equipe', '103332;;m²;10;1e999;4').errors).toEqual(['Linha 2: RUP inválida.'])
     expect(um('rup;equipe', '103332;;m²;10;10001;4').errors).toEqual(['Linha 2: RUP acima do limite de 10.000.'])
     expect(um('equipe', '103332;;m²;10;1001').errors).toEqual(['Linha 2: equipe acima do limite de 1.000.'])
@@ -212,7 +212,7 @@ describe('CSV com o código do recorte (AC-12)', () => {
     expect(erroDeValorDaLinha('quantity', NaN)).toBe('quantidade inválida')
     expect(erroDeValorDaLinha('quantity', 0)).toBe('quantidade inválida')
     expect(erroDeValorDaLinha('unitCost', 0)).toBeUndefined()
-    expect(erroDeValorDaLinha('unitCost', -1)).toBe('custo unitário inválida')
+    expect(erroDeValorDaLinha('unitCost', -1)).toBe('custo unitário inválido')
     expect(erroDeValorDaLinha('rup', 345.33)).toBeUndefined() // o maior RUP publicado em 09/2026
     expect(erroDeValorDaLinha('unitCost', 228977.2)).toBeUndefined() // o maior custo publicado
     expect(erroDeValorDaLinha('team', 1001)).toBe('equipe acima do limite de 1.000')

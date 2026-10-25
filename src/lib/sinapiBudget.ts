@@ -48,11 +48,13 @@ export const MAX_BUDGET_LINES = 200
  */
 export const LIMITES_LINHA = { quantity: 1e9, unitCost: 1e7, rup: 1e4, team: 1000 } as const
 const ROTULO_CAMPO = { quantity: 'quantidade', unitCost: 'custo unitário', rup: 'RUP', team: 'equipe' } as const
+// Concordância do adjetivo com o campo ("custo unitário" é masculino).
+const INVALIDO = { quantity: 'inválida', unitCost: 'inválido', rup: 'inválida', team: 'inválida' } as const
 export type CampoLimitado = keyof typeof LIMITES_LINHA
 
 /** Mensagem se o valor não é um número finito acima de zero (custo pode ser 0) ou passa do teto; `undefined` se vale. */
 export function erroDeValorDaLinha(campo: CampoLimitado, v: number): string | undefined {
-  if (!Number.isFinite(v) || v < 0 || (v === 0 && campo !== 'unitCost')) return `${ROTULO_CAMPO[campo]} inválida`
+  if (!Number.isFinite(v) || v < 0 || (v === 0 && campo !== 'unitCost')) return `${ROTULO_CAMPO[campo]} ${INVALIDO[campo]}`
   if (v > LIMITES_LINHA[campo]) return `${ROTULO_CAMPO[campo]} acima do limite de ${LIMITES_LINHA[campo].toLocaleString('pt-BR')}`
   return undefined
 }
