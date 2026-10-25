@@ -47,7 +47,7 @@ async function onCsv(e: Event) {
 }
 
 function downloadTemplate() {
-  downloadText('modelo_planilha_sinapi.csv', '﻿' + BUDGET_CSV_TEMPLATE, 'text/csv')
+  downloadText('modelo_planilha_sinapi.csv', '\uFEFF' + BUDGET_CSV_TEMPLATE, 'text/csv')
 }
 
 function generate() {
