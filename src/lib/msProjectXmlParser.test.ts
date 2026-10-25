@@ -414,6 +414,12 @@ describe('parseMspdiXml: rodada 03 (chaves do protótipo, datas inválidas, ocor
     expect(r.warnings.join(' ')).not.toMatch(/abcdefghij|Invalid/)
   })
 
+  it('data inválida presente no legado e em <Exceptions> é avisada uma vez só', () => {
+    const legadoInvalido = `<WeekDays><WeekDay><DayType>0</DayType><DayWorking>0</DayWorking>${periodo('2026-02-30', '2026-03-02')}</WeekDay></WeekDays>`
+    const xml = projeto({ head: calendario(`${legadoInvalido}<Exceptions>${excecao('2026-02-30', '2026-03-02')}</Exceptions>`) })
+    expect(parseMspdiXml(xml).warnings).toContain('1 exceção(ões) do calendário com data inválida ignorada(s).')
+  })
+
   it('recorrente com menos datas legadas no período que Occurrences não é aplicada e avisa (A1)', () => {
     const exc = `<Exceptions>${excecao('2026-12-25', '2028-12-25', { ocorrencias: 3 })}</Exceptions>`
     const duas = parseMspdiXml(projeto({ head: calendario(`${legado(['2026-12-25', '2027-12-25'])}${exc}`) }))

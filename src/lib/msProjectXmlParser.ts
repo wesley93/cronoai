@@ -564,13 +564,13 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     const from = isoDate(text(p, 'FromDate'))
     const to = isoDate(text(p, 'ToDate'))
     if (!from || !to) return
+    const key = `${working ? 1 : 0}|${from}|${to}`
+    if (seenRanges.has(key)) return // dedupe antes de validar: a data inválida presente no legado e em <Exceptions> conta uma vez
+    seenRanges.add(key)
     if (!isValidIsoDate(from) || !isValidIsoDate(to)) {
       invalidRanges++
       return
     }
-    const key = `${working ? 1 : 0}|${from}|${to}`
-    if (seenRanges.has(key)) return
-    seenRanges.add(key)
     const target = working ? extra : holidays
     let cursor = from
     let days = 0
@@ -592,7 +592,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   // O MS Project 2007–2016 (corpus; 2019 a confirmar) grava cada exceção em dois lugares: <Exceptions> (com a regra de recorrência)
   // e os WeekDay DayType=0 legados, já expandidos ocorrência por ocorrência. Expandir FromDate..ToDate de uma recorrente marcaria o
   // intervalo inteiro; as datas certas estão na lista legada. A recorrente só é considerada aplicada se a lista legada (do mesmo tipo,
-  // feriado ou dia útil extra) tem ao menos uma data dentro de FromDate..ToDate dela; senão vira aviso. (Exigir o FromDate exato dava
+  // feriado ou dia útil extra) tem ao menos `Occurrences` datas distintas dentro de FromDate..ToDate dela; senão vira aviso. (Exigir o FromDate exato dava
   // falso aviso em 14 das 27 recorrentes do corpus: o FromDate nem sempre é uma ocorrência.) A expansão pela regra fica para a SPEC-05.
   const legacyDays = kids(kid(cal, 'WeekDays'), 'WeekDay').filter((wd) => text(wd, 'DayType') === '0')
   for (const wd of legacyDays) collect(wd, text(wd, 'DayWorking') === '1')
