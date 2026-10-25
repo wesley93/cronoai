@@ -2,7 +2,7 @@
 import { computed, reactive, ref } from 'vue'
 import { FileSpreadsheet, Upload, Download, Trash2, Wand2, KeyRound, Eraser } from 'lucide-vue-next'
 import type { BudgetLine } from '@/lib/sinapiBudget'
-import { BUDGET_CSV_TEMPLATE, DEFAULT_BATCH_OPTIONS, lineDuration, lineName, lineResources } from '@/lib/sinapiBudget'
+import { BUDGET_CSV_TEMPLATE, DEFAULT_BATCH_OPTIONS, lineDuration, lineName, lineResources, parseNumberBR } from '@/lib/sinapiBudget'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import { downloadText } from '@/lib/download'
@@ -26,7 +26,7 @@ const preview = computed(() => project.previewBudgetBatch(opts))
 const previewByName = computed(() => new Map(preview.value?.created.map((c) => [c.task.name, c]) ?? []))
 
 function edit(l: BudgetLine, field: 'quantity' | 'rup' | 'unitCost' | 'team', raw: string) {
-  const v = Number(raw.replace(/\./g, '').replace(',', '.'))
+  const v = parseNumberBR(raw)
   const limits = { quantity: 1e8, rup: 50, unitCost: 1e7, team: 60 }
   if (!Number.isFinite(v) || v <= 0 || v > limits[field]) return
   project.updateBudgetLine(l.id, { [field]: field === 'team' ? Math.round(v) : v })

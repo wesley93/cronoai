@@ -42,6 +42,8 @@ const snapshot = computed(() => {
 })
 watch(pkg, () => (selectedIdx.value = undefined))
 const indexPoints = computed(() => indexSeries(curve.value))
+/** Variações menores que o arredondamento exibido (0,01) contam como estáveis. */
+const trendWord = (before: number, after: number) => (Math.abs(after - before) < 0.005 ? 'ficou estável' : after > before ? 'melhorou' : 'piorou')
 const forecast = computed(() => project.evmForecast)
 const pkgName = computed(() => project.packageEvm.find((p) => p.wbs === pkg.value)?.name)
 
@@ -191,8 +193,8 @@ async function copyReport() {
         <IndexTrendChart v-if="indexPoints.length" :points="indexPoints" />
         <p v-else class="py-10 text-center text-xs text-zinc-500">Sem execução registrada neste recorte.</p>
         <div v-if="indexPoints.length >= 2" class="mt-2 text-[11.5px] text-zinc-500">
-          No último mês o SPI {{ indexPoints.at(-1)!.spi >= indexPoints.at(-2)!.spi ? 'melhorou' : 'piorou' }}
-          ({{ fmtIndex(indexPoints.at(-2)!.spi) }} → {{ fmtIndex(indexPoints.at(-1)!.spi) }}) e o CPI {{ indexPoints.at(-1)!.cpi >= indexPoints.at(-2)!.cpi ? 'melhorou' : 'piorou' }}
+          No último mês o SPI {{ trendWord(indexPoints.at(-2)!.spi, indexPoints.at(-1)!.spi) }}
+          ({{ fmtIndex(indexPoints.at(-2)!.spi) }} → {{ fmtIndex(indexPoints.at(-1)!.spi) }}) e o CPI {{ trendWord(indexPoints.at(-2)!.cpi, indexPoints.at(-1)!.cpi) }}
           ({{ fmtIndex(indexPoints.at(-2)!.cpi) }} → {{ fmtIndex(indexPoints.at(-1)!.cpi) }}).
         </div>
       </SectionCard>

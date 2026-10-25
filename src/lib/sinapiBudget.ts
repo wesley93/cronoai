@@ -86,7 +86,9 @@ export function parseNumberBR(raw: string | undefined): number {
   if (!raw) return NaN
   const s = raw.trim().replace(/^R\$\s*/i, '').replace(/\s/g, '')
   if (!s) return NaN
-  const normalized = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s
+  // "1.850,5" e "1.280" (milhar pt-BR) -> 1850.5 / 1280; "0.82" segue como decimal
+  const thousandsOnly = /^\d{1,3}(\.\d{3})+$/.test(s)
+  const normalized = s.includes(',') || thousandsOnly ? s.replace(/\./g, '').replace(',', '.') : s
   return Number(normalized)
 }
 
