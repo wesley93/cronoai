@@ -1,7 +1,7 @@
 // Leitura do estado salvo pela versão anterior (v1) e cadeia de migrações do esquema da obra (SPEC-15 RNF-15.3).
 // Cada ciclo que muda o formato da obra acrescenta um passo em MIGRACOES e o teste com o formato anterior.
 import type { PersistedState, RegistroObra } from '@/types/obra'
-import { defaultHolidays } from './calendar'
+import { defaultHolidays, parseISO, toISO } from './calendar'
 import { UID_CALENDARIO_PADRAO, calendarioPadrao, diasParaMinutos, erroDoCalendario } from './calendarioTrabalho'
 import type { CalendarioObra } from '@/types/domain'
 
@@ -101,11 +101,24 @@ function temTarefasEMeta(v: unknown): v is Record<string, unknown> {
 
 const CHAVES_LISTA = ['reports', 'restrictions', 'materials', 'recoveryCosts', 'appliedScenarios', 'log', 'undo', 'budget'] as const
 
+/** Data ISO `yyyy-mm-dd` que existe no calendário (texto livre e dia inexistente, como 2026-02-30, não valem). */
+function dataIsoValida(v: unknown): boolean {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false
+  try {
+    return toISO(parseISO(v)) === v
+  } catch {
+    return false
+  }
+}
+
 /** Fronteira de confiança: chaves e listas já verificadas; o conteúdo interno de cada lista não é revalidado (a v1 já o gravava assim). */
 function eEstado(v: Record<string, unknown>): v is Record<string, unknown> & PersistedState {
   return (
     Array.isArray(v.tasks) &&
     eObjeto(v.meta) &&
+    // Sem data de início e de status válidas o motor não tem data-base: a obra é ilegível (e nada é gravado por cima dela)
+    dataIsoValida(v.meta.startDate) &&
+    dataIsoValida(v.meta.statusDate) &&
     Array.isArray(v.calendarios) &&
     v.calendarios.every(eObjeto) &&
     eNumero(v.calendarioPadraoUid) &&

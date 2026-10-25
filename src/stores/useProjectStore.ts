@@ -1,6 +1,6 @@
 // Estado global reativo da obra: toda ação (apontamento, cenário, SINAPI, XML) recalcula CPM, EVM e suprimentos.
 import { defineStore } from 'pinia'
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, toRaw, watch } from 'vue'
 import type {
   CalendarioObra,
   DecisionLogEntry,
@@ -13,6 +13,7 @@ import type {
   ProjectState,
   ResourceAssignment,
   ScenarioKind,
+  ScheduleResult,
   Task,
 } from '@/types/domain'
 import type { MSProjectPredecessor, MSProjectTask } from '@/types/msProject'
@@ -61,7 +62,8 @@ import {
 import { SAFETY_MARGIN_DAYS, analyzeSupplies } from '@/lib/supplies'
 import { fmtBRL, fmtMonth, uid } from '@/lib/format'
 import { calcularDivergencias } from '@/lib/divergencias'
-import { mensagemDoCalculo, verificarCalculo } from '@/lib/horizonte'
+import type { PreviaPlanilha, PreviaProgresso, PreviaSinapi } from '@/types/previas'
+import { calcularObra, mensagemDoCalculo, verificarCalculo } from '@/lib/horizonte'
 import { ROTULO_RESTRICAO, calendarioExiste, montarRestricao, tarefasManuaisAlteradas, validarPrazoFinal, validarRestricao, type TipoRestricaoTela } from '@/lib/restricoes'
 import { lagEmDias, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
 import { criarRegistro, lerEstadoV1, migrarRegistro } from '@/lib/migracaoEstado'
@@ -464,18 +466,21 @@ export const useProjectStore = defineStore('project', () => {
    */
   const calculo = computed(() => {
     try {
-      const cals = compilarCalendarios(state.meta.startDate, state.calendarios, state.calendarioPadraoUid)
-      const calsPv = compilarCalendarios(state.meta.startDate, state.calendarios, state.calendarioPadraoUid, { semExcecoesUteis: true })
-      const sch = computeSchedule(state.tasks, cals, optsDaObra(state.meta, 'forecast', state.meta.statusDate))
-      const evm = computeEvm(state.tasks, calsPv, state.meta.statusDate)
-      return { cals, calsPv, sch, evm, erro: undefined as string | undefined }
+      // Cópia simples do estado: ler 3.000 tarefas pelo proxy reativo do Vue custa ~4x mais que ler objetos comuns, e a cópia (JSON) também
+      // registra a dependência de todos os campos que o cálculo usa
+      return { ...calcularObra(clone(state.tasks), clone(state.meta), clone(state.calendarios), state.calendarioPadraoUid), erro: undefined as string | undefined }
     } catch (e) {
       const seguros = calendariosSeguros()
+      const sch = computeSchedule([], seguros, optsDaObra(state.meta, 'forecast', state.meta.statusDate))
+      const padrao = calendarioDeDias(seguros.padrao)
       return {
         cals: seguros,
         calsPv: seguros,
-        sch: computeSchedule([], seguros, optsDaObra(state.meta, 'forecast', state.meta.statusDate)),
+        sch,
         evm: computeEvm([], seguros, state.meta.statusDate),
+        atraso: analyzeDelay([], sch, padrao),
+        calendar: padrao,
+        baseCalendar: padrao,
         erro: mensagemDoCalculo(e),
       }
     }
@@ -487,13 +492,20 @@ export const useProjectStore = defineStore('project', () => {
   /** Calendários do valor planejado (PV): sem as exceções úteis, como a linha de base (CR-2d). */
   const calendariosPv = computed(() => calculo.value.calsPv)
   /** Contas por dia útil ("+16 d.u."): o calendário padrão, com dias extras. */
-  const calendar = computed(() => calendarioDeDias(calendarios.value.padrao))
-  const baseCalendar = computed(() => calendarioDeDias(calendariosPv.value.padrao))
+  const calendar = computed(() => calculo.value.calendar)
+  const baseCalendar = computed(() => calculo.value.baseCalendar)
   /** Variação em dias úteis sem deixar o teto de 50 anos derrubar a tela (0 quando não cabe). */
   const variacaoSegura = (cal: WorkCalendar, a: string, b: string) => tentar(() => workingVariance(cal, a, b), () => 0)
-  /** Cronograma previsto de uma lista de tarefas (a da obra ou uma hipótese: apontamento, inclusão, planilha). */
-  function agendar(tasks: Task[]) {
-    return tentar(() => computeSchedule(tasks, calendarios.value, optsDaObra(state.meta, 'forecast', state.meta.statusDate)), () => schedule.value)
+  /**
+   * Cronograma previsto de uma HIPÓTESE (apontamento, inclusão, planilha, cenário). Não esconde a falha: se a hipótese estoura o
+   * teto de 50 anos, devolve o erro em português para a prévia mostrar na tela (e não "sem impacto").
+   */
+  function simular(tasks: Task[], cals: CalendariosCompilados = calendarios.value): { sch: ScheduleResult; erro?: undefined } | { sch?: undefined; erro: string } {
+    try {
+      return { sch: computeSchedule(tasks, cals, optsDaObra(state.meta, 'forecast', state.meta.statusDate)) }
+    } catch (e) {
+      return { erro: mensagemDoCalculo(e) }
+    }
   }
   const schedule = computed(() => calculo.value.sch)
   /** Tarefas cuja data difere da do arquivo importado, com a causa provável (RF-05.8). */
@@ -504,13 +516,8 @@ export const useProjectStore = defineStore('project', () => {
   const taskByUid = computed(() => new Map(state.tasks.map((t) => [t.uid, t])))
   const evm = computed(() => calculo.value.evm)
   const packageEvm = computed(() => tentar(() => computePackageEvm(state.tasks, calendariosPv.value, state.meta.statusDate), () => []))
-  const sCurve = computed(() => tentar(() => computeSCurve(state.tasks, calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth), () => []))
-  const delay = computed(() =>
-    tentar(
-      () => analyzeDelay(state.tasks, schedule.value, baseCalendar.value),
-      () => analyzeDelay([], schedule.value, baseCalendar.value),
-    ),
-  )
+  const sCurve = computed(() => (calculo.value.erro ? [] : tentar(() => computeSCurve(clone(state.tasks), calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth), () => [])))
+  const delay = computed(() => calculo.value.atraso)
   /**
    * Obra com "não mover o restante" e tarefa iniciada cujo restante termina ANTES da data de status: o cálculo é a política do
    * CronoAI (o restante segue contínuo desde o início real), mas o resultado fica no passado e o usuário precisa saber.
@@ -708,9 +715,11 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /** Simula o impacto de um apontamento no término da obra antes de aprovar. */
-  function previewProgress(taskUid: number, pct: number, reportDate = state.meta.statusDate) {
+  function previewProgress(taskUid: number, pct: number, reportDate = state.meta.statusDate): PreviaProgresso {
     const tasks = state.tasks.map((t) => (t.uid === taskUid ? { ...t, ...progressPatch(t, pct, reportDate) } : t))
-    const s = agendar(tasks)
+    const sim = simular(tasks)
+    if (sim.erro !== undefined) return { erro: sim.erro }
+    const s = sim.sch
     return { finish: s.projectFinish, deltaDays: variacaoSegura(calendar.value, schedule.value.projectFinish, s.projectFinish) }
   }
 
@@ -719,7 +728,9 @@ export const useProjectStore = defineStore('project', () => {
     const current = taskByUid.value.get(taskUid)
     if (!current) return undefined
     const tasks = state.tasks.map((t) => (t.uid === taskUid ? { ...t, ...progressPatch(t, pct, reportDate) } : t))
-    const after = agendar(tasks)
+    const simulado = simular(tasks)
+    if (simulado.erro !== undefined) return undefined // a prévia de datas já mostra o erro da hipótese
+    const after = simulado.sch
     const comum = { meta: state.meta, calendarios: state.calendarios, calendarioPadraoUid: state.calendarioPadraoUid }
     return {
       before: buildTaskXml(current, { ...comum, tasks: state.tasks, schedule: schedule.value }),
@@ -728,13 +739,18 @@ export const useProjectStore = defineStore('project', () => {
   }
 
 
-  function approveReport(reportId: string, taskUid: number, pct: number | undefined, restrictions: DetectedRestriction[]) {
+  function approveReport(reportId: string, taskUid: number, pct: number | undefined, restrictions: DetectedRestriction[]): { ok: true; delta: number } | { ok: false; erro: string } {
     const report = state.reports.find((r) => r.id === reportId)
     const task = taskByUid.value.get(taskUid)
-    if (!report || !task) return
+    if (!report || !task) return { ok: false, erro: 'Relato ou tarefa não encontrado.' }
     const before = task.percentComplete
     const finishBefore = schedule.value.projectFinish
     const reportDate = report.timestamp.slice(0, 10)
+    if (pct !== undefined && pct !== before) {
+      // Recusa o apontamento que estouraria o horizonte de 50 anos antes de mudar qualquer coisa
+      const erro = erroSeAplicar(state.tasks.map((t) => (t.uid === taskUid ? { ...t, ...progressPatch(t, pct, reportDate) } : t)))
+      if (erro) return { ok: false, erro }
+    }
     if (pct !== undefined && pct !== before) applyProgress(taskUid, pct, reportDate)
     for (const r of restrictions) {
       state.restrictions.unshift({ ...r, id: uid('rst'), date: reportDate, taskUid, reportId, resolved: false })
@@ -751,7 +767,7 @@ export const useProjectStore = defineStore('project', () => {
         (restrictions.length ? `; restrições: ${restrictions.map((r) => r.label).join(', ')}` : '') +
         (delta !== 0 ? `; término da obra ${delta < 0 ? 'antecipado' : 'adiado'} em ${Math.abs(delta)} dia(s) útil(eis).` : '.'),
     )
-    return { delta }
+    return { ok: true, delta }
   }
 
   function rejectReport(reportId: string) {
@@ -787,8 +803,15 @@ export const useProjectStore = defineStore('project', () => {
     state.calendarios = state.calendarios.map((c) => (c.uid === state.calendarioPadraoUid ? transformar(c) : c))
   }
 
-  function applyScenario(result: ScenarioResult) {
-    if (!result.applicable || state.appliedScenarios.includes(result.kind)) return
+  function applyScenario(result: ScenarioResult): ResultadoAcao {
+    if (!result.applicable || state.appliedScenarios.includes(result.kind)) return { ok: false, erro: 'Este cenário não pode ser aplicado agora.' }
+    // Hipótese: a tarefa alterada e o calendário com os dias extras; recusa se estourar o horizonte
+    const tarefasHipotese = result.taskPatch ? state.tasks.map((t) => (t.uid === result.taskPatch!.uid ? { ...t, ...clone(result.taskPatch!.patch) } : t)) : state.tasks
+    const calendariosHipotese = result.addedWorkingDays?.length
+      ? state.calendarios.map((c) => (c.uid === state.calendarioPadraoUid ? comDiasExtras(c, result.addedWorkingDays!) : c))
+      : state.calendarios
+    const erro = erroSeAplicar(tarefasHipotese, state.meta, calendariosHipotese)
+    if (erro) return { ok: false, erro }
     const costId = uid('cost')
     const undo: ScenarioUndo = { kind: result.kind, costId, result: clone(result) }
     if (result.taskPatch) {
@@ -808,6 +831,7 @@ export const useProjectStore = defineStore('project', () => {
     state.appliedScenarios.push(result.kind)
     state.undo.push(undo)
     log('cenario', `Cenário aplicado: ${result.title}`, `${result.summary}. Recupera ${result.daysRecovered} dia(s) útil(eis); custo comprometido ${fmtBRL(amount)}.`)
+    return { ok: true }
   }
 
   function appliedResult(kind: ScenarioKind): ScenarioResult | undefined {
@@ -901,15 +925,17 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   // ---------------------------------------------------------------- Módulo 4
-  function addSinapiTask(input: SinapiInsert): Task {
+  function addSinapiTask(input: SinapiInsert): { ok: true; task: Task } | { ok: false; erro: string } {
     const { task, group } = buildSinapiTask(input, state.tasks)
+    const erro = erroSeAplicar([...state.tasks, ...(group ? [group] : []), task])
+    if (erro) return { ok: false, erro }
     if (group) state.tasks.push(group)
     state.tasks.push(task)
     // Linha de base da inclusão de escopo = datas calculadas no momento da inclusão
     const s = schedule.value.byUid.get(task.uid)
     if (s) patchTask(task.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin })
     log('sinapi', `Pacote incluído na EAP: [UID ${task.uid}] ${task.wbs}`, `${input.name} — ${input.durationDays} dias úteis, BAC ${fmtBRL(task.bac)}.`)
-    return task
+    return { ok: true, task }
   }
 
   function buildSinapiTask(input: SinapiInsert, tasks: Task[]): { task: Task; parentWbs: string; group?: Task } {
@@ -947,10 +973,12 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /** Prévia da inclusão: datas da nova tarefa e impacto na entrega. */
-  function previewSinapiTask(input: SinapiInsert) {
+  function previewSinapiTask(input: SinapiInsert): PreviaSinapi {
     const { task, group } = buildSinapiTask(input, state.tasks)
     const tasks = [...state.tasks, ...(group ? [group] : []), task]
-    const s = agendar(tasks)
+    const sim = simular(tasks)
+    if (sim.erro !== undefined) return { erro: sim.erro }
+    const s = sim.sch
     const sched = s.byUid.get(task.uid)
     return {
       uid: task.uid,
@@ -1028,7 +1056,7 @@ export const useProjectStore = defineStore('project', () => {
       const days = lineDuration(l)
       let parentWbs = existingGroups.has(l.group) ? l.group : extraGroup
       const prev = lastInGroup.get(parentWbs ?? '__novo__')
-      const sched = agendar(tasks)
+      const sched = computeSchedule(tasks, calendarios.value, optsDaObra(state.meta, 'forecast', state.meta.statusDate)) // lança se estourar: quem chama trata
       const predecessorUid = prev?.uid ?? suggestPredecessorFor(parentWbs ?? '99', tasks, sched)
       const linkType: LinkType = prev && opts.mode === 'SS' ? 'SS' : 'FS'
       const lagDays = prev && opts.mode === 'SS' ? Math.max(1, Math.round((minutosParaDias(prev.duracaoMin, minutosPorDia.value) * opts.overlapPct) / 100)) : 0
@@ -1061,10 +1089,18 @@ export const useProjectStore = defineStore('project', () => {
     return { tasks, created }
   }
 
-  function previewBudgetBatch(opts: BatchOptions = DEFAULT_BATCH_OPTIONS) {
+  function previewBudgetBatch(opts: BatchOptions = DEFAULT_BATCH_OPTIONS): PreviaPlanilha | undefined {
     if (!state.budget.length) return undefined
-    const { tasks, created } = buildBudgetBatch(state.budget, opts)
-    const s = agendar(tasks)
+    let lote: ReturnType<typeof buildBudgetBatch>
+    try {
+      lote = buildBudgetBatch(state.budget, opts)
+    } catch (e) {
+      return { erro: mensagemDoCalculo(e) }
+    }
+    const { tasks, created } = lote
+    const sim = simular(tasks)
+    if (sim.erro !== undefined) return { erro: sim.erro }
+    const s = sim.sch
     return {
       created: created.map((t) => ({ task: t, sched: s.byUid.get(t.uid)! })),
       projectFinish: s.projectFinish,
@@ -1074,9 +1110,17 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /** Gera os pacotes da planilha na EAP (com linha de base da inclusão) e esvazia a planilha. */
-  function generateFromBudget(opts: BatchOptions = DEFAULT_BATCH_OPTIONS): Task[] {
-    if (!state.budget.length) return []
-    const { tasks, created } = buildBudgetBatch(state.budget, opts)
+  function generateFromBudget(opts: BatchOptions = DEFAULT_BATCH_OPTIONS): { ok: true; created: Task[] } | { ok: false; erro: string } {
+    if (!state.budget.length) return { ok: true, created: [] }
+    let lote: ReturnType<typeof buildBudgetBatch>
+    try {
+      lote = buildBudgetBatch(state.budget, opts)
+    } catch (e) {
+      return { ok: false, erro: mensagemDoCalculo(e) }
+    }
+    const { tasks, created } = lote
+    const erro = erroSeAplicar(tasks)
+    if (erro) return { ok: false, erro }
     state.tasks = tasks
     for (const t of created) {
       const s = schedule.value.byUid.get(t.uid)
@@ -1085,13 +1129,14 @@ export const useProjectStore = defineStore('project', () => {
     const bac = created.reduce((a, t) => a + t.bac, 0)
     log('sinapi', `Cronograma gerado da planilha SINAPI (${created.length} pacotes)`, `Vínculos ${opts.mode === 'SS' ? `SS com defasagem de ${opts.overlapPct}%` : 'FS em série'} · BAC +${fmtBRL(bac)}.`)
     state.budget = []
-    return created
+    return { ok: true, created }
   }
 
   // ---------------------------------------------------------------- EAP / XML
   /** Recusa a edição que, aplicada, estouraria o horizonte de 50 anos (simula antes de gravar). */
-  function erroSeAplicar(tasks: Task[], meta: ProjectState['meta'] = state.meta): string | undefined {
-    return verificarCalculo(tasks, meta, state.calendarios, state.calendarioPadraoUid)
+  function erroSeAplicar(tasks: Task[], meta: ProjectState['meta'] = state.meta, calendariosHipotese: CalendarioObra[] = state.calendarios): string | undefined {
+    // toRaw: a simulação não precisa de reatividade e o proxy do Vue deixa o cálculo de 3.000 tarefas várias vezes mais lento
+    return verificarCalculo(tasks.map((t) => toRaw(t)), toRaw(meta), calendariosHipotese.map((c) => toRaw(c)), state.calendarioPadraoUid)
   }
 
   function updateTask(taskUid: number, patch: Partial<Task>): ResultadoAcao {

@@ -50,11 +50,14 @@ describe('Geração em lote na EAP', () => {
     expect(lines).toHaveLength(5)
     const before = store.leaves.length
     const preview = store.previewBudgetBatch({ mode: 'SS', overlapPct: 40 })!
-    const created = store.generateFromBudget({ mode: 'SS', overlapPct: 40 })
+    const res = store.generateFromBudget({ mode: 'SS', overlapPct: 40 })
+    if (!res.ok) throw new Error(res.erro)
+    const created = res.created
 
     expect(created).toHaveLength(5)
     expect(store.leaves.length).toBe(before + 5)
     expect(store.state.budget).toHaveLength(0)
+    if (preview.erro !== undefined) throw new Error(preview.erro)
     expect(store.schedule.projectFinish).toBe(preview.projectFinish)
 
     const contrapiso = created.find((t) => t.sinapi === '87630')!
@@ -69,7 +72,9 @@ describe('Geração em lote na EAP', () => {
 
   it('FS em série encadeia o mesmo grupo sem sobreposição', () => {
     const store = useProjectStore()
-    const created = store.generateFromBudget({ mode: 'FS', overlapPct: 40 })
+    const res = store.generateFromBudget({ mode: 'FS', overlapPct: 40 })
+    if (!res.ok) throw new Error(res.erro)
+    const created = res.created
     const porcelanato = created.find((t) => t.sinapi === '87263')!
     expect(porcelanato.predecessors[0]).toMatchObject({ type: 'FS', lag: { tipo: 'util', minutos: 0 } })
   })

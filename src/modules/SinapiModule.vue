@@ -108,7 +108,12 @@ function add() {
     ui.notify('warning', 'Dados incompletos', 'Informe quantidade, RUP e equipe/prazo válidos.')
     return
   }
-  const t = project.addSinapiTask(input.value)
+  const res = project.addSinapiTask(input.value)
+  if (!res.ok) {
+    ui.notify('error', 'Pacote não adicionado', res.erro)
+    return
+  }
+  const t = res.task
   ui.notify('success', `Pacote adicionado: [UID ${t.uid}] ${t.wbs}`, `${fmtDiasUteis(t.duracaoMin, project.minutosPorDia)} dias úteis · ${officials.value} ${item.professional.toLowerCase()}(s) + ${helpers.value} servente(s) · vínculo ${linkType.value}.`)
 }
 </script>
@@ -244,7 +249,8 @@ function add() {
               </div>
             </div>
 
-            <div v-if="preview" class="rounded-lg border border-zinc-200 p-3 text-[12px] dark:border-zinc-800">
+            <div v-if="preview?.erro" class="rounded-lg border border-coral-300 p-3 text-[12px] text-coral-700 dark:border-coral-800 dark:text-coral-300" role="alert" data-testid="erro-previa">{{ preview.erro }}</div>
+            <div v-else-if="preview && preview.erro === undefined" class="rounded-lg border border-zinc-200 p-3 text-[12px] dark:border-zinc-800">
               <div class="flex items-center gap-2 font-mono text-[12px] font-semibold"><GitCommitHorizontal class="h-4 w-4 text-amber-500" /> [UID {{ preview.uid }}] {{ preview.wbs }}</div>
               <div class="mt-2 grid grid-cols-2 gap-2">
                 <div><span class="text-zinc-500">Início previsto</span><div class="font-medium tabular-nums">{{ fmtDate(preview.start) }}</div></div>

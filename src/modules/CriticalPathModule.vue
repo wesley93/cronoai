@@ -49,7 +49,11 @@ const comparison = computed(() => SCENARIOS.map((k) => project.appliedResult(k) 
 function apply(kind: ScenarioKind) {
   const res = project.scenarios[kind]
   const before = project.schedule.projectFinish
-  project.applyScenario(res)
+  const aplicado = project.applyScenario(res)
+  if (!aplicado.ok) {
+    ui.notify('error', `${res.title} não aplicado`, aplicado.erro)
+    return
+  }
   ui.notify('success', `${res.title} aplicado`, `Entrega: ${fmtDate(before)} → ${fmtDate(project.schedule.projectFinish)} · custo comprometido ${fmtBRL(res.extraCost)}. Gantt, EVM e suprimentos recalculados.`)
 }
 function undo(kind: ScenarioKind) {

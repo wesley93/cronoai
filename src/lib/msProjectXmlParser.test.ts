@@ -895,7 +895,7 @@ describe('parseMspdiXml: rodada 02 (faixas de Duration e MinutesPerDay, calendá
       head: '<StartDate>2026-03-02T08:00:00</StartDate><StatusDate>2026-03-01T17:00:00</StatusDate>',
       tasks:
         tarefa(1) +
-        `<Task><UID>2</UID><ID>2</ID><Name>Manual</Name><WBS>2</WBS><OutlineLevel>1</OutlineLevel><Manual>1</Manual><Start>2026-03-16T08:00:00</Start><Finish>2026-03-20T17:00:00</Finish><Duration>PT40H0M0S</Duration><PredecessorLink><PredecessorUID>1</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink></Task>`,
+        `<Task><UID>2</UID><ID>2</ID><Name>Manual</Name><WBS>2</WBS><OutlineLevel>1</OutlineLevel><Manual>1</Manual><Start>2026-03-16T09:30:00</Start><Finish>2026-03-20T16:45:00</Finish><Duration>PT40H0M0S</Duration><PredecessorLink><PredecessorUID>1</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink></Task>`,
     })
     const exportar = (alterar: boolean) => {
       const r = parseMspdiXml(xml)
@@ -912,7 +912,7 @@ describe('parseMspdiXml: rodada 02 (faixas de Duration e MinutesPerDay, calendá
     }
     // Calculado pelo CronoAI: B começa no dia seguinte ao fim de A (03/03) e leva 5 dias úteis (até 09/03)
     expect(exportar(true)).toEqual(['2026-03-03T08:00:00', '2026-03-10T17:00:00'])
-    // Não alterada: as datas manuais do arquivo (16/03 a 20/03)
-    expect(exportar(false)).toEqual(['2026-03-16T08:00:00', '2026-03-20T17:00:00'])
+    // Não alterada: as datas e horas manuais do arquivo (16/03 09:30 a 20/03 16:45)
+    expect(exportar(false)).toEqual(['2026-03-16T09:30:00', '2026-03-20T16:45:00']) // a hora exata do arquivo, não 08:00/17:00
   })
 })

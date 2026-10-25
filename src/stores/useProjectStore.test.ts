@@ -63,7 +63,7 @@ describe('useProjectStore · visão MS Project', () => {
 
   it('N-2: aprovar o relato do Mestre Tião (75%) antecipa 5 d.u. e a entrega vai a 16/06/27', () => {
     const store = useProjectStore()
-    expect(store.approveReport('r-tiao', 104, 75, [])).toEqual({ delta: -5 })
+    expect(store.approveReport('r-tiao', 104, 75, [])).toEqual({ ok: true, delta: -5 })
     expect(store.schedule.projectFinish).toBe('2027-06-16')
   })
 

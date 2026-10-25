@@ -62,7 +62,11 @@ function approve() {
   const restrictions = ai.value.restrictions.filter((_, i) => includeRestrictions.value[i])
   const pct = ai.value.suggestedPercent !== undefined || newPercent.value !== previous.value ? newPercent.value : undefined
   const res = project.approveReport(props.report.id, task.value.uid, pct, restrictions)
-  const delta = res?.delta ?? 0
+  if (!res.ok) {
+    ui.notify('error', 'Apontamento não aprovado', res.erro)
+    return
+  }
+  const delta = res.delta
   ui.notify(
     'success',
     `EAP atualizada: [UID ${task.value.uid}] ${task.value.wbs}`,
@@ -194,7 +198,10 @@ function reject() {
       </div>
 
       <!-- Impacto -->
-      <div v-if="pending && preview" class="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-200 p-3 text-[12px] dark:border-zinc-800">
+      <div v-if="pending && preview?.erro !== undefined" class="rounded-lg border border-coral-300 p-3 text-[12px] text-coral-700 dark:border-coral-800 dark:text-coral-300" role="alert" data-testid="erro-previa">
+        {{ preview.erro }}
+      </div>
+      <div v-else-if="pending && preview && preview.erro === undefined" class="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-200 p-3 text-[12px] dark:border-zinc-800">
         <KeyRound class="h-4 w-4 text-amber-500" />
         <span>Impacto previsto na entrega das chaves:</span>
         <span class="font-semibold tabular-nums">{{ fmtDate(project.schedule.projectFinish) }}</span>

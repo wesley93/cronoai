@@ -62,9 +62,11 @@ describe('useProjectStore · multiobra', () => {
       // Conferência independente da função de migração: cada duração e cada lag do JSON v1 (em dias) × 480 = minutos do estado novo
       const v1 = JSON.parse(aurora) as { tasks: { uid: number; durationDays: number; baselineDuration?: number; predecessors: { uid: number; lagDays: number }[] }[] }
       expect(v1.tasks).toHaveLength(store.state.tasks.length)
+      expect(v1.tasks.filter((t) => t.baselineDuration !== undefined).length).toBeGreaterThan(10) // a conferência da linha de base não é vazia
       for (const t of v1.tasks) {
         const novo = store.taskByUid.get(t.uid)!
         expect([t.uid, novo.duracaoMin]).toEqual([t.uid, Math.round(t.durationDays * 480)])
+        expect([t.uid, novo.baselineDuracaoMin]).toEqual([t.uid, t.baselineDuration === undefined ? undefined : Math.round(t.baselineDuration * 480)])
         expect(novo.predecessors.map((p) => [p.uid, p.lag])).toEqual(t.predecessors.map((p) => [p.uid, { tipo: 'util', minutos: Math.round(p.lagDays * 480) }]))
       }
       expect(store.state.calendarios).toHaveLength(1)
@@ -215,6 +217,21 @@ describe('useProjectStore · multiobra', () => {
       const troca = await nova.trocarObra(b.id)
       expect(troca).toEqual({ ok: false, erro: 'Obra salva por uma versão mais nova do CronoAI (esquema 99).' })
       expect(nova.obraAtivaId).toBe(idAurora)
+    })
+
+    it('rodada 03: obra com data de início ou de status inválida fica ilegível, a outra abre e nada é gravado por cima', async () => {
+      const { adaptador, store } = await carregarCom(aurora)
+      const idAurora = store.obraAtivaId
+      const b = await store.criarObra({ modelo: 'branco', dados: recife })
+      if (!b.ok) throw new Error(b.erro)
+      const registro = adaptador.obras.get(b.id)!
+      const adulterado = JSON.stringify({ ...JSON.parse(registro.json), meta: { ...JSON.parse(registro.json).meta, statusDate: '2026-02-30' } })
+      adaptador.obras.set(b.id, { ...registro, json: adulterado })
+      const nova = await recarregar(adaptador)
+      expect(nova.obraAtivaId).toBe(idAurora)
+      expect(nova.obras.find((o) => o.id === b.id)?.ilegivel).toBe(true)
+      expect(adaptador.obras.get(b.id)?.json).toBe(adulterado) // intacta
+      expect(await nova.trocarObra(b.id)).toEqual({ ok: false, erro: 'Os dados desta obra estão ilegíveis.' })
     })
 
     it('M-6: registro ausente também vira ilegível', async () => {

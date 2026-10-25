@@ -121,12 +121,18 @@ describe('lerEstadoV1', () => {
     expect(feriadosDe(r.estado)).toEqual(defaultHolidays(2028, 2031))
   })
 
-  it('sem startDate válido, usa o ano recebido de quem chama', () => {
+  it('rodada 03: sem data de início ou de status válida a obra é ilegível (antes: abria usando o ano de quem chama)', () => {
     const base = JSON.parse(aurora)
-    const r = lerV1(JSON.stringify({ ...base, calendar: undefined, meta: { ...base.meta, startDate: undefined } }), 2031)
-    expect(r.tipo).toBe('ok')
-    if (r.tipo !== 'ok') return
-    expect(feriadosDe(r.estado)).toEqual(defaultHolidays(2031, 2034))
+    for (const meta of [
+      { startDate: undefined },
+      { startDate: 'lixo' },
+      { startDate: '2026-02-30' },
+      { statusDate: undefined },
+      { statusDate: '2026-13-01' },
+      { statusDate: 20261001 },
+    ]) {
+      expect(lerV1(JSON.stringify({ ...base, calendar: undefined, meta: { ...base.meta, ...meta } }), 2031), JSON.stringify(meta)).toEqual({ tipo: 'corrompido' })
+    }
   })
 
   it('calendário só com feriados: preserva os feriados e completa só os dias extras', () => {
@@ -185,6 +191,15 @@ describe('migrarRegistro', () => {
     const reg = criarRegistro('o1', estado, '2026-10-25T10:00:00.000Z')
     expect(reg.versaoEsquema).toBe(3)
     expect(migrarRegistro(reg)).toEqual({ tipo: 'ok', estado: JSON.parse(JSON.stringify(estado)), avisos: [] })
+  })
+
+  it('rodada 03: obra gravada com data de início ou de status inválida é ilegível, no esquema 1, 2 ou 3', () => {
+    const base = estadoV1()
+    for (const [campo, valor] of [['startDate', 'não é data'], ['startDate', '2026-02-30'], ['statusDate', ''], ['statusDate', '2026-00-10']] as const) {
+      const estado = { ...base, meta: { ...base.meta, [campo]: valor } }
+      expect(migrarRegistro(registro(JSON.stringify(estado))), `${campo}=${valor}`).toEqual({ tipo: 'erro', mensagem: 'Os dados desta obra estão ilegíveis.' })
+    }
+    expect(migrarRegistro(registro(JSON.stringify({ ...base, meta: { ...base.meta, statusDate: undefined } }), 2)).tipo).toBe('erro')
   })
 
   it('leva o esquema 1 ao atual pela cadeia, com o mesmo resultado da leitura da v1', () => {

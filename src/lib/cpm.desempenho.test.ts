@@ -8,6 +8,8 @@ import type { CalendarioObra, Lag, LinkType, PredecessorLink, Restricao, Task } 
 import { addCalendarDays, brazilianHolidays } from './calendar'
 import { calendarioPadrao, compilarCalendarios, diasParaMinutos } from './calendarioTrabalho'
 import { computeSchedule } from './cpm'
+import { createPinia, setActivePinia } from 'pinia'
+import { buildSeedState, useProjectStore } from '@/stores/useProjectStore'
 
 const FRENTES = 100
 const POR_FRENTE = 30
@@ -117,3 +119,50 @@ describe('desempenho do motor em minutos (RNF-05.1)', () => {
     expect(tempos[2]).toBeLessThan(500)
   })
 })
+
+describe('desempenho de uma edição de célula na store (obra de 3.000 tarefas)', () => {
+  /** Obra sintética dentro da store: `updateTask` simula a hipótese (cálculo completo) e depois a tela recalcula os derivados. */
+  function storeComObraGrande() {
+    globalThis.localStorage?.clear?.()
+    setActivePinia(createPinia())
+    const store = useProjectStore()
+    const seed = buildSeedState()
+    store.state.meta = { ...seed.meta, startDate: BASE, statusDate: STATUS }
+    store.state.calendarios = [padrao, sabado4h, noturno]
+    store.state.calendarioPadraoUid = 1
+    store.state.tasks = gerarObra()
+    store.state.materials = []
+    store.state.reports = []
+    return store
+  }
+
+  const editar = (store: ReturnType<typeof storeComObraGrande>, minutos: number) => {
+    const t0 = performance.now()
+    const r = store.updateTask(1500, { duracaoMin: minutos })
+    const fim = store.schedule.projectFinish // força o recálculo dos derivados, como a tela
+    return { ms: performance.now() - t0, ok: r.ok, fim }
+  }
+
+  it('a edição de uma duração é aceita e recalcula tudo (teto largo de 5.000 ms no CI)', () => {
+    const store = storeComObraGrande()
+    expect(store.erroCronograma).toBeUndefined()
+    const r = editar(store, diasParaMinutos(7))
+    expect(r.ok).toBe(true)
+    expect(store.taskByUid.get(1500)!.duracaoMin).toBe(3360)
+    expect(r.ms).toBeLessThan(5000)
+  })
+
+  it.skipIf(!process.env.CRONOAI_PERF)('local (CRONOAI_PERF=1): mediana de 5 edições de célula (verificação + recálculo)', () => {
+    const store = storeComObraGrande()
+    editar(store, diasParaMinutos(6)) // aquecimento
+    const tempos: number[] = []
+    for (let i = 0; i < 5; i++) tempos.push(editar(store, diasParaMinutos(7 + i)).ms)
+    tempos.sort((a, b) => a - b)
+    console.info(`[CRONOAI_PERF] edição de célula (ms): ${tempos.map((t) => t.toFixed(0)).join(', ')}; mediana ${tempos[2].toFixed(0)} ms`)
+    // Meta de 500 ms NÃO atingida: a edição roda a previsão e a linha de base para verificar a hipótese e depois a previsão de novo
+    // para a tela (3 cronogramas de ~130 a 200 ms cada). Teto local de 1.500 ms; ver o relatório da rodada 03 (antes de usar cópia
+    // simples e toRaw no lugar do proxy reativo do Vue, a mesma edição levava ~5.500 ms).
+    expect(tempos[2]).toBeLessThan(1500)
+  })
+})
+

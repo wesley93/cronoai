@@ -517,6 +517,15 @@ describe('rodada 02: progresso com vínculos, restrições de término em tarefa
     expect([r.byUid.get(2)!.start, r.byUid.get(2)!.finish, r.byUid.get(2)!.inicioHora]).toEqual(['2026-08-10', '2026-08-10', '08:00'])
   })
 
+  it('R-1 (rodada 03): a data TARDIA do marco com folga 0 é a do próprio momento, igual à cedo (SNET 12/08 e marco sem vínculo na previsão)', () => {
+    const snet = agendar([tarefa(1, 0, { restricao: { tipo: 'SNET', data: '2026-08-12' } })], '2026-08-03').byUid.get(1)!
+    // Antes: cedo 12/08 e tardio 11/08 (a data caía no fim do trecho útil anterior); depois: as quatro datas em 12/08
+    expect([snet.earlyStart, snet.earlyFinish, snet.lateStart, snet.lateFinish, snet.folgaTotalMin]).toEqual(['2026-08-12', '2026-08-12', '2026-08-12', '2026-08-12', 0])
+    const previsao = prever([tarefa(1, 0)]).byUid.get(1)!
+    // Marco sem vínculo com data de status 05/08: começa no 1º momento útil depois do status (06/08 08:00)
+    expect([previsao.earlyStart, previsao.lateStart, previsao.lateFinish, previsao.folgaTotalMin]).toEqual(['2026-08-06', '2026-08-06', '2026-08-06', 0])
+  })
+
   it('J: o marco depois de uma tarefa em calendário de 24 h, às 00:00 em ponto, fica no dia anterior', () => {
     const h24: CalendarioObra = { uid: 3, nome: '24 Horas', semana: Array.from({ length: 7 }, () => [{ de: 0, ate: 1440 }]), excecoes: [] }
     const cals = compilarCalendarios('2026-08-03', [padrao, h24], 1)

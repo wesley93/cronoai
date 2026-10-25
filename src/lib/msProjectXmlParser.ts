@@ -267,8 +267,8 @@ function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
   // Horas reais do cálculo; datas reais (início e término) ficam no expediente padrão
   const cInicio = ctx.cals.de(t.calendarioUid)
   const cDuracao = t.duracaoCorrida ? ctx.cals.corrido : cInicio
-  const inicioHora = doArquivo ? startTime : t.isSummary ? (r ? `${r.inicioHora}:00` : startTime) : s && !(t.percentComplete > 0 && t.actualStart) ? `${s.inicioHora}:00` : startTime
-  const terminoHora = doArquivo ? '17:00:00' : t.isSummary ? (r ? `${r.terminoHora}:00` : '17:00:00') : s && !(t.percentComplete >= 100 && t.actualFinish) ? `${s.terminoHora}:00` : '17:00:00'
+  const inicioHora = doArquivo ? (t.arquivo?.inicioHora ? `${t.arquivo.inicioHora}:00` : startTime) : t.isSummary ? (r ? `${r.inicioHora}:00` : startTime) : s && !(t.percentComplete > 0 && t.actualStart) ? `${s.inicioHora}:00` : startTime
+  const terminoHora = doArquivo ? (t.arquivo?.terminoHora ? `${t.arquivo.terminoHora}:00` : '17:00:00') : t.isSummary ? (r ? `${r.terminoHora}:00` : '17:00:00') : s && !(t.percentComplete >= 100 && t.actualFinish) ? `${s.terminoHora}:00` : '17:00:00'
   const restricao = t.restricao && !('inferida' in t.restricao && t.restricao.inferida) ? t.restricao : undefined // a inferida não vai ao arquivo
   const prazo = t.prazoFinal ? (t.prazoFinal.length > 10 ? `${t.prazoFinal.slice(0, 16)}:00` : dt(t.prazoFinal, '17:00:00')) : undefined
 
@@ -792,6 +792,8 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     }
     return d
   }
+  /** `hh:mm` do `Start`/`Finish` do arquivo, ou `undefined` se o texto não é data e hora válidas. */
+  const horaDoArquivo = (v: string | undefined): string | undefined => dataHoraMspdi(v)?.slice(11)
   const horaSegura = (v: string | undefined): string | undefined => {
     const dh = dataHoraMspdi(v)
     if (!dh) return undefined
@@ -1042,6 +1044,9 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
       : {
           ...(start ? { inicio: start } : {}),
           ...(finish ? { termino: finish } : {}),
+          // Hora exata do arquivo da tarefa manual (a exportação a devolve como veio)
+          ...(manual === '1' && start && horaDoArquivo(text(node, 'Start')) ? { inicioHora: horaDoArquivo(text(node, 'Start')) } : {}),
+          ...(manual === '1' && finish && horaDoArquivo(text(node, 'Finish')) ? { terminoHora: horaDoArquivo(text(node, 'Finish')) } : {}),
           duracaoMin,
           percentComplete: pct,
           ...(restricao ? { restricao } : {}),

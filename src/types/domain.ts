@@ -59,12 +59,15 @@ export interface OpcoesCronograma {
 
 /**
  * Dados de uma tarefa como vieram do MSPDI. Só tarefas folha; ausente quando a tarefa não veio de arquivo.
- * `inicio` e `termino` são `Start`/`Finish` do arquivo (`yyyy-mm-dd`); `restricao` e `prazoFinal` são os explícitos
+ * `inicio` e `termino` são `Start`/`Finish` do arquivo (`yyyy-mm-dd`); `inicioHora` e `terminoHora` (`hh:mm`, só tarefa manual)
+ * guardam a hora exata do arquivo para a volta; `restricao` e `prazoFinal` são os explícitos
  * (a restrição inferida pelo import não entra aqui); `manual` guarda `Manual` (agendada manualmente) e `ativa`, o `Active`.
  */
 export interface DadosDoArquivo {
   inicio?: string
   termino?: string
+  inicioHora?: string
+  terminoHora?: string
   duracaoMin: number
   percentComplete: number
   restricao?: Restricao

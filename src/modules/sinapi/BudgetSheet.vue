@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { FileSpreadsheet, Upload, Download, Trash2, Wand2, KeyRound, Eraser } from '@lucide/vue'
+import type { ScheduledTask, Task } from '@/types/domain'
 import type { BudgetLine } from '@/lib/sinapiBudget'
 import { BUDGET_CSV_TEMPLATE, DEFAULT_BATCH_OPTIONS, lineDuration, lineName, lineResources, parseNumberBR } from '@/lib/sinapiBudget'
 import { useProjectStore } from '@/stores/useProjectStore'
@@ -24,7 +25,10 @@ const totals = computed(() => ({
   hh: lines.value.reduce((a, l) => a + l.quantity * l.rup, 0),
 }))
 const preview = computed(() => project.previewBudgetBatch(opts))
-const previewByName = computed(() => new Map(preview.value?.created.map((c) => [c.task.name, c]) ?? []))
+const previewByName = computed(() => {
+  const p = preview.value
+  return p && p.erro === undefined ? new Map(p.created.map((c) => [c.task.name, c])) : new Map<string, { task: Task; sched: ScheduledTask }>()
+})
 
 function edit(l: BudgetLine, field: 'quantity' | 'rup' | 'unitCost' | 'team', raw: string) {
   const v = parseNumberBR(raw)
@@ -52,7 +56,12 @@ function downloadTemplate() {
 }
 
 function generate() {
-  const created = project.generateFromBudget(opts)
+  const res = project.generateFromBudget(opts)
+  if (!res.ok) {
+    ui.notify('error', 'Cronograma não gerado', res.erro)
+    return
+  }
+  const created = res.created
   if (created.length) {
     ui.notify('success', `${created.length} pacote(s) adicionados à EAP`, `Vínculos ${opts.mode === 'SS' ? `SS com defasagem de ${opts.overlapPct}%` : 'FS em série'} · caminho crítico, EVM e Gantt recalculados.`)
   }
@@ -144,7 +153,8 @@ const cell =
         </template>
       </div>
       <div class="text-zinc-500">Total: <strong class="text-zinc-800 dark:text-zinc-100">{{ fmtNum(totals.hh) }} HH</strong> · BAC <strong class="text-zinc-800 dark:text-zinc-100">{{ fmtBRL(totals.bac) }}</strong></div>
-      <div v-if="preview" class="flex items-center gap-1.5">
+      <div v-if="preview?.erro" class="text-coral-600 dark:text-coral-400" role="alert" data-testid="erro-previa">{{ preview.erro }}</div>
+      <div v-else-if="preview && preview.erro === undefined" class="flex items-center gap-1.5">
         <KeyRound class="h-3.5 w-3.5 text-amber-500" /> Entrega: {{ fmtDate(preview.projectFinish) }}
         <span v-if="preview.deltaDays > 0" class="chip-critical">+{{ preview.deltaDays }} dias úteis</span>
         <span v-else class="chip-ok">sem impacto</span>
