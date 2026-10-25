@@ -6,11 +6,11 @@
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
-import { parseMspdiXml } from './msProjectXmlParser'
+import { addCalendarDays } from './calendar'
+import { MAX_MSPDI_CHARS, parseMspdiXml } from './msProjectXmlParser'
 
 const REF_DIR = process.env.CRONOAI_REF_DIR
 const CORPUS_DIR = REF_DIR ? join(REF_DIR, 'mpxj-mspdi') : ''
-const MAX_BYTES = 15 * 1024 * 1024
 const SEM_TAREFA = 'Nenhuma tarefa encontrada no XML.'
 const TIMEOUT = 30_000
 const LINK_CODE = { FF: '0', FS: '1', SF: '2', SS: '3' } as const
@@ -49,6 +49,28 @@ interface Estatico {
   lb0: number // tarefas com Baseline Number 0 e Start
   lb1a10: number // elementos Baseline com Number != 0
   timephased: number // elementos TimephasedData (qualquer nível)
+  tarefasLb1a10: number // tarefas com ao menos uma Baseline Number != 0
+  lb0Incompleta: number // tarefas com Baseline 0 só com início ou só com término
+  elapsed: number // folhas com DurationFormat em tempo corrido e duração > 0
+  curtas: number // folhas com duração > 0 que viram 0 dia
+  fracionarias: number // folhas com duração > 0 arredondada para dias inteiros
+  text1SemApelido: number // tarefas com Text1 preenchido e sem apelido SINAPI no arquivo
+  number1SemApelido: number // tarefas com Number1 numérico e sem apelido "lead" no arquivo
+  calendarioProprio: number // tarefas com CalendarUID diferente de -1 e do calendário do projeto
+  nulas: number // tarefas nulas (IsNull = 1) com UID
+  valoresPersonalizados: number // ExtendedAttribute de tarefa fora de Text1/Number1 (ou dos apelidos)
+  camposPersonalizados: number // FieldID distintos dos anteriores
+}
+
+const FIELD_TEXT1 = '188743731'
+const FIELD_NUMBER1 = '188743767'
+const ELAPSED = ['4', '6', '8', '10', '12', '36', '38', '40', '42', '44']
+
+/** Minutos de uma duração ISO 8601 (PT..H..M..S / P..DT..), lida à parte do parser. */
+function minutosBrutos(v: string | undefined, minutosPorDia: number): number {
+  if (!v) return 0
+  const n = (re: RegExp) => Number(v.match(re)?.[1] ?? 0)
+  return n(/(\d+(?:\.\d+)?)D/) * minutosPorDia + n(/(\d+(?:\.\d+)?)H/) * 60 + n(/(\d+(?:\.\d+)?)M/) + n(/(\d+(?:\.\d+)?)S/) / 60
 }
 
 function lerEstatico(xml: string): Estatico {
@@ -58,6 +80,20 @@ function lerEstatico(xml: string): Estatico {
     (t) => Number(txt(t, 'UID')) !== 0 && txt(t, 'OutlineLevel') !== '0' && txt(t, 'IsNull') !== '1' && txt(t, 'Active') !== '0',
   )
   const folhas = tarefas.filter((t) => txt(t, 'Summary') !== '1')
+  const minutosPorDia = Number(txt(project, 'MinutesPerDay')) || 480
+  const calProjeto = txt(project, 'CalendarUID') ?? '1'
+  const defs = kids(kid(project, 'ExtendedAttributes'), 'ExtendedAttribute')
+  const idsComApelido = (trecho: string) => defs.filter((d) => (txt(d, 'Alias') ?? '').toLowerCase().includes(trecho)).map((d) => txt(d, 'FieldID'))
+  const sinapiIds = idsComApelido('sinapi')
+  const leadIds = idsComApelido('lead')
+  const campoText1 = sinapiIds.length ? sinapiIds[sinapiIds.length - 1]! : FIELD_TEXT1
+  const campoNumber1 = leadIds.length ? leadIds[leadIds.length - 1]! : FIELD_NUMBER1
+  const valorDe = (t: Element, id: string) => kids(t, 'ExtendedAttribute').find((e) => txt(e, 'FieldID') === id)
+  const extras = tarefas.flatMap((t) => kids(t, 'ExtendedAttribute')).filter((e) => ![campoText1, campoNumber1].includes(txt(e, 'FieldID') ?? ''))
+  const dias = (t: Element) => {
+    const m = minutosBrutos(txt(t, 'Duration'), minutosPorDia)
+    return { m, exato: Math.round((m / minutosPorDia) * 100) / 100 }
+  }
   return {
     uids: tarefas.map((t) => Number(txt(t, 'UID'))),
     vinculos: tarefas.flatMap((t) => kids(t, 'PredecessorLink').map((l) => `${txt(l, 'PredecessorUID')}>${txt(t, 'UID')}:${txt(l, 'Type') ?? '1'}`)),
@@ -67,6 +103,27 @@ function lerEstatico(xml: string): Estatico {
     lb0: tarefas.filter((t) => kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') === '0' && txt(b, 'Start'))).length,
     lb1a10: tarefas.reduce((a, t) => a + kids(t, 'Baseline').filter((b) => (txt(b, 'Number') ?? '0') !== '0').length, 0),
     timephased: doc.getElementsByTagName('TimephasedData').length,
+    tarefasLb1a10: tarefas.filter((t) => kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') !== '0')).length,
+    lb0Incompleta: tarefas.filter((t) =>
+      kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') === '0' && !txt(b, 'Start') !== !txt(b, 'Finish')),
+    ).length,
+    elapsed: folhas.filter((t) => ELAPSED.includes(txt(t, 'DurationFormat') ?? '') && dias(t).m > 0).length,
+    curtas: folhas.filter((t) => dias(t).m > 0 && Math.round(dias(t).exato) === 0).length,
+    fracionarias: folhas.filter((t) => Math.round(dias(t).exato) > 0 && dias(t).exato !== Math.round(dias(t).exato)).length,
+    text1SemApelido: sinapiIds.length ? 0 : tarefas.filter((t) => valorDe(t, FIELD_TEXT1) && txt(valorDe(t, FIELD_TEXT1), 'Value')).length,
+    number1SemApelido: leadIds.length
+      ? 0
+      : tarefas.filter((t) => {
+          const v = txt(valorDe(t, FIELD_NUMBER1), 'Value')
+          return v !== undefined && !Number.isNaN(Number(v))
+        }).length,
+    calendarioProprio: tarefas.filter((t) => {
+      const c = txt(t, 'CalendarUID')
+      return c !== undefined && c !== '-1' && c !== calProjeto
+    }).length,
+    nulas: kids(kid(project, 'Tasks'), 'Task').filter((t) => Number(txt(t, 'UID')) !== 0 && txt(t, 'IsNull') === '1').length,
+    valoresPersonalizados: extras.length,
+    camposPersonalizados: new Set(extras.map((e) => txt(e, 'FieldID') ?? '')).size,
   }
 }
 
@@ -89,6 +146,7 @@ interface Linha {
   lb0Lida: number
   lb1a10: number
   timephased: number
+  est: Estatico
   resultado: 'importado' | 'recusado'
   uidsUnicos: boolean
   avisos: string[]
@@ -96,6 +154,15 @@ interface Linha {
 }
 
 const linhas: Linha[] = []
+interface LinhaCalendario {
+  arquivo: string
+  recorrentes: number
+  legadoFeriados: number
+  legadoExtras: number
+  lidosFeriados: number
+  lidosExtras: number
+}
+const calendarios: LinhaCalendario[] = []
 const VERSOES = ['2002', '2003', '2007', '2010', '2013', '2016', '2019', 'outros'] as const
 
 function versaoDe(rel: string): string {
@@ -136,6 +203,12 @@ function relatorioMd(): string {
     '|' + ' --- |'.repeat(12),
     porArquivo,
     '',
+    '## Calendários dos arquivos de calendário (tarefa fictícia em memória)',
+    '',
+    '| Arquivo | Exceções recorrentes | Feriados na lista legada | Dias úteis extras na lista legada | Feriados lidos | Dias úteis extras lidos |',
+    '|' + ' --- |'.repeat(6),
+    ...calendarios.map((c) => `| ${c.arquivo} | ${c.recorrentes} | ${c.legadoFeriados} | ${c.legadoExtras} | ${c.lidosFeriados} | ${c.lidosExtras} |`),
+    '',
     '## Avisos por arquivo',
     '',
     ...linhas.filter((l) => l.avisos.length).map((l) => `- ${l.arquivo}:\n${l.avisos.map((a) => `  - ${a}`).join('\n')}`),
@@ -157,13 +230,14 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
   afterAll(() => {
     const dir = join(process.cwd(), 'test-results', 'corpus-mspdi')
     mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, 'relatorio.json'), JSON.stringify(linhas, null, 1))
+    writeFileSync(join(dir, 'relatorio.json'), JSON.stringify(linhas.map(({ est: _est, ...l }) => l), null, 1))
     writeFileSync(join(dir, 'relatorio.md'), relatorioMd())
+    writeFileSync(join(dir, 'calendarios.json'), JSON.stringify(calendarios, null, 1))
   })
 
   describe.each(arquivos.map((f) => [relative(CORPUS_DIR, f).split(sep).join('/'), f] as const))('%s', (rel, caminho) => {
     it('importa sem exceção não tratada e sem perder UID, vínculo, % e datas reais', { timeout: TIMEOUT }, () => {
-      expect(statSync(caminho).size).toBeLessThanOrEqual(MAX_BYTES)
+      expect(statSync(caminho).size).toBeLessThanOrEqual(MAX_MSPDI_CHARS)
       const xml = readFileSync(caminho, 'utf8')
       const est = lerEstatico(xml)
       const saveVersion = xml.match(/<SaveVersion>(\d+)<\/SaveVersion>/)?.[1] ?? '—'
@@ -172,7 +246,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
         tarefasArquivo: est.uids.length, tarefasLidas: 0, vinculosArquivo: est.vinculos.length, vinculosLidos: 0,
         pctArquivo: est.pct, pctLido: 0, inicioRealArquivo: est.inicioReal, inicioRealLido: 0,
         terminoRealArquivo: est.terminoReal, terminoRealLido: 0, lb0Arquivo: est.lb0, lb0Lida: 0,
-        lb1a10: est.lb1a10, timephased: est.timephased, resultado: 'recusado', uidsUnicos: true, avisos: [], ms: 0,
+        lb1a10: est.lb1a10, timephased: est.timephased, est, resultado: 'recusado', uidsUnicos: true, avisos: [], ms: 0,
       }
       linhas.push(linha)
 
@@ -208,6 +282,61 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       expect(linha.inicioRealLido).toBe(est.inicioReal)
       expect(linha.terminoRealLido).toBe(est.terminoReal)
       expect(linha.lb0Lida).toBe(est.lb0)
+
+      // Sem descarte silencioso (AC-4): categoria presente no arquivo => aviso com o número do arquivo; ausente => sem aviso
+      const w = r.warnings
+      const confere = (n: number, texto: string, prefixo: RegExp) => {
+        if (n > 0) expect(w).toContain(texto)
+        else expect(w.filter((a) => prefixo.test(a))).toEqual([])
+      }
+      confere(est.tarefasLb1a10, `Linhas de base 1 a 10 não importadas em ${est.tarefasLb1a10} tarefa(s): o CronoAI usa só a linha de base 0.`, /^Linhas de base 1 a 10/)
+      confere(est.lb0Incompleta, `${est.lb0Incompleta} tarefa(s) com linha de base 0 incompleta (sem início ou sem término): o valor planejado (PV) delas fica zero.`, /linha de base 0 incompleta/)
+      confere(est.elapsed, `${est.elapsed} tarefa(s) com duração em tempo corrido convertida como horas úteis: revise as durações.`, /tempo corrido/)
+      confere(est.curtas, `${est.curtas} tarefa(s) com menos de meio dia de duração importada(s) como marco (0 dia).`, /menos de meio dia/)
+      confere(est.fracionarias, `${est.fracionarias} duração(ões) fracionária(s) arredondada(s) para dias úteis inteiros.`, /fracionária/)
+      confere(est.text1SemApelido, `Text1 lido como código SINAPI em ${est.text1SemApelido} tarefa(s) sem apelido 'SINAPI' no arquivo: confira.`, /^Text1 lido/)
+      confere(est.number1SemApelido, `Number1 lido como lead time em ${est.number1SemApelido} tarefa(s) sem apelido 'lead' no arquivo: confira.`, /^Number1 lido/)
+      confere(est.calendarioProprio, `${est.calendarioProprio} tarefa(s) com calendário próprio importada(s) no calendário do projeto.`, /calendário próprio/)
+      confere(est.nulas, `${est.nulas} linha(s) em branco (tarefa nula) ignorada(s).`, /em branco/)
+      const informativo = [
+        est.timephased && `${est.timephased} registro(s) distribuído(s) no tempo (TimephasedData)`,
+        est.valoresPersonalizados && `${est.valoresPersonalizados} valor(es) de ${est.camposPersonalizados} campo(s) personalizado(s)`,
+      ].filter(Boolean)
+      confere(informativo.length, `Não importado do MS Project: ${informativo.join('; ')}.`, /^Não importado do MS Project/)
+    })
+  })
+
+  // Os 39 arquivos sem tarefa continuam recusados (não apagar a EAP da obra). O calendário dos 11 arquivos de calendário é conferido
+  // injetando uma tarefa fictícia SÓ EM MEMÓRIA (o arquivo do corpus não é alterado): plano 00003, P2 = A.
+  const comCalendario = arquivos.map((f) => relative(CORPUS_DIR, f).split(sep).join('/')).filter((r) => /calendar-(calendars|recurring-exceptions)/.test(r))
+  const TAREFA_FICTICIA =
+    '<Task><UID>1</UID><ID>1</ID><Name>Tarefa ficticia</Name><OutlineLevel>1</OutlineLevel><Start>2001-01-01T08:00:00</Start><Duration>PT8H0M0S</Duration></Task>'
+
+  describe.each(comCalendario)('calendário de %s (tarefa fictícia em memória)', (rel) => {
+    it('usa as datas gravadas pelo MS Project, sem bloco contínuo', { timeout: TIMEOUT }, () => {
+      const xml = readFileSync(join(CORPUS_DIR, rel), 'utf8')
+      const injetado = xml.includes('<Tasks/>') ? xml.replace('<Tasks/>', `<Tasks>${TAREFA_FICTICIA}</Tasks>`) : xml.replace('<Tasks>', `<Tasks>${TAREFA_FICTICIA}`)
+      const doc = new DOMParser().parseFromString(xml, 'application/xml')
+      const project = doc.documentElement
+      const cals = kids(kid(project, 'Calendars'), 'Calendar')
+      const cal = cals.find((c) => txt(c, 'UID') === (txt(project, 'CalendarUID') ?? '1')) ?? cals[0]
+      const legado = { folga: new Set<string>(), extra: new Set<string>() }
+      for (const wd of kids(kid(cal, 'WeekDays'), 'WeekDay')) {
+        if (txt(wd, 'DayType') !== '0') continue
+        const per = kid(wd, 'TimePeriod')
+        const de = txt(per, 'FromDate')?.slice(0, 10)
+        const ate = txt(per, 'ToDate')?.slice(0, 10)
+        for (let d = de; d && ate && d <= ate; d = addCalendarDays(d, 1)) (txt(wd, 'DayWorking') === '1' ? legado.extra : legado.folga).add(d)
+      }
+      const recorrentes = kids(kid(cal, 'Exceptions'), 'Exception').filter((e) => Number(txt(e, 'Occurrences') ?? 1) > 1).length
+
+      const r = parseMspdiXml(injetado)
+      calendarios.push({ arquivo: rel, recorrentes, legadoFeriados: legado.folga.size, legadoExtras: legado.extra.size, lidosFeriados: r.calendar.holidays.length, lidosExtras: r.calendar.extraWorkingDays.length })
+      if (legado.folga.size) expect(r.calendar.holidays).toEqual([...legado.folga].sort())
+      expect(r.calendar.extraWorkingDays).toEqual([...legado.extra].sort())
+      if (recorrentes && legado.folga.size + legado.extra.size) {
+        expect(r.warnings.filter((a) => /recorrente/.test(a))).toEqual([])
+      }
     })
   })
 
@@ -229,6 +358,38 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       expect(somar(imp, 'lb1a10')).toBe(470)
       expect(somar(linhas, 'timephased')).toBe(10222)
       expect(imp.filter((l) => l.uidsUnicos)).toHaveLength(95)
+    })
+
+    // Antes do ciclo 00003 nenhum destes tinha aviso (só o de data de status, calendário sem feriados e custos). Depois: um aviso por categoria.
+    // Contagens de tarefas (não de elementos): o plano falava em "47 tarefas" para as LB 1–10, mas são 470 tarefas com uma LB 1–10 cada.
+    it('cada categoria de dado não preservado gera aviso com o número medido (antes: nenhum aviso)', () => {
+      const imp = linhas.filter((l) => l.resultado === 'importado')
+      const soma = (re: RegExp) => {
+        const achados = imp.flatMap((l) => l.avisos.map((a) => a.match(re)?.[1])).filter((n): n is string => n !== undefined)
+        return { total: achados.reduce((a, n) => a + Number(n), 0), arquivos: achados.length }
+      }
+      expect(soma(/^Linhas de base 1 a 10 não importadas em (\d+) tarefa/)).toEqual({ total: 470, arquivos: 7 })
+      expect(soma(/^(\d+) tarefa\(s\) com linha de base 0 incompleta/)).toEqual({ total: 23, arquivos: 8 }) // só início (7 arquivos) + só término
+      expect(soma(/^(\d+) tarefa\(s\) com duração em tempo corrido/)).toEqual({ total: 5, arquivos: 1 })
+      expect(soma(/^(\d+) tarefa\(s\) com menos de meio dia/)).toEqual({ total: 4, arquivos: 1 })
+      expect(soma(/^(\d+) duração\(ões\) fracionária/)).toEqual({ total: 20, arquivos: 4 })
+      expect(soma(/^Text1 lido como código SINAPI em (\d+) tarefa/)).toEqual({ total: 6, arquivos: 6 })
+      expect(soma(/^Number1 lido como lead time em (\d+) tarefa/)).toEqual({ total: 6, arquivos: 6 })
+      expect(soma(/^(\d+) tarefa\(s\) com calendário próprio/)).toEqual({ total: 1, arquivos: 1 })
+      expect(soma(/^(\d+) linha\(s\) em branco/)).toEqual({ total: 3, arquivos: 1 })
+      expect(soma(/^(\d+) exceção\(ões\) recorrente/)).toEqual({ total: 0, arquivos: 0 }) // todas têm a lista legada
+      expect(imp.filter((l) => l.avisos.some((a) => a.startsWith('Não importado do MS Project')))).toHaveLength(95)
+    })
+
+    it('calendários dos 11 arquivos de calendário: lista legada do MS Project (antes: 1.950 feriados lidos e 65 dias úteis extras)', () => {
+      expect(calendarios).toHaveLength(11)
+      const recorrentes = calendarios.filter((c) => c.recorrentes > 0)
+      expect(recorrentes).toHaveLength(4)
+      for (const c of recorrentes) {
+        expect(c.recorrentes).toBe(27)
+        expect(c.lidosFeriados).toBe(137)
+        expect(c.lidosExtras).toBe(3)
+      }
     })
 
     it('tem o número de arquivos por versão da medição', () => {
