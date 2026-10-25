@@ -14,9 +14,16 @@ const DEFAULT_MINUTES_PER_DAY = 480
 export const MAX_MSPDI_CHARS = 15 * 1024 * 1024
 /** Dias de uma única exceção de calendário expandidos pelo import. */
 const MAX_EXCEPTION_DAYS = 400
-/** Total de feriados + dias úteis extras aceitos no calendário importado (≈ 27 anos de dias corridos). */
+/**
+ * Orçamento de dias PERCORRIDOS (não só inseridos) na expansão de todas as exceções do calendário importado (≈ 27 anos de dias
+ * corridos). Limita o trabalho de CPU: milhares de exceções repetidas de intervalo longo não travam a aba. Como cada dia inserido
+ * foi percorrido, também limita o total de feriados + dias úteis extras.
+ */
 export const MAX_CALENDAR_DAYS = 10_000
-/** DurationFormat em tempo corrido (elapsed): 4 min, 6 h, 8 dia, 10 sem, 12 mês; +32 = estimado. */
+/**
+ * DurationFormat em tempo corrido (elapsed): 4 min, 6 h, 8 dia, 10 sem, 12 mês; +32 = estimado.
+ * Fora de propósito: 19/20 (percentual; 20 = e%) e 51/52 (estimados) não são duração em tempo.
+ */
 const ELAPSED_FORMATS = new Set(['4', '6', '8', '10', '12', '36', '38', '40', '42', '44'])
 
 const LINK_TO_CODE: Record<LinkType, number> = { FF: 0, FS: 1, SF: 2, SS: 3 }
@@ -470,7 +477,8 @@ export function validateMspdi(xml: string, options: { strictOrder?: boolean } = 
       const type = text(l, 'Type') ?? '1'
       if (pred === undefined || !uids.has(pred)) errors.push(`Tarefa UID ${uid}: predecessora ${pred ?? '?'} não existe.`)
       if (pred === uid) errors.push(`Tarefa UID ${uid}: vínculo com ela mesma.`)
-      if (!(type in CODE_TO_LINK)) errors.push(`Tarefa UID ${uid}: tipo de vínculo ${type} inválido (0–3).`)
+      // Só número do arquivo na mensagem: texto livre do XML não vai para o aviso
+      if (!(type in CODE_TO_LINK)) errors.push(`Tarefa UID ${uid}: tipo de vínculo ${/^\d{1,6}$/.test(type) ? type : '(não numérico)'} inválido (0–3).`)
     }
   }
   return { valid: errors.length === 0, errors, warnings, taskCount: tasks.length, linkCount }
@@ -485,17 +493,6 @@ export interface MspdiImportResult {
   tasks: Task[]
   calendar: WorkCalendarConfig
   warnings: string[]
-}
-
-/** Datas de `from` a `to` (inclusive), no máximo `MAX_EXCEPTION_DAYS`; `truncated` quando o intervalo era maior. */
-function expandRange(from: string, to: string): { days: string[]; truncated: boolean } {
-  const days: string[] = []
-  let cursor = from
-  while (cursor <= to && days.length < MAX_EXCEPTION_DAYS) {
-    days.push(cursor)
-    cursor = addCalendarDays(cursor, 1)
-  }
-  return { days, truncated: cursor <= to }
 }
 
 export function parseMspdiXml(xmlText: string): MspdiImportResult {
@@ -543,36 +540,68 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   const calUid = text(project, 'CalendarUID') ?? '1'
   const calendars = kids(kid(project, 'Calendars'), 'Calendar')
   const cal = calendars.find((c) => text(c, 'UID') === calUid) ?? calendars[0]
+  const projectCalUid = text(cal, 'UID') // calendário realmente usado (o CalendarUID do projeto pode não existir)
   const holidays = new Set<string>()
   const extra = new Set<string>()
   let truncatedRanges = 0
   let overLimit = false
+  let walked = 0 // dias percorridos no calendário inteiro (orçamento MAX_CALENDAR_DAYS)
+  const seenRanges = new Set<string>() // a mesma exceção aparece no legado e em <Exceptions>: expande e conta uma vez
   const collect = (node: Element, working: boolean) => {
+    if (overLimit) return
     const p = kid(node, 'TimePeriod')
     const from = isoDate(text(p, 'FromDate'))
     const to = isoDate(text(p, 'ToDate'))
     if (!from || !to) return
-    const { days, truncated } = expandRange(from, to)
-    if (truncated) truncatedRanges++
-    for (const d of days) {
-      const target = working ? extra : holidays
-      if (target.has(d)) continue
-      if (holidays.size + extra.size >= MAX_CALENDAR_DAYS) {
+    const key = `${working ? 1 : 0}|${from}|${to}`
+    if (seenRanges.has(key)) return
+    seenRanges.add(key)
+    const target = working ? extra : holidays
+    let cursor = from
+    let days = 0
+    while (cursor <= to) {
+      if (days >= MAX_EXCEPTION_DAYS) {
+        truncatedRanges++
+        break
+      }
+      if (walked >= MAX_CALENDAR_DAYS) {
         overLimit = true
         break
       }
-      target.add(d)
+      target.add(cursor)
+      walked++
+      days++
+      cursor = addCalendarDays(cursor, 1)
     }
   }
-  // O MS Project 2007+ grava cada exceção em dois lugares: <Exceptions> (com a regra de recorrência) e os WeekDay DayType=0
-  // legados, já expandidos ocorrência por ocorrência. Expandir FromDate..ToDate de uma recorrente marcaria o intervalo inteiro;
-  // as datas certas estão na lista legada. Sem ela, a recorrente não é aplicada (e vira aviso). A expansão pela regra fica para a SPEC-05.
+  // O MS Project 2007–2016 (corpus; 2019 a confirmar) grava cada exceção em dois lugares: <Exceptions> (com a regra de recorrência)
+  // e os WeekDay DayType=0 legados, já expandidos ocorrência por ocorrência. Expandir FromDate..ToDate de uma recorrente marcaria o
+  // intervalo inteiro; as datas certas estão na lista legada. A recorrente só é considerada aplicada se a lista legada (do mesmo tipo,
+  // feriado ou dia útil extra) tem ao menos uma data dentro de FromDate..ToDate dela; senão vira aviso. (Exigir o FromDate exato dava
+  // falso aviso em 14 das 27 recorrentes do corpus: o FromDate nem sempre é uma ocorrência.) A expansão pela regra fica para a SPEC-05.
   const legacyDays = kids(kid(cal, 'WeekDays'), 'WeekDay').filter((wd) => text(wd, 'DayType') === '0')
   for (const wd of legacyDays) collect(wd, text(wd, 'DayWorking') === '1')
+  const legacyHolidays = [...holidays].sort()
+  const legacyExtra = [...extra].sort()
+  // Busca binária: alguma data da lista ordenada em [from, to]?
+  const anyWithin = (sorted: string[], from: string, to: string) => {
+    let lo = 0
+    let hi = sorted.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (sorted[mid] < from) lo = mid + 1
+      else hi = mid
+    }
+    return lo < sorted.length && sorted[lo] <= to
+  }
   let recurringNotApplied = 0
   for (const ex of kids(kid(cal, 'Exceptions'), 'Exception')) {
     if ((num(ex, 'Occurrences') ?? 1) > 1) {
-      if (!legacyDays.length) recurringNotApplied++
+      const period = kid(ex, 'TimePeriod')
+      const first = isoDate(text(period, 'FromDate'))
+      const last = isoDate(text(period, 'ToDate'))
+      const inLegacy = first !== undefined && last !== undefined && anyWithin(text(ex, 'DayWorking') === '1' ? legacyExtra : legacyHolidays, first, last)
+      if (!inLegacy) recurringNotApplied++
       continue
     }
     collect(ex, text(ex, 'DayWorking') === '1')
@@ -603,7 +632,8 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   let nullRows = 0
   let ownCalendar = 0
   let otherBaselines = 0
-  let partialBaselines = 0
+  let baselineNoFinish = 0
+  let baselineNoStart = 0
   let elapsedDurations = 0
   let milestoneFromShort = 0
   let fractionalDurations = 0
@@ -639,7 +669,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     }
     if (kids(node, 'Baseline').some((b) => (text(b, 'Number') ?? '0') !== '0')) otherBaselines++
     const taskCal = text(node, 'CalendarUID')
-    if (taskCal !== undefined && taskCal !== '-1' && taskCal !== calUid) ownCalendar++
+    if (taskCal !== undefined && taskCal !== '-1' && taskCal !== projectCalUid) ownCalendar++
     const preds = kids(node, 'PredecessorLink')
       .map((l) => {
         let lagDays = lagToWorkingDays(num(l, 'LinkLag') ?? 0, num(l, 'LagFormat') ?? 7, minutesPerDay)
@@ -668,7 +698,8 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     if (lead !== undefined && lead !== '' && !Number.isNaN(Number(lead)) && !leadAlias) leadNoAlias++
     const baselineStart = isoDate(text(baseline, 'Start'))
     const baselineFinish = isoDate(text(baseline, 'Finish'))
-    if (baseline && !baselineStart !== !baselineFinish) partialBaselines++
+    if (baseline && baselineStart && !baselineFinish) baselineNoFinish++
+    if (baseline && !baselineStart && baselineFinish) baselineNoStart++
 
     tasks.push({
       uid,
@@ -704,7 +735,9 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   if (inactive) warnings.push(`${inactive} tarefa(s) inativa(s) ignorada(s).`)
   if (percentLags) warnings.push(`${percentLags} vínculo(s) com latência em % ou formato desconhecido importados com latência zero.`)
   if (otherBaselines) warnings.push(`Linhas de base 1 a 10 não importadas em ${otherBaselines} tarefa(s): o CronoAI usa só a linha de base 0.`)
-  if (partialBaselines) warnings.push(`${partialBaselines} tarefa(s) com linha de base 0 incompleta (sem início ou sem término): o valor planejado (PV) delas fica zero.`)
+  // Sem término, evm.ts devolve PV zero. Sem início, a store (withBaseline onlyMissing olha só baselineStart) recalcula a LB pelo cronograma.
+  if (baselineNoFinish) warnings.push(`${baselineNoFinish} tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.`)
+  if (baselineNoStart) warnings.push(`${baselineNoStart} tarefa(s) com linha de base 0 sem início: a linha de base delas será recalculada pelo cronograma ao importar.`)
   if (elapsedDurations) warnings.push(`${elapsedDurations} tarefa(s) com duração em tempo corrido convertida como horas úteis: revise as durações.`)
   if (milestoneFromShort) warnings.push(`${milestoneFromShort} tarefa(s) com menos de meio dia de duração importada(s) como marco (0 dia).`)
   if (fractionalDurations) warnings.push(`${fractionalDurations} duração(ões) fracionária(s) arredondada(s) para dias úteis inteiros.`)

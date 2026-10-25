@@ -171,6 +171,15 @@ describe('parseMspdiXml: exceções recorrentes do calendário (A1)', () => {
     expect(r.warnings).toContain('1 exceção(ões) recorrente(s) do calendário não aplicada(s): confira feriados e dias úteis extras.')
   })
 
+  it('recorrente com lista legada sem nenhuma data dentro do seu período não é aplicada e avisa', () => {
+    const xml = projeto({
+      head: calendario(`${legado(['2026-12-25'])}<Exceptions>${excecao('2027-06-01', '2028-06-01', { ocorrencias: 3 })}</Exceptions>`),
+    })
+    const r = parseMspdiXml(xml)
+    expect(r.calendar.holidays).toEqual(['2026-12-25'])
+    expect(r.warnings).toContain('1 exceção(ões) recorrente(s) do calendário não aplicada(s): confira feriados e dias úteis extras.')
+  })
+
   it('C-3: recorrente útil (sábados de hora extra) usa a lista legada', () => {
     const sabados = ['2027-01-02', '2027-02-06', '2027-03-06']
     const xml = projeto({
@@ -211,6 +220,25 @@ describe('parseMspdiXml: limites de segurança (S-1, S-2, S-3)', () => {
     expect(r.warnings).toContain('1 exceção(ões) do calendário com mais de 400 dias: lidas apenas nos primeiros 400 dias.')
   })
 
+  it('S-3: milhares de exceções de intervalo longo e repetido gastam só o orçamento de dias percorridos', { timeout: 30_000 }, () => {
+    // 3.000 exceções com o mesmo início e términos diferentes: cada uma tem >= 400 dias e todas caem nos mesmos 400 dias.
+    // Os dias inseridos ficam em 400, mas o orçamento conta os PERCORRIDOS: acaba na 25ª exceção (25 × 400 = 10.000) e o resto é ignorado.
+    const blocos = Array.from({ length: 3000 }, (_, i) => excecao('2000-01-01', addCalendarDays('2099-12-31', -i)))
+    const r = parseMspdiXml(projeto({ head: calendario(`<Exceptions>${blocos.join('')}</Exceptions>`) }))
+    expect(r.calendar.holidays).toHaveLength(400)
+    expect(r.warnings).toContain('Calendário com mais de 10000 dias de exceção: o excedente não foi importado; confira feriados e dias úteis extras.')
+    // as 25 primeiras são cortadas em 400 dias; a mesma exceção repetida em legado e <Exceptions> conta uma vez (teste abaixo)
+    expect(r.warnings).toContain('25 exceção(ões) do calendário com mais de 400 dias: lidas apenas nos primeiros 400 dias.')
+  })
+
+  it('exceção que consta no legado e em <Exceptions> é expandida e avisada uma vez só', () => {
+    const periodoLongo = periodo('2026-01-01', '2028-12-31')
+    const legadoLongo = `<WeekDays><WeekDay><DayType>0</DayType><DayWorking>0</DayWorking>${periodoLongo}</WeekDay></WeekDays>`
+    const r = parseMspdiXml(projeto({ head: calendario(`${legadoLongo}<Exceptions>${excecao('2026-01-01', '2028-12-31')}</Exceptions>`) }))
+    expect(r.calendar.holidays).toHaveLength(400)
+    expect(r.warnings).toContain('1 exceção(ões) do calendário com mais de 400 dias: lidas apenas nos primeiros 400 dias.')
+  })
+
   it('S-3: calendário limitado a MAX_CALENDAR_DAYS no total, com aviso', () => {
     expect(MAX_CALENDAR_DAYS).toBe(10_000)
     const blocos = Array.from({ length: 30 }, (_, i) => {
@@ -236,7 +264,8 @@ describe('parseMspdiXml: avisos do que o import não preserva', () => {
     const r = parseMspdiXml(projeto({ tasks: tarefa(1, { extra: lb }) }))
     expect(r.tasks[0].baselineStart).toBe('2026-03-02')
     expect(r.tasks[0].baselineFinish).toBeUndefined()
-    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 incompleta (sem início ou sem término): o valor planejado (PV) delas fica zero.')
+    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.')
+    expect(r.warnings.join(' ')).not.toMatch(/sem início/)
 
     // Volta: o export grava <Baseline> com o início e sem <Finish>, na ordem do esquema
     const tasks = seed.tasks.map((t) => (t.uid === 104 ? { ...t, baselineStart: '2026-03-02', baselineFinish: undefined } : t))
@@ -251,9 +280,31 @@ describe('parseMspdiXml: avisos do que o import não preserva', () => {
     expect(volta.baselineFinish).toBeUndefined()
   })
 
+  it('C-4b: LB0 só com término é mantida, avisa (recalculada pelo cronograma) e faz ida e volta com strictOrder', () => {
+    const lb = '<Baseline><Number>0</Number><Finish>2026-04-30T17:00:00</Finish></Baseline>'
+    const r = parseMspdiXml(projeto({ tasks: tarefa(1, { extra: lb }) }))
+    expect(r.tasks[0].baselineStart).toBeUndefined()
+    expect(r.tasks[0].baselineFinish).toBe('2026-04-30')
+    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem início: a linha de base delas será recalculada pelo cronograma ao importar.')
+    expect(r.warnings.join(' ')).not.toMatch(/sem término/)
+
+    const tasks = seed.tasks.map((t) => (t.uid === 104 ? { ...t, baselineStart: undefined, baselineFinish: '2026-04-30' } : t))
+    const parcial = { ...input, tasks }
+    const el = buildTaskXml(tasks.find((t) => t.uid === 104)!, parcial)
+    const bloco = el.match(/<Baseline>[\s\S]*<\/Baseline>/)![0]
+    expect(bloco).toMatch(/<Number>0<\/Number>\s*<Finish>2026-04-30T17:00:00<\/Finish>/)
+    expect(bloco).not.toContain('<Start>')
+    expect(bloco).not.toContain('<Duration>')
+    const xml = buildMspdiXml(parcial)
+    expect(validateMspdi(xml, { strictOrder: true }).errors).toEqual([])
+    const volta = parseMspdiXml(xml).tasks.find((t) => t.uid === 104)!
+    expect(volta.baselineStart).toBeUndefined()
+    expect(volta.baselineFinish).toBe('2026-04-30')
+  })
+
   it('C-4: LB0 completa do seed segue sem aviso e sem mudança', () => {
     const r = parseMspdiXml(buildMspdiXml(input))
-    expect(r.warnings.join(' ')).not.toMatch(/incompleta/)
+    expect(r.warnings.join(' ')).not.toMatch(/linha de base 0 sem/)
     expect(r.tasks.find((t) => t.uid === 104)?.baselineFinish).toBe(seed.tasks.find((t) => t.uid === 104)?.baselineFinish)
   })
 
@@ -263,7 +314,7 @@ describe('parseMspdiXml: avisos do que o import não preserva', () => {
     expect(r.tasks[0].baselineStart).toBe('2026-03-02')
     expect(r.tasks[0].baselineFinish).toBe('2026-03-03')
     expect(r.warnings).toContain('Linhas de base 1 a 10 não importadas em 1 tarefa(s): o CronoAI usa só a linha de base 0.')
-    expect(r.warnings.join(' ')).not.toMatch(/incompleta/)
+    expect(r.warnings.join(' ')).not.toMatch(/linha de base 0 sem/)
   })
 
   it('C-6: durações em tempo corrido, abaixo de meio dia e fracionárias avisam sem mudar o valor', () => {
@@ -299,6 +350,19 @@ describe('parseMspdiXml: avisos do que o import não preserva', () => {
     const com = parseMspdiXml(projeto({ head: defs, tasks: tarefa(1, { extra: campos }) }))
     expect(com.tasks[0].sinapi).toBe('X-1')
     expect(com.warnings.join(' ')).not.toMatch(/Text1|Number1/)
+  })
+
+  it('calendário próprio: compara com o calendário realmente usado, não com um CalendarUID inexistente', () => {
+    // CalendarUID do projeto (9) não existe: o import usa o primeiro calendário (UID 1); a tarefa com CalendarUID 1 não tem calendário próprio
+    const head = `<CalendarUID>9</CalendarUID>${calendario('')}`
+    const r = parseMspdiXml(projeto({ head, tasks: tarefa(1, { extra: '<CalendarUID>1</CalendarUID>' }) + tarefa(2, { extra: '<CalendarUID>2</CalendarUID>' }) }))
+    expect(r.warnings).toContain('1 tarefa(s) com calendário próprio importada(s) no calendário do projeto.')
+  })
+
+  it('vínculo com tipo não numérico não leva o texto do arquivo para a mensagem', () => {
+    const xml = projeto({ tasks: tarefa(1) + tarefa(2, { extra: '<PredecessorLink><PredecessorUID>1</PredecessorUID><Type>SEGREDO-X</Type></PredecessorLink>' }) })
+    const v = validateMspdi(xml)
+    expect(v.errors).toEqual(['Tarefa UID 2: tipo de vínculo (não numérico) inválido (0–3).'])
   })
 
   it('C-8: calendário próprio da tarefa e tarefa nula avisam', () => {

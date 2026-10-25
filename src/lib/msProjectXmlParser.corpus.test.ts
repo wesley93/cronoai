@@ -3,7 +3,7 @@
 // Como rodar: CRONOAI_REF_DIR=<pasta referencias> npx vitest run src/lib/msProjectXmlParser.corpus.test.ts
 // Sem a variável (CI), a suíte inteira é pulada de propósito: não há corpus no repositório (licença; ver plano 00003, P1).
 // Os auxiliares moram aqui dentro: um .ts auxiliar em src/lib entraria na cobertura sem execução no CI.
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { WorkCalendar, addCalendarDays } from './calendar'
@@ -21,14 +21,16 @@ const LINK_CODE = { FF: '0', FS: '1', SF: '2', SS: '3' } as const
 // Auxiliares (varredura, leitura estática do arquivo e relatório)
 // ---------------------------------------------------------------------------
 
-/** Só `*.xml` sob a pasta do corpus, pulando `.git`. */
+/** Só `*.xml` sob a pasta do corpus, pulando `.git` e links simbólicos. */
 function listXml(dir: string): string[] {
   const out: string[] = []
   const walk = (d: string) => {
     for (const n of readdirSync(d)) {
       if (n === '.git') continue
       const p = join(d, n)
-      if (statSync(p).isDirectory()) walk(p)
+      const info = lstatSync(p)
+      if (info.isSymbolicLink()) continue // dado de terceiros: não segue link para fora da pasta do corpus
+      if (info.isDirectory()) walk(p)
       else if (n.toLowerCase().endsWith('.xml')) out.push(p)
     }
   }
@@ -52,7 +54,8 @@ interface Estatico {
   lb1a10: number // elementos Baseline com Number != 0
   timephased: number // elementos TimephasedData (qualquer nível)
   tarefasLb1a10: number // tarefas com ao menos uma Baseline Number != 0
-  lb0Incompleta: number // tarefas com Baseline 0 só com início ou só com término
+  lb0SemTermino: number // tarefas com Baseline 0 só com início
+  lb0SemInicio: number // tarefas com Baseline 0 só com término
   elapsed: number // folhas com DurationFormat em tempo corrido e duração > 0
   curtas: number // folhas com duração > 0 que viram 0 dia
   fracionarias: number // folhas com duração > 0 arredondada para dias inteiros
@@ -84,7 +87,9 @@ function lerEstatico(xml: string): Estatico {
   )
   const folhas = tarefas.filter((t) => txt(t, 'Summary') !== '1')
   const minutosPorDia = Number(txt(project, 'MinutesPerDay')) || 480
-  const calProjeto = txt(project, 'CalendarUID') ?? '1'
+  const calendarios = kids(kid(project, 'Calendars'), 'Calendar')
+  const calUsado = calendarios.find((c) => txt(c, 'UID') === (txt(project, 'CalendarUID') ?? '1')) ?? calendarios[0]
+  const calProjeto = txt(calUsado, 'UID') // calendário realmente usado pelo import
   const defs = kids(kid(project, 'ExtendedAttributes'), 'ExtendedAttribute')
   const idsComApelido = (trecho: string) => defs.filter((d) => (txt(d, 'Alias') ?? '').toLowerCase().includes(trecho)).map((d) => txt(d, 'FieldID'))
   const sinapiIds = idsComApelido('sinapi')
@@ -107,9 +112,8 @@ function lerEstatico(xml: string): Estatico {
     lb1a10: tarefas.reduce((a, t) => a + kids(t, 'Baseline').filter((b) => (txt(b, 'Number') ?? '0') !== '0').length, 0),
     timephased: doc.getElementsByTagName('TimephasedData').length,
     tarefasLb1a10: tarefas.filter((t) => kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') !== '0')).length,
-    lb0Incompleta: tarefas.filter((t) =>
-      kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') === '0' && !txt(b, 'Start') !== !txt(b, 'Finish')),
-    ).length,
+    lb0SemTermino: tarefas.filter((t) => kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') === '0' && txt(b, 'Start') && !txt(b, 'Finish'))).length,
+    lb0SemInicio: tarefas.filter((t) => kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') === '0' && !txt(b, 'Start') && txt(b, 'Finish'))).length,
     elapsed: folhas.filter((t) => ELAPSED.includes(txt(t, 'DurationFormat') ?? '') && dias(t).m > 0).length,
     curtas: folhas.filter((t) => dias(t).m > 0 && Math.round(dias(t).exato) === 0).length,
     fracionarias: folhas.filter((t) => Math.round(dias(t).exato) > 0 && dias(t).exato !== Math.round(dias(t).exato)).length,
@@ -239,6 +243,8 @@ function relatorioMd(): string {
 const arquivos = REF_DIR ? listXml(CORPUS_DIR) : []
 
 describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () => {
+  // ATENÇÃO: as asserções do bloco "inventário fixo" leem `linhas`, preenchida pelos testes por arquivo acima: dependem da ordem
+  // de execução do arquivo (sequencial por padrão no Vitest). Não usar `--sequence.shuffle` nem `-t` neste arquivo.
   // Cada parse é síncrono e o conjunto leva mais de 1 min: sem ceder o laço de eventos entre os testes, o worker não
   // responde ao Vitest ("Timeout calling onTaskUpdate"). Não é espera por tempo: só devolve o controle uma vez por teste.
   beforeEach(() => new Promise<void>((resolve) => setTimeout(resolve, 0)))
@@ -308,7 +314,8 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
         else expect(w.filter((a) => prefixo.test(a))).toEqual([])
       }
       confere(est.tarefasLb1a10, `Linhas de base 1 a 10 não importadas em ${est.tarefasLb1a10} tarefa(s): o CronoAI usa só a linha de base 0.`, /^Linhas de base 1 a 10/)
-      confere(est.lb0Incompleta, `${est.lb0Incompleta} tarefa(s) com linha de base 0 incompleta (sem início ou sem término): o valor planejado (PV) delas fica zero.`, /linha de base 0 incompleta/)
+      confere(est.lb0SemTermino, `${est.lb0SemTermino} tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.`, /linha de base 0 sem término/)
+      confere(est.lb0SemInicio, `${est.lb0SemInicio} tarefa(s) com linha de base 0 sem início: a linha de base delas será recalculada pelo cronograma ao importar.`, /linha de base 0 sem início/)
       confere(est.elapsed, `${est.elapsed} tarefa(s) com duração em tempo corrido convertida como horas úteis: revise as durações.`, /tempo corrido/)
       confere(est.curtas, `${est.curtas} tarefa(s) com menos de meio dia de duração importada(s) como marco (0 dia).`, /menos de meio dia/)
       confere(est.fracionarias, `${est.fracionarias} duração(ões) fracionária(s) arredondada(s) para dias úteis inteiros.`, /fracionária/)
@@ -456,7 +463,8 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
         return { total: achados.reduce((a, n) => a + Number(n), 0), arquivos: achados.length }
       }
       expect(soma(/^Linhas de base 1 a 10 não importadas em (\d+) tarefa/)).toEqual({ total: 470, arquivos: 7 })
-      expect(soma(/^(\d+) tarefa\(s\) com linha de base 0 incompleta/)).toEqual({ total: 23, arquivos: 8 }) // só início (7 arquivos) + só término
+      expect(soma(/^(\d+) tarefa\(s\) com linha de base 0 sem término/)).toEqual({ total: 11, arquivos: 7 })
+      expect(soma(/^(\d+) tarefa\(s\) com linha de base 0 sem início/)).toEqual({ total: 12, arquivos: 8 })
       expect(soma(/^(\d+) tarefa\(s\) com duração em tempo corrido/)).toEqual({ total: 5, arquivos: 1 })
       expect(soma(/^(\d+) tarefa\(s\) com menos de meio dia/)).toEqual({ total: 4, arquivos: 1 })
       expect(soma(/^(\d+) duração\(ões\) fracionária/)).toEqual({ total: 20, arquivos: 4 })

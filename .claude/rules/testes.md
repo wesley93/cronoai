@@ -37,7 +37,7 @@ Fonte da verdade: `CLAUDE.md` › **Convenções › Testes** e › **Invioláve
 
 ## Regras gerais
 
-- Teste comportamento, não detalhe de implementação. Sem `setTimeout` para esperar; sem `it.skip`/`it.only` no commit (`skip` só com o motivo e quando sai).
+- Teste comportamento, não detalhe de implementação. Sem `setTimeout` para esperar (única exceção: o `beforeEach` do teste de corpus, `setTimeout(…, 0)`, só cede o laço de eventos entre parses síncronos longos, para o worker responder ao Vitest); sem `it.skip`/`it.only` no commit (`skip` só com o motivo e quando sai).
 - `vi.useFakeTimers()`/`vi.setSystemTime()` quando o código usa a data de hoje; sempre restaure.
 
 ## Antes de entregar
