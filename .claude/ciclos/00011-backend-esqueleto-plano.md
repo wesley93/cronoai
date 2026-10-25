@@ -488,3 +488,8 @@ Origem: validação (arquiteto, testes e dba). O `${VAR:?}` no compose faria o `
   - (b) log do `db` sem `CRONOAI_DB_SENHA`;
   - (c) `db` não `healthy` e com a causa no log, sem a senha do migrador.
 - O `server/README.md` e o `docs/devops.md` documentam `docker compose --profile backend up -d --wait db`, que falha com código ≠ 0 se o banco não ficar `healthy`.
+
+## Emenda 03 (25/10/2026) — R08 com string de conexão
+Origem: validação da `seguranca` (rodada 01). A regra R08 do `validar-regras.mjs` só pegava senha entre aspas e não via `Password=...` em string de conexão Npgsql/ADO.NET, exatamente o formato que o backend introduz. O orquestrador pediu a extensão nesta rodada. A decisão foi dele, com autorização do usuário, **sujeita à revisão do usuário no PR**:
+- **Escopo ampliado:** `.claude/scripts/lib/regras-cronoai.mjs` ganha o padrão `SENHA_CONEXAO` (`password|pwd=` sem espaço, ignorando os marcadores `<…>`, `$VAR`, `%L` e `{x}`; em arquivo de teste, o achado é só alerta).
+- **Fica para o 00012:** as demais regras de .NET no `validar-regras.mjs` (`FromSqlRaw`, DDL fora de migração), como o plano já previa.
