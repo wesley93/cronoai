@@ -1,0 +1,258 @@
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { AlertTriangle, ChevronRight, GitBranch, KeyRound, ShieldCheck, Sparkles, Network, RotateCcw } from 'lucide-vue-next'
+import type { ScenarioKind } from '@/types/domain'
+import { useProjectStore } from '@/stores/useProjectStore'
+import { useUiStore } from '@/stores/ui'
+import ModuleHeader from '@/components/common/ModuleHeader.vue'
+import SectionCard from '@/components/common/SectionCard.vue'
+import GanttChart from '@/components/gantt/GanttChart.vue'
+import ScenarioCard from './critical/ScenarioCard.vue'
+import { fmtBRL, fmtDate, fmtDateLong } from '@/lib/format'
+import { describeLink, formatPredecessors } from '@/lib/wbs'
+
+const project = useProjectStore()
+const ui = useUiStore()
+const delay = computed(() => project.delay)
+const onlyCritical = ref(false)
+
+const affectedUids = computed(() => [delay.value.origin?.uid, ...delay.value.affected.map((a) => a.uid)].filter((x): x is number => x !== undefined))
+const ganttTasks = computed(() => (onlyCritical.value ? project.tasksByWbs.filter((t) => t.isSummary || project.schedule.byUid.get(t.uid)?.critical) : project.tasksByWbs))
+
+const SCENARIOS: ScenarioKind[] = ['crashing', 'fast-tracking', 'overtime']
+const params = project.scenarioParams
+
+/** Tarefa-alvo do crashing (vazio = sugestão automática: 1ª sucessora crítica com pedreiros). */
+const crashTarget = computed({
+  get: () => (params.crashing.targetUid !== undefined ? String(params.crashing.targetUid) : ''),
+  set: (v: string) => (params.crashing.targetUid = v ? Number(v) : undefined),
+})
+/** Vínculo FS a paralelizar no formato "pred>succ" (vazio = sugestão automática). */
+const fastLink = computed({
+  get: () => (params.fastTracking.predUid !== undefined ? `${params.fastTracking.predUid}>${params.fastTracking.succUid}` : ''),
+  set: (v: string) => {
+    const [p, s] = v ? v.split('>').map(Number) : [undefined, undefined]
+    params.fastTracking.predUid = p
+    params.fastTracking.succUid = s
+  },
+})
+const crashTrade = computed(() => {
+  const uid = project.scenarios.crashing.targetUid
+  const t = uid !== undefined ? project.taskByUid.get(uid) : undefined
+  return t ? (t.resources.filter((r) => r.resource !== 'Servente').sort((a, b) => b.units - a.units)[0]?.resource ?? 'Oficial') : 'Oficial'
+})
+const comparison = computed(() => SCENARIOS.map((k) => project.appliedResult(k) ?? project.scenarios[k]))
+
+function apply(kind: ScenarioKind) {
+  const res = project.scenarios[kind]
+  const before = project.schedule.projectFinish
+  project.applyScenario(res)
+  ui.notify('success', `${res.title} aplicado`, `Entrega: ${fmtDate(before)} → ${fmtDate(project.schedule.projectFinish)} · custo comprometido ${fmtBRL(res.extraCost)}. Gantt, EVM e suprimentos recalculados.`)
+}
+function undo(kind: ScenarioKind) {
+  project.undoScenario(kind)
+  ui.notify('info', 'Cenário desfeito', 'Cronograma restaurado e recalculado.')
+}
+
+const network = computed(() =>
+  project.leaves.map((t) => {
+    const s = project.schedule.byUid.get(t.uid)!
+    return {
+      t,
+      s,
+      lateStart: project.calendar.dateAt(s.ls),
+      lateFinish: s.lf > s.ls ? project.calendar.dateAt(s.lf - 1) : project.calendar.dateAt(Math.max(0, s.lf - 1)),
+      variance: project.finishVarianceDays(t),
+    }
+  }),
+)
+const shortName = (name: string) => name.replace('Alvenaria de vedação bloco cerâmico 14x19x29', 'Alvenaria').replace('Estrutura de concreto armado fck 30', 'Estrutura')
+</script>
+
+<template>
+  <div class="space-y-5">
+    <ModuleHeader
+      pain="Dor 2"
+      title="Motor de Caminho Crítico & Simulador “E se?”"
+      description="CPM com vínculos FS/SS/FF/SF e reprogramação pela data de status: veja o efeito dominó do atraso e simule planos de recuperação antes de mexer no MS Project."
+    >
+      <span class="chip-critical">{{ project.schedule.criticalPath.length }} tarefas críticas em aberto</span>
+    </ModuleHeader>
+
+    <!-- Efeito dominó -->
+    <section v-if="delay.delayDays > 0 && delay.origin" class="card overflow-hidden border-coral-500/40">
+      <div class="flex flex-wrap items-start gap-4 bg-coral-500/[0.07] p-5">
+        <div class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-coral-500/15"><AlertTriangle class="h-5 w-5 text-coral-500" /></div>
+        <div class="min-w-0 flex-1">
+          <div class="eyebrow text-coral-600 dark:text-coral-400">Efeito dominó detectado</div>
+          <h2 class="mt-1 text-base font-semibold">
+            Atraso em <span class="font-mono">[UID {{ delay.origin.uid }}] {{ delay.origin.wbs }}</span> {{ shortName(delay.origin.name) }} empurra a entrega das chaves em
+            <span class="text-coral-600 dark:text-coral-400">{{ delay.delayDays }} dias úteis</span> ({{ delay.delayCalendarDays }} dias corridos)
+          </h2>
+          <p class="mt-1 text-[12.5px] text-zinc-600 dark:text-zinc-300">
+            A tarefa está a {{ Math.round(delay.origin.percentComplete) }}% e termina {{ delay.originShift }} dias úteis após a linha de base.
+            {{ delay.affected.length }} sucessoras foram deslocadas, {{ delay.affected.filter((a) => a.critical).length }} delas no caminho crítico.
+          </p>
+        </div>
+        <div class="flex items-center gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+          <KeyRound class="h-5 w-5 text-amber-500" />
+          <div>
+            <div class="eyebrow">Linha de base</div>
+            <div class="text-sm font-semibold tabular-nums text-zinc-500 line-through decoration-coral-500/60">{{ fmtDate(delay.keysBaseline) }}</div>
+          </div>
+          <ChevronRight class="h-4 w-4 text-zinc-400" />
+          <div>
+            <div class="eyebrow">Previsão atual</div>
+            <div class="text-sm font-semibold tabular-nums text-coral-600 dark:text-coral-400">{{ fmtDate(delay.keysForecast) }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-1.5 border-t border-coral-500/20 px-5 py-3 text-[11.5px]">
+        <span class="mr-1 text-zinc-500">Cadeia afetada:</span>
+        <template v-for="(a, i) in delay.affected" :key="a.uid">
+          <ChevronRight v-if="i" class="h-3 w-3 text-zinc-400" />
+          <span :class="a.critical ? 'chip-critical' : 'chip-neutral'" :title="project.taskByUid.get(a.uid)?.name">
+            {{ project.taskByUid.get(a.uid)?.wbs }} {{ shortName(project.taskByUid.get(a.uid)?.name ?? '').split(' — ')[0].slice(0, 28) }} +{{ a.shiftDays }}d
+          </span>
+        </template>
+      </div>
+    </section>
+    <section v-else class="card flex items-center gap-3 border-emerald-500/40 bg-emerald-500/[0.06] p-5">
+      <ShieldCheck class="h-6 w-6 text-emerald-500" />
+      <div>
+        <div class="text-sm font-semibold">Entrega das chaves {{ delay.delayDays < 0 ? `antecipada em ${-delay.delayDays} dias úteis` : 'no prazo da linha de base' }}</div>
+        <div class="text-[12px] text-zinc-500">Previsão: {{ fmtDateLong(delay.keysForecast) }} · Linha de base: {{ fmtDateLong(delay.keysBaseline) }}</div>
+      </div>
+    </section>
+
+    <!-- Simulador -->
+    <SectionCard
+      title="Simulador de Recuperação com IA"
+      :subtitle="`Cada cenário recalcula o CPM completo. Custo indireto da obra: ${fmtBRL(project.state.meta.dailyIndirectCost)}/dia útil.`"
+      :icon="Sparkles"
+    >
+      <template #actions>
+        <button class="btn-ghost" @click="project.resetScenarioParams()"><RotateCcw class="h-3.5 w-3.5" /> Parâmetros padrão</button>
+      </template>
+
+      <div class="mb-4 flex items-start gap-2.5 rounded-lg border border-amber-400/40 bg-amber-400/[0.07] p-3 text-[12.5px]">
+        <Sparkles class="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+        <div>
+          <span class="font-semibold">Recomendação:</span> {{ project.recommendation.reason }}
+          <span class="block text-[11px] text-zinc-500">Critério: menor saldo (custo extra − economia de indireto) entre os cenários de risco baixo ou médio. É uma sugestão; a decisão é do engenheiro.</span>
+        </div>
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-3">
+        <ScenarioCard
+          v-for="k in SCENARIOS"
+          :key="k"
+          :result="project.appliedResult(k) ?? project.scenarios[k]"
+          :applied="project.state.appliedScenarios.includes(k)"
+          :recommended="project.recommendation.kind === k"
+          @apply="apply(k)"
+          @undo="undo(k)"
+        >
+          <template v-if="k === 'crashing'" #controls>
+            <label class="label">Tarefa a comprimir</label>
+            <select v-model="crashTarget" class="input py-1.5 text-xs">
+              <option value="">Sugestão automática (sucessora crítica)</option>
+              <option v-for="o in project.scenarioOptions.crashing" :key="o.value" :value="o.value">{{ o.critical ? '● ' : '' }}{{ o.label }}</option>
+            </select>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <div class="flex justify-between text-[11px]"><span class="text-zinc-500">+ {{ crashTrade.toLowerCase() }}(s)</span><strong class="tabular-nums">{{ params.crashing.addOfficials }}</strong></div>
+                <input v-model.number="params.crashing.addOfficials" type="range" min="0" max="10" class="w-full" :aria-label="`${crashTrade}s adicionais`" />
+              </div>
+              <div>
+                <div class="flex justify-between text-[11px]"><span class="text-zinc-500">+ serventes</span><strong class="tabular-nums">{{ params.crashing.addServentes }}</strong></div>
+                <input v-model.number="params.crashing.addServentes" type="range" min="0" max="10" class="w-full" aria-label="Serventes adicionais" />
+              </div>
+            </div>
+          </template>
+          <template v-else-if="k === 'fast-tracking'" #controls>
+            <label class="label">Vínculo Término-Início (FS) a paralelizar</label>
+            <select v-model="fastLink" class="input py-1.5 text-xs">
+              <option value="">Sugestão automática (Alvenaria → Elétrica)</option>
+              <option v-for="o in project.scenarioOptions.fastTracking" :key="o.value" :value="o.value">{{ o.critical ? '● ' : '' }}{{ o.label }}</option>
+            </select>
+            <div>
+              <div class="flex justify-between text-[11px]"><span class="text-zinc-500">Latência do novo vínculo SS</span><strong class="tabular-nums">SS + {{ params.fastTracking.lagDays }} d</strong></div>
+              <input v-model.number="params.fastTracking.lagDays" type="range" min="0" max="20" class="w-full" aria-label="Latência em dias" />
+            </div>
+          </template>
+          <template v-else #controls>
+            <div class="flex justify-between text-[11px]"><span class="text-zinc-500">Sábados convocados (a partir da data de status)</span><strong class="tabular-nums">{{ params.overtime.saturdays }}</strong></div>
+            <input v-model.number="params.overtime.saturdays" type="range" min="1" max="8" class="w-full" aria-label="Quantidade de sábados" />
+          </template>
+        </ScenarioCard>
+      </div>
+      <p class="mt-2 text-[10.5px] text-zinc-500">● = no caminho crítico. Taxas horárias, mobilização (R$ 1.200/profissional), perda de 5% por congestionamento e contingência de 4% são premissas ilustrativas do projeto.</p>
+
+      <!-- Comparativo -->
+      <div class="mt-5 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+        <table class="table-base">
+          <thead>
+            <tr><th>Cenário</th><th class="text-right">Dias recuperados</th><th>Nova entrega</th><th class="text-right">Custo extra</th><th class="text-right">Economia indireto</th><th class="text-right">Saldo</th><th class="text-right">R$/dia</th><th>Risco</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in comparison" :key="r.kind" :class="project.recommendation.kind === r.kind ? 'bg-amber-400/[0.06]' : ''">
+              <td class="font-medium">{{ r.title }} <span v-if="project.state.appliedScenarios.includes(r.kind)" class="chip-ok ml-1">aplicado</span></td>
+              <td class="text-right tabular-nums">{{ r.applicable ? r.daysRecovered : '—' }}</td>
+              <td class="tabular-nums">{{ r.applicable ? fmtDate(r.newFinish) : '—' }}</td>
+              <td class="text-right tabular-nums">{{ fmtBRL(r.extraCost) }}</td>
+              <td class="text-right tabular-nums">{{ fmtBRL(r.indirectSavings) }}</td>
+              <td class="text-right font-semibold tabular-nums" :class="r.netImpact > 0 ? 'text-coral-600 dark:text-coral-400' : 'text-emerald-600 dark:text-emerald-400'">{{ fmtBRL(r.netImpact) }}</td>
+              <td class="text-right tabular-nums">{{ Number.isFinite(r.costPerDay) && r.applicable ? fmtBRL(r.costPerDay) : '—' }}</td>
+              <td><span :class="{ Baixo: 'chip-ok', Médio: 'chip-warn', Alto: 'chip-critical' }[r.risk]">{{ r.risk }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </SectionCard>
+
+    <!-- Gantt -->
+    <SectionCard title="Cronograma (Gantt) — previsto x linha de base" subtitle="Barras vermelhas = caminho crítico (folga total = 0). Contorno âmbar = afetadas pelo efeito dominó." :icon="GitBranch" body-class="p-3">
+      <template #actions>
+        <label class="flex items-center gap-2 text-[11px] text-zinc-500"><input v-model="onlyCritical" type="checkbox" class="accent-amber-400" /> Só caminho crítico</label>
+      </template>
+      <GanttChart :tasks="ganttTasks" :schedule="project.schedule" :rollups="project.rollups" :status-date="project.state.meta.statusDate" :highlight="affectedUids" />
+    </SectionCard>
+
+    <!-- Rede lógica -->
+    <SectionCard title="Tabela de Rede Lógica (CPM)" subtitle="Datas mais cedo/mais tarde, folgas e vínculos — mesmos campos do MS Project" :icon="Network" body-class="overflow-x-auto">
+      <table class="table-base">
+        <thead>
+          <tr>
+            <th>UID</th><th>EAP</th><th>Tarefa</th><th class="text-right">Dur.</th><th>Predecessoras</th>
+            <th>Início cedo</th><th>Término cedo</th><th>Início tarde</th><th>Término tarde</th>
+            <th class="text-right">Folga total</th><th class="text-right">Folga livre</th><th class="text-right">Var. LB</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in network" :key="row.t.uid" :class="row.s.critical ? 'bg-coral-500/[0.04]' : ''">
+            <td class="mono">{{ row.t.uid }}</td>
+            <td class="mono">{{ row.t.wbs }}</td>
+            <td class="max-w-[280px] truncate" :title="row.t.name">{{ shortName(row.t.name) }}</td>
+            <td class="text-right tabular-nums">{{ row.t.durationDays }}d</td>
+            <td class="mono" :title="row.t.predecessors.map((p) => `${p.uid}: ${describeLink(p.type)}`).join('\n')">{{ formatPredecessors(row.t) || '—' }}</td>
+            <td class="tabular-nums">{{ fmtDate(row.s.start) }}</td>
+            <td class="tabular-nums">{{ fmtDate(row.s.finish) }}</td>
+            <td class="tabular-nums text-zinc-500">{{ row.t.percentComplete >= 100 ? '—' : fmtDate(row.lateStart) }}</td>
+            <td class="tabular-nums text-zinc-500">{{ row.t.percentComplete >= 100 ? '—' : fmtDate(row.lateFinish) }}</td>
+            <td class="text-right font-semibold tabular-nums" :class="row.s.critical ? 'text-coral-600 dark:text-coral-400' : ''">{{ row.t.percentComplete >= 100 ? '—' : `${row.s.totalFloat}d` }}</td>
+            <td class="text-right tabular-nums">{{ row.t.percentComplete >= 100 ? '—' : `${row.s.freeFloat}d` }}</td>
+            <td class="text-right tabular-nums" :class="row.variance > 0 ? 'text-coral-600 dark:text-coral-400' : row.variance < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-500'">
+              {{ row.variance > 0 ? `+${row.variance}` : row.variance }}d
+            </td>
+            <td>
+              <span v-if="row.t.percentComplete >= 100" class="chip-neutral">Concluída</span>
+              <span v-else-if="row.s.critical" class="chip-critical">Crítica</span>
+              <span v-else class="chip-ok">Folga {{ row.s.totalFloat }}d</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </SectionCard>
+  </div>
+</template>
