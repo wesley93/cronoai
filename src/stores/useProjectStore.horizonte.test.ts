@@ -241,7 +241,7 @@ describe('rodada 03: prévias e ações que recusam a hipótese que estoura o ho
     const { store } = await abrir(criarArmazenamentoMemoria(null))
     const tarefas = store.state.tasks.length
     const linhas = store.state.budget.length
-    store.state.budget[0].quantity = 1e12
+    store.state.budget[0].quantity = 1e9 // no teto da linha (1e9): passa dos limites de valor e cai no horizonte de 50 anos
     const previa = store.previewBudgetBatch({ mode: 'FS', overlapPct: 40 })
     expect(previa?.erro).toMatch(/horizonte de 50 anos/)
     expect(store.generateFromBudget({ mode: 'FS', overlapPct: 40 })).toEqual({ ok: false, erro: expect.stringMatching(/horizonte de 50 anos/) })

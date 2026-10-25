@@ -3,7 +3,7 @@ import { computed, reactive, ref } from 'vue'
 import { FileSpreadsheet, Upload, Download, Trash2, Wand2, KeyRound, Eraser } from '@lucide/vue'
 import type { ScheduledTask, Task } from '@/types/domain'
 import type { BudgetLine } from '@/lib/sinapiBudget'
-import { BUDGET_CSV_TEMPLATE, DEFAULT_BATCH_OPTIONS, ehFonteAlterada, fonteBase, lineDuration, lineName, lineResources, parseNumberBR } from '@/lib/sinapiBudget'
+import { AVISO_MODELO_CSV, BUDGET_CSV_TEMPLATE, DEFAULT_BATCH_OPTIONS, ehFonteAlterada, erroDeValorDaLinha, fonteBase, lineDuration, lineName, lineResources, parseNumberBR } from '@/lib/sinapiBudget'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import { downloadText } from '@/lib/download'
@@ -36,8 +36,12 @@ const previewByName = computed(() => {
 
 function edit(l: BudgetLine, field: 'quantity' | 'rup' | 'unitCost' | 'team', raw: string) {
   const v = parseNumberBR(raw)
-  const limits = { quantity: 1e8, rup: 50, unitCost: 1e7, team: 60 }
-  if (!Number.isFinite(v) || v <= 0 || v > limits[field]) return
+  // Tetos únicos de `LIMITES_LINHA` (antes: quantidade 1e8, RUP 50, custo 1e7, equipe 60, sem aviso); custo 0 não vale na célula, como antes
+  const erro = v === 0 ? 'valor inválido' : erroDeValorDaLinha(field, v)
+  if (erro) {
+    ui.notify('warning', 'Valor não aceito', `${erro.charAt(0).toUpperCase()}${erro.slice(1)}.`)
+    return
+  }
   project.updateBudgetLine(l.id, { [field]: field === 'team' ? Math.round(v) : v })
 }
 
@@ -88,7 +92,7 @@ const cell =
   >
     <template #actions>
       <input ref="fileInput" type="file" accept=".csv,.txt,text/csv" class="hidden" @change="onCsv" />
-      <button class="btn-ghost" title="Baixar modelo de CSV" @click="downloadTemplate"><Download class="h-3.5 w-3.5" /> Modelo CSV</button>
+      <button class="btn-ghost" :title="`Baixar modelo de CSV. ${AVISO_MODELO_CSV}`" @click="downloadTemplate"><Download class="h-3.5 w-3.5" /> Modelo CSV</button>
       <button class="btn-secondary" @click="fileInput?.click()"><Upload class="h-3.5 w-3.5" /> Importar CSV</button>
       <button v-if="lines.length" class="btn-ghost" @click="clear"><Eraser class="h-3.5 w-3.5" /> Esvaziar</button>
     </template>

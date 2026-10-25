@@ -25,7 +25,8 @@ const maximo = (xs: Iterable<number>) => {
 }
 const temArquivo = !!REF && existsSync(ARQUIVO)
 
-describe.skipIf(!temArquivo)('planilha SINAPI 09/2026 (referência local)', () => {
+// Cada teste lê abas de ~23 MB: timeout largo (2 min), para a máquina carregada não reprovar por tempo
+describe.skipIf(!temArquivo)('planilha SINAPI 09/2026 (referência local)', { timeout: 120_000 }, () => {
   let bytes: Buffer
   let zip: LeitorZip
   let planilha: Planilha

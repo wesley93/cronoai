@@ -37,6 +37,7 @@ import {
   fonteBase,
   marcarFonteAlterada,
   HELPER_RATIO_PADRAO,
+  erroDeValorDaLinha,
   type BatchOptions,
   type BudgetLine,
 } from '@/lib/sinapiBudget'
@@ -1216,8 +1217,14 @@ export const useProjectStore = defineStore('project', () => {
     return `A composição escolhida vem de ${fonteBase(fonte)}, que não é o recorte desta obra${a ? ` (${a.fonte})` : ' (a obra não tem recorte)'}. Escolha a composição de novo.`
   }
 
+  /** Quantidade e custo acima do teto (ou infinitos) nunca viram BAC: a tarefa seria criada com custo infinito. */
+  function erroDeLimitesDoPacote(input: Pick<SinapiInsert, 'quantity' | 'unitCost'>): string | undefined {
+    const e = erroDeValorDaLinha('quantity', input.quantity) ?? erroDeValorDaLinha('unitCost', input.unitCost)
+    return e ? `Valor fora do limite: ${e}.` : undefined
+  }
+
   function addSinapiTask(input: SinapiInsert): { ok: true; task: Task } | { ok: false; erro: string } {
-    const erroFonte = erroDeFonte(input.fonte)
+    const erroFonte = erroDeFonte(input.fonte) ?? erroDeLimitesDoPacote(input)
     if (erroFonte) return { ok: false, erro: erroFonte }
     const { task, group } = buildSinapiTask(input, state.tasks)
     const erro = erroSeAplicar([...state.tasks, ...(group ? [group] : []), task])
@@ -1276,7 +1283,7 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Prévia da inclusão: datas da nova tarefa e impacto na entrega. */
   function previewSinapiTask(input: SinapiInsert): PreviaSinapi {
-    const erroFonte = erroDeFonte(input.fonte)
+    const erroFonte = erroDeFonte(input.fonte) ?? erroDeLimitesDoPacote(input)
     if (erroFonte) return { erro: erroFonte }
     const { task, group } = buildSinapiTask(input, state.tasks)
     const tasks = [...state.tasks, ...(group ? [group] : []), task]
@@ -1326,6 +1333,11 @@ export const useProjectStore = defineStore('project', () => {
   function updateBudgetLine(id: string, patch: Partial<Omit<BudgetLine, 'id'>>) {
     const l = state.budget.find((x) => x.id === id)
     if (!l) return
+    // Valor não finito ou acima do teto não entra na linha (a tela avisa antes; aqui é a última defesa)
+    for (const campo of ['quantity', 'unitCost', 'rup', 'team'] as const) {
+      const v = patch[campo]
+      if (v !== undefined && erroDeValorDaLinha(campo, v)) return
+    }
     // Linha do recorte com RUP, custo ou profissional mudados: deixa de ser "o publicado" (fonte "· alterado")
     const mudaPublicado =
       !!l.fonte &&
@@ -1450,8 +1462,17 @@ export const useProjectStore = defineStore('project', () => {
     return `${ruins.length} linha(s) da planilha vêm de ${fontes}, que não é o recorte desta obra${a ? ` (${a.fonte})` : ' (a obra não tem recorte)'}: ${lista}. Remova essas linhas e inclua de novo as composições; nada foi gerado.`
   }
 
+  /** Linha do estado salvo (ou adulterado) com valor infinito ou acima do teto: o lote não a gera. */
+  function erroDeValoresDoLote(linhas: readonly BudgetLine[]): string | undefined {
+    const ruins = linhas.filter((l) => erroDeValorDaLinha('quantity', l.quantity) || erroDeValorDaLinha('unitCost', l.unitCost) || erroDeValorDaLinha('rup', l.rup) || erroDeValorDaLinha('team', l.team))
+    if (!ruins.length) return undefined
+    return `${ruins.length} linha(s) da planilha têm quantidade, custo, RUP ou equipe fora dos limites (${ruins.slice(0, 5).map((l) => l.code || l.description).join(', ')}): corrija ou remova; nada foi gerado.`
+  }
+
   function previewBudgetBatch(opts: BatchOptions = DEFAULT_BATCH_OPTIONS): PreviaPlanilha | undefined {
     if (!state.budget.length) return undefined
+    const erroValores = erroDeValoresDoLote(state.budget)
+    if (erroValores) return { erro: erroValores }
     const erroFontes = erroDeFontesDoLote(state.budget)
     if (erroFontes) return { erro: erroFontes }
     let lote: ReturnType<typeof buildBudgetBatch>
@@ -1475,6 +1496,8 @@ export const useProjectStore = defineStore('project', () => {
   /** Gera os pacotes da planilha na EAP (com linha de base da inclusão) e esvazia a planilha. */
   function generateFromBudget(opts: BatchOptions = DEFAULT_BATCH_OPTIONS): { ok: true; created: Task[] } | { ok: false; erro: string } {
     if (!state.budget.length) return { ok: true, created: [] }
+    const erroValores = erroDeValoresDoLote(state.budget)
+    if (erroValores) return { ok: false, erro: erroValores }
     const erroFontes = erroDeFontesDoLote(state.budget)
     if (erroFontes) return { ok: false, erro: erroFontes }
     let lote: ReturnType<typeof buildBudgetBatch>

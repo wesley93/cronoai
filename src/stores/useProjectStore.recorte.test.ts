@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import amostraTexto from '../../e2e/arquivos/recorte-sinapi-sp-2026-09-amostra.json?raw'
 import type { DadosObra } from '@/lib/obras'
+import { BUDGET_CSV_TEMPLATE } from '@/lib/sinapiBudget'
 import { MAX_RECORTE_BYTES, buscarComposicoes, itemCatalogoDoRecorte, linhaDoRecorte } from '@/lib/recorteSinapi'
 import { recursosDaEquipe } from '@/lib/sinapiRup'
 import type { RecorteSinapi } from '@/types/sinapi'
@@ -575,7 +576,7 @@ describe('linha da planilha alterada pelo usuário: fonte, equipe e notas (B2)',
     const { store } = await comRecorte()
     store.clearBudget()
     store.importBudgetCsv(['codigo;descricao;unidade;quantidade;custo unitario;equipe', '104658;;m²;100;300;2', '103681;;m³;320;800;4'].join('\n'))
-    expect(store.state.budget.map((l) => l.fonte)).toEqual([ALTERADA.replace('SINAPI SP', 'SINAPI SP'), ALTERADA])
+    expect(store.state.budget.map((l) => l.fonte)).toEqual([ALTERADA, ALTERADA])
     const r = store.generateFromBudget({ mode: 'FS', overlapPct: 0 })
     if (!r.ok) throw new Error(r.erro)
     const cr2 = r.created.find((t) => t.sinapi === '104658')!
@@ -819,6 +820,8 @@ describe('totais do arquivo conferem com a lista (segurança, Info 3)', () => {
   })
 })
 
+// Um 2º teste ('o índice da troca é gravado depois de uma gravação já em andamento') foi REMOVIDO: passava com e sem a correção,
+// porque `garantirObraAtualSalva` já espera a fila (rodada 02). O cenário que discrimina é o abaixo (mutação M3 do relatório da rodada 04).
 describe('índice da troca de obra montado sob a fila (resíduo do R-3)', () => {
   it('a troca de obra começa antes e grava o índice durante a importação: o recorte, a referência da obra e o índice terminam coerentes', async () => {
     const { adaptador, store } = await abrir()
@@ -855,32 +858,155 @@ describe('índice da troca de obra montado sob a fila (resíduo do R-3)', () => 
     expect(adaptador.indice!.obraAtivaId).toBe(b.id)
     expect(store.obraAtivaId).toBe(b.id)
   })
+})
 
-  it('o índice da troca é gravado depois de uma gravação já em andamento (a referência dela não se perde)', async () => {
-    const { adaptador, store } = await abrir()
-    const idA = await obraSp(store)
+describe('BAC do lote a partir do CSV do modelo, com recorte (rodada 04)', () => {
+  it('modelo baixável com "rup" e "custo_unitario" vazios: BAC = 640 × R$ 123,96 = R$ 79.334,40 (o publicado); só a linha 103332 entra, as outras dão erro', async () => {
+    const { store } = await comRecorte()
+    store.clearBudget()
+    const r = store.importBudgetCsv(BUDGET_CSV_TEMPLATE)
+    expect(r.added).toBe(1)
+    expect(r.errors).toEqual(['Linha 5: RUP ausente e código 87529 fora do catálogo.', 'Linha 6: RUP ausente e código 87263 fora do catálogo.'])
+    expect(store.state.budget[0]!.fonte).toBe('SINAPI SP 09/2026 não desonerado')
+    const g = store.generateFromBudget({ mode: 'FS', overlapPct: 0 })
+    if (!g.ok) throw new Error(g.erro)
+    expect(g.created[0]!.bac).toBeCloseTo(79334.4, 2)
+  })
+
+  it('linha com o custo 98,50 preenchido (como o modelo trazia antes): BAC = 640 × 98,50 = R$ 63.040,00, linha "alterada"; antes da rodada 03 a coluna era ignorada e o BAC saía 79.334,40', async () => {
+    const { store } = await comRecorte()
+    store.clearBudget()
+    const r = store.importBudgetCsv('codigo;descricao;local;unidade;quantidade;rup;custo_unitario;equipe\n103332;;;m²;640;0,82;98,50;4')
+    expect(r.errors).toEqual([])
+    expect(store.state.budget[0]!.fonte).toBe('SINAPI SP 09/2026 não desonerado · alterado')
+    const g = store.generateFromBudget({ mode: 'FS', overlapPct: 0 })
+    if (!g.ok) throw new Error(g.erro)
+    expect(g.created[0]!.bac).toBeCloseTo(63040, 2)
+    expect(g.created[0]!.notes).toContain('Custo R$ 98,5/m² (informado pelo usuário; publicado R$ 123,96).')
+  })
+})
+
+describe('valores infinitos ou acima do teto nunca viram BAC (segurança, Info 3)', () => {
+  const pacote = (quantity: number, unitCost: number) => ({
+    name: 'Pacote', code: '103332', unit: 'm²', quantity, unitCost, durationDays: 1,
+    resources: [{ resource: 'Pedreiro', units: 1 }], parentWbs: '', newGroupName: 'Grupo (teste)', linkType: 'FS' as const, lagDays: 0,
+  })
+
+  it('addSinapiTask e previewSinapiTask recusam quantidade ou custo infinitos ou acima do teto, sem criar tarefa', async () => {
+    const { store } = await abrir()
+    const antes = store.state.tasks.length
+    for (const [q, c] of [[1e308, 100], [Infinity, 100], [100, 1e308], [100, Infinity], [1e12, 1], [100, 1e8], [NaN, 1], [0, 1]] as const) {
+      const r = store.addSinapiTask(pacote(q, c))
+      expect(r.ok).toBe(false)
+      expect(store.previewSinapiTask(pacote(q, c)).erro).toMatch(/^Valor fora do limite: /)
+    }
+    expect(store.state.tasks).toHaveLength(antes)
+    expect(store.previewSinapiTask(pacote(1e308, 100)).erro).toBe('Valor fora do limite: quantidade acima do limite de 1.000.000.000.')
+  })
+
+  it('no teto (1e9 × R$ 10.000.000) o BAC é finito', async () => {
+    const { store } = await abrir()
+    const r = store.addSinapiTask({ ...pacote(1e9, 1e7), durationDays: 2000 })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.task.bac).toBe(1e16)
+    expect(Number.isFinite(1e9 * 1e7)).toBe(true)
+  })
+
+  it('célula: updateBudgetLine ignora valor não finito ou acima do teto e a linha não muda', async () => {
+    const { store } = await abrir()
+    const l = store.state.budget[0]!
+    const antes = { quantity: l.quantity, unitCost: l.unitCost, rup: l.rup, team: l.team }
+    for (const patch of [{ quantity: 1e308 }, { unitCost: Infinity }, { rup: Infinity }, { team: 1e6 }, { quantity: NaN }]) store.updateBudgetLine(l.id, patch)
+    expect({ quantity: l.quantity, unitCost: l.unitCost, rup: l.rup, team: l.team }).toEqual(antes)
+    store.updateBudgetLine(l.id, { quantity: 1e9 })
+    expect(l.quantity).toBe(1e9)
+  })
+
+  it('estado salvo adulterado com quantidade 1e308: o lote recusa (prévia e geração) e não cria tarefa', async () => {
+    const { store } = await abrir()
+    const tarefas = store.state.tasks.length
+    store.state.budget[0]!.quantity = 1e308
+    const msg = '1 linha(s) da planilha têm quantidade, custo, RUP ou equipe fora dos limites (103332): corrija ou remova; nada foi gerado.'
+    expect(store.previewBudgetBatch()).toEqual({ erro: msg })
+    expect(store.generateFromBudget()).toEqual({ ok: false, erro: msg })
+    expect(store.state.tasks).toHaveLength(tarefas)
+  })
+
+  it('CSV com "1e308" na quantidade e no custo: recusa a linha e nada entra na planilha', async () => {
+    const { store } = await comRecorte()
+    store.clearBudget()
+    const r = store.importBudgetCsv('codigo;descricao;unidade;quantidade;custo unitario\n103332;;m²;1e308;\n104658;;m²;10;1e308')
+    expect(r.added).toBe(0)
+    expect(r.errors).toEqual(['Linha 2: quantidade acima do limite de 1.000.000.000.', 'Linha 3: custo unitário acima do limite de 10.000.000.'])
+    expect(store.state.budget).toHaveLength(0)
+  })
+})
+
+describe('guardas de obra em salvarAgora, provadas por mutação (rodada 04)', () => {
+  async function preparar() {
+    const { adaptador, store } = await comRecorte() // obra A já com o recorte (1 registro)
+    const idA = store.obraAtivaId
     const b = await store.criarObra({ modelo: 'exemplo' })
     if (!b.ok) throw new Error(b.erro)
     await store.trocarObra(idA)
-    let abrirObra!: () => void
-    const portao = new Promise<void>((r) => (abrirObra = r))
+    return { adaptador, store, idA, idB: b.id }
+  }
+
+  it('(a) a obra ativa muda durante a leitura dos órfãos: nada é gravado, nem na obra A nem na B, e o recorte fica', async () => {
+    const { adaptador, store, idA, idB } = await preparar()
+    const obraBAntes = structuredClone(adaptador.obras.get(idB)!)
+    const obraAAntes = structuredClone(adaptador.obras.get(idA)!)
+    let abrir!: () => void
+    const portao = new Promise<void>((r) => (abrir = r))
     let noPortao = false
+    const lerRecorte = adaptador.lerRecorte.bind(adaptador)
+    adaptador.lerRecorte = async (chave) => {
+      noPortao = true
+      await portao
+      return lerRecorte(chave)
+    }
+    const gravacoes: string[] = []
     const gravarObra = adaptador.gravarObra.bind(adaptador)
     adaptador.gravarObra = async (reg, indice, extras) => {
-      if (extras?.gravarRecorte) {
-        noPortao = true
-        await portao
-      }
+      gravacoes.push(reg.id)
       return gravarObra(reg, indice, extras)
+    }
+    // Remover o vínculo da A torna o recorte órfão: salvarAgora lê o registro dele (o portão) antes de gravar
+    const remocao = store.removerRecorteSinapi()
+    await vi.waitFor(() => expect(noPortao).toBe(true))
+    store.obraAtivaId = idB // a obra ativa muda durante os awaits (cenário defensivo: a fila normalmente impede)
+    abrir()
+    const r = await remocao
+    expect(r).toEqual({ ok: false, erro: 'A obra ativa mudou durante a operação. Nada foi gravado: refaça na obra desejada.' })
+    expect(gravacoes).toEqual([]) // sem a última conferência, gravarObra seria chamado com o id da B e o estado da A
+    expect(adaptador.obras.get(idB)).toEqual(obraBAntes)
+    expect(adaptador.obras.get(idA)).toEqual(obraAAntes)
+    expect(adaptador.recortes.size).toBe(1)
+  })
+
+  it('(b) a gravação falha depois da troca de obra: o desfazer não mexe na referência da obra nova', async () => {
+    const { adaptador, store, idB } = await preparar()
+    await store.removerRecorteSinapi() // A volta a não ter referência: a importação abaixo a cria de novo
+    expect(store.state.meta.recorteSinapi).toBeUndefined()
+    let abrir!: () => void
+    const portao = new Promise<void>((r) => (abrir = r))
+    let noPortao = false
+    adaptador.gravarObra = async () => {
+      noPortao = true
+      await portao
+      throw new DOMException('Cota simulada excedida', 'QuotaExceededError')
     }
     const importacao = store.importarRecorteSinapi(texto())
     await vi.waitFor(() => expect(noPortao).toBe(true))
-    const troca = store.trocarObra(b.id)
-    abrirObra()
-    expect(await importacao).toEqual({ ok: true })
-    expect(await troca).toEqual({ ok: true })
-    expect(adaptador.indice!.obras.find((o) => o.id === idA)?.recorteSinapi).toBe(CHAVE)
-    expect(adaptador.recortes.size).toBe(1)
-    expect(adaptador.indice!.obraAtivaId).toBe(b.id)
+    expect(store.state.meta.recorteSinapi?.chave).toBe(CHAVE) // a referência entrou antes de gravar
+    // A obra muda e o estado passa a ser o da nova obra, que tem a sua própria referência
+    store.obraAtivaId = idB
+    const refDaNova = { chave: 'BA|desonerado|2026-10', sha256Origem: 'c'.repeat(64), importadoEm: '2026-11-01T00:00:00.000Z' }
+    store.state.meta.recorteSinapi = refDaNova
+    abrir()
+    const r = await importacao
+    expect(r.ok).toBe(false)
+    // Sem a guarda, o desfazer apagaria (ou trocaria) a referência da obra NOVA
+    expect(store.state.meta.recorteSinapi).toEqual(refDaNova)
   })
 })

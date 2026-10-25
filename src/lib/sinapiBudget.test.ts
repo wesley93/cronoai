@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ItemCatalogoSinapi } from '@/types/sinapi'
 import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
-import { BUDGET_CSV_TEMPLATE, HELPER_RATIO_PADRAO, MAX_BUDGET_LINES, ehFonteAlterada, fonteBase, lineDuration, lineFromCatalog, lineResources, marcarFonteAlterada, parseBudgetCsv, parseNumberBR } from './sinapiBudget'
+import { AVISO_MODELO_CSV, BUDGET_CSV_TEMPLATE, HELPER_RATIO_PADRAO, LIMITES_LINHA, MAX_BUDGET_LINES, ehFonteAlterada, erroDeValorDaLinha, fonteBase, lineDuration, lineFromCatalog, lineResources, marcarFonteAlterada, parseBudgetCsv, parseNumberBR } from './sinapiBudget'
 
 describe('planilha SINAPI: bordas do CSV', () => {
   it('arquivo vazio', () => {
@@ -162,14 +162,61 @@ describe('CSV com o código do recorte (AC-12)', () => {
     expect(lineResources(l)).toEqual([{ resource: 'Carpinteiro', units: 4 }, { resource: 'Servente', units: 2 }])
   })
 
-  it('cabeçalho do modelo baixável: "custo_unitario" (com sublinhado) é o custo (antes: a coluna era ignorada e valia o custo do recorte)', () => {
-    const modelo = BUDGET_CSV_TEMPLATE.split('\n').slice(0, 2).join('\n') // 103332, RUP 0,82, custo 98,50, equipe 4
-    const l = parseBudgetCsv(modelo, [item]).lines[0]!
-    expect(l.unitCost).toBe(98.5) // ANTES: 123,96 (o custo do recorte; a coluna custo_unitario era ignorada)
+  it('cabeçalho com sublinhado ("custo_unitario") é o custo (antes da rodada 03: a coluna era ignorada e valia o custo do recorte, R$ 123,96)', () => {
+    const l = parseBudgetCsv('codigo;descricao;local;unidade;quantidade;rup;custo_unitario;equipe\n103332;;;m²;640;0,82;98,50;4', [item]).lines[0]!
+    expect(l.unitCost).toBe(98.5)
     expect(l.rup).toBe(0.82)
     expect(l.fonte).toBe(ALTERADA)
-    // E sem recorte (catálogo): o custo do modelo é o do catálogo, então nada muda
-    expect(parseBudgetCsv(modelo).lines[0]!.unitCost).toBe(98.5)
+  })
+
+  it('modelo baixável: "rup" e "custo_unitario" VAZIOS valem o recorte (R$ 123,96 e RUP 1,6225376) ou o catálogo; as linhas fora do recorte dão erro com o número da linha do ARQUIVO', () => {
+    // ANTES (rodada 03): o modelo trazia RUP 0,82 e custo 98,50 preenchidos, e com recorte a linha 103332 saía "alterada" com BAC 640 × 98,50 = R$ 63.040,00
+    const r = parseBudgetCsv(BUDGET_CSV_TEMPLATE, [item])
+    expect(r.lines).toHaveLength(1)
+    expect(r.lines[0]).toMatchObject({ code: '103332', rup: 1.6225376, unitCost: 123.96, fonte: 'SINAPI SP 09/2026 não desonerado', equipe: [{ recurso: 'Servente', proporcao: 0.5 }] })
+    expect(r.lines[0]!.quantity * r.lines[0]!.unitCost).toBeCloseTo(79334.4, 2) // DEPOIS: o publicado
+    expect(r.errors).toEqual(['Linha 5: RUP ausente e código 87529 fora do catálogo.', 'Linha 6: RUP ausente e código 87263 fora do catálogo.'])
+    // Sem recorte: o catálogo ilustrativo, com os mesmos valores que o modelo trazia antes (nada muda)
+    const cat = parseBudgetCsv(BUDGET_CSV_TEMPLATE)
+    expect(cat.errors).toEqual([])
+    expect(cat.lines.map((l) => [l.code, l.rup, l.unitCost, l.team])).toEqual([['103332', 0.82, 98.5, 4], ['87529', 0.62, 38.9, 4], ['87263', 0.7, 189, 3]])
+  })
+
+  it('o texto do modelo explica que valor preenchido substitui o publicado e sai "alterado"; linhas "#" e em branco são ignoradas', () => {
+    expect(BUDGET_CSV_TEMPLATE.startsWith(`# ${AVISO_MODELO_CSV}`)).toBe(true)
+    expect(AVISO_MODELO_CSV).toContain('VAZIOS')
+    expect(AVISO_MODELO_CSV).toContain('substitui o publicado')
+    expect(AVISO_MODELO_CSV).toContain('"alterado"')
+    const r = parseBudgetCsv('# comentário\n\ncodigo;descricao;unidade;quantidade\n;x;m²;0')
+    expect(r.errors).toEqual(['Linha 4: quantidade inválida.']) // a linha do arquivo, contando o comentário e a linha em branco
+    expect(parseBudgetCsv('# só comentário\n')).toEqual({ lines: [], errors: ['Arquivo vazio.'] })
+  })
+
+  it('"1e308", "1e999" e valores acima do teto são recusados com o motivo (quantidade, custo, RUP e equipe); no teto vale', () => {
+    const um = (cab: string, linha: string) => parseBudgetCsv(`codigo;descricao;unidade;quantidade;${cab}\n${linha}`, [item])
+    expect(um('equipe', '103332;;m²;1e308;4').errors).toEqual(['Linha 2: quantidade acima do limite de 1.000.000.000.'])
+    expect(um('equipe', '103332;;m²;1e999;4').errors).toEqual(['Linha 2: quantidade inválida.'])
+    expect(um('custo unitario;equipe', '103332;;m²;10;1e308;4').errors).toEqual(['Linha 2: custo unitário acima do limite de 10.000.000.'])
+    expect(um('custo unitario;equipe', '103332;;m²;10;1e999;4').errors).toEqual(['Linha 2: custo unitário inválida.'])
+    expect(um('rup;equipe', '103332;;m²;10;1e999;4').errors).toEqual(['Linha 2: RUP inválida.'])
+    expect(um('rup;equipe', '103332;;m²;10;10001;4').errors).toEqual(['Linha 2: RUP acima do limite de 10.000.'])
+    expect(um('equipe', '103332;;m²;10;1001').errors).toEqual(['Linha 2: equipe acima do limite de 1.000.'])
+    for (const l of [um('custo unitario;equipe', '103332;;m²;1000000000;10000000;4').lines[0]!]) {
+      expect(l.quantity).toBe(1e9)
+      expect(Number.isFinite(l.quantity * l.unitCost)).toBe(true) // 1e16: finito
+    }
+  })
+
+  it('erroDeValorDaLinha: não finito, negativo, zero (menos no custo) e acima do teto', () => {
+    expect(erroDeValorDaLinha('quantity', Infinity)).toBe('quantidade inválida')
+    expect(erroDeValorDaLinha('quantity', NaN)).toBe('quantidade inválida')
+    expect(erroDeValorDaLinha('quantity', 0)).toBe('quantidade inválida')
+    expect(erroDeValorDaLinha('unitCost', 0)).toBeUndefined()
+    expect(erroDeValorDaLinha('unitCost', -1)).toBe('custo unitário inválida')
+    expect(erroDeValorDaLinha('rup', 345.33)).toBeUndefined() // o maior RUP publicado em 09/2026
+    expect(erroDeValorDaLinha('unitCost', 228977.2)).toBeUndefined() // o maior custo publicado
+    expect(erroDeValorDaLinha('team', 1001)).toBe('equipe acima do limite de 1.000')
+    expect(LIMITES_LINHA).toEqual({ quantity: 1e9, unitCost: 1e7, rup: 1e4, team: 1000 })
   })
 
   it('as funções da marca de alteração', () => {

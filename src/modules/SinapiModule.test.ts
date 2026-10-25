@@ -190,3 +190,27 @@ describe('planilha: linhas de outro recorte (B1)', () => {
     expect(store.generateFromBudget()).toMatchObject({ ok: false })
   })
 })
+
+describe('calculadora: valores fora do teto não dimensionam nem entram na EAP (segurança, Info 3)', () => {
+  it('quantidade "1e308" ou acima de 1e9: mensagem na tela, botões desabilitados e nenhuma prévia; no teto volta a valer', async () => {
+    const store = await montar({ comRecorte: true })
+    await escolher('103332')
+    await definirEquipe(4)
+    const botaoEap = () => [...raiz.querySelectorAll('button')].find((b) => b.textContent?.includes('Adicionar à EAP do MS Project'))!
+    await digitar('quantidade', '640')
+    expect(por('erro-limite')).toBeNull()
+    expect(botaoEap().disabled).toBe(false)
+    for (const valor of ['1e308', '1e12']) {
+      await digitar('quantidade', valor)
+      expect(texto('erro-limite')).toContain('quantidade acima do limite de 1.000.000.000')
+      expect(botaoEap().disabled).toBe(true)
+      expect(por('erro-previa')).toBeNull()
+    }
+    const antes = store.state.tasks.length
+    botaoEap().click()
+    await nextTick()
+    expect(store.state.tasks).toHaveLength(antes)
+    await digitar('quantidade', '1000000000')
+    expect(por('erro-limite')).toBeNull()
+  })
+})

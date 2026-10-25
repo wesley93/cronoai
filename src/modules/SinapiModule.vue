@@ -20,7 +20,7 @@ import { rateOf } from '@/lib/scenarios'
 import { taxaCadastrada, taxaHora } from '@/lib/premissas'
 import { fmtBRLCents, fmtDate, fmtDiasUteis, fmtNum } from '@/lib/format'
 import { descreverTabelaSinapi } from '@/lib/obras'
-import { marcarFonteAlterada } from '@/lib/sinapiBudget'
+import { LIMITES_LINHA, erroDeValorDaLinha, marcarFonteAlterada } from '@/lib/sinapiBudget'
 
 const project = useProjectStore()
 const ui = useUiStore()
@@ -174,7 +174,9 @@ const input = computed<SinapiInsert>(() => ({
   maoDeObra: item.fonte ? maoDeObra.value : undefined,
   informado: informado.value,
 }))
-const valid = computed(() => !!item.code && quantity.value > 0 && item.rup > 0 && days.value > 0 && Number.isFinite(days.value) && days.value <= 2000)
+/** Quantidade, custo e RUP precisam ser finitos e ficar nos tetos (`LIMITES_LINHA`): senão o BAC viraria infinito. */
+const erroDeLimite = computed(() => erroDeValorDaLinha('quantity', quantity.value) ?? (item.unitCost > 0 ? erroDeValorDaLinha('unitCost', item.unitCost) : undefined) ?? (item.rup > 0 ? erroDeValorDaLinha('rup', item.rup) : undefined))
+const valid = computed(() => !erroDeLimite.value && !!item.code && quantity.value > 0 && item.rup > 0 && days.value > 0 && Number.isFinite(days.value) && days.value <= 2000)
 const preview = computed(() => (valid.value ? project.previewSinapiTask(input.value) : undefined))
 const generated = computed(() => project.leaves.filter((t) => t.notes?.startsWith('Gerado pelo CronoAI')))
 /** Composição do recorte SEM mão de obra publicada: a RUP é a que o usuário digitou, e a fonte e as notas dizem isso. */
@@ -260,7 +262,7 @@ const profissionalMinusculo = computed(() => item.professional.toLowerCase())
           </div>
           <div>
             <label class="label">Quantidade total ({{ item.unit }})</label>
-            <input v-model.number="quantity" type="number" min="0" step="any" class="input tabular-nums" data-testid="quantidade" />
+            <input v-model.number="quantity" type="number" min="0" :max="LIMITES_LINHA.quantity" step="any" class="input tabular-nums" data-testid="quantidade" />
           </div>
           <div>
             <label class="label">Produtividade — RUP (HH/{{ item.unit }})</label>
@@ -380,6 +382,7 @@ const profissionalMinusculo = computed(() => item.professional.toLowerCase())
               </div>
             </div>
 
+            <div v-if="erroDeLimite" class="rounded-lg border border-coral-300 p-3 text-[12px] text-coral-700 dark:border-coral-800 dark:text-coral-300" role="alert" data-testid="erro-limite">Valor fora do limite: {{ erroDeLimite }}. Corrija para dimensionar o pacote.</div>
             <div v-if="preview?.erro" class="rounded-lg border border-coral-300 p-3 text-[12px] text-coral-700 dark:border-coral-800 dark:text-coral-300" role="alert" data-testid="erro-previa">{{ preview.erro }}</div>
             <div v-else-if="preview && preview.erro === undefined" class="rounded-lg border border-zinc-200 p-3 text-[12px] dark:border-zinc-800">
               <div class="flex items-center gap-2 font-mono text-[12px] font-semibold"><GitCommitHorizontal class="h-4 w-4 text-amber-500" /> [UID {{ preview.uid }}] {{ preview.wbs }}</div>
