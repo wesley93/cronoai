@@ -19,7 +19,9 @@
 - **Node exigido:** 22 LTS ou superior (`.nvmrc`).
 
 ### Imagem Docker
-- Build multi-stage: `node:22.23.4-alpine` compila e `nginxinc/nginx-unprivileged:1.30.6-alpine` (linha **stable** do Nginx) serve só o `dist/`. Ambas são fixadas por **versão + digest**; o Dependabot propõe as atualizações.
+- Build multi-stage: `node:22-alpine` (linha LTS do `.nvmrc`) compila e `nginxinc/nginx-unprivileged:stable-alpine` (linha **stable** do Nginx, nunca a *mainline* de número ímpar) serve só o `dist/`.
+- Ambas fixadas por **digest**: o Dependabot atualiza o digest dentro da mesma linha. Troca de major do Node fica de fora e é PR manual, junto com `.nvmrc` e CI.
+- No npm, o Dependabot também ignora versões principais (Tailwind 4, TypeScript 7, Vitest 5…): elas exigem migração e entram por PR planejado.
 - Roda como usuário 101 (não root), sem capabilities (`cap_drop: ALL`), com sistema de arquivos somente leitura e `no-new-privileges`.
 - Nginx ([docker/nginx.conf](../docker/nginx.conf)):
   - headers de segurança: CSP, `nosniff`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`;
