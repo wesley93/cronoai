@@ -14,6 +14,10 @@ describe('Planilha SINAPI (CSV)', () => {
     expect(parseNumberBR('1.850,50')).toBe(1850.5)
     expect(parseNumberBR('R$ 98,50')).toBe(98.5)
     expect(parseNumberBR('0.82')).toBe(0.82)
+    // Milhar pt-BR sem vírgula decimal (regressão: era lido como 1,28)
+    expect(parseNumberBR('1.280')).toBe(1280)
+    expect(parseNumberBR('12.500.000')).toBe(12500000)
+    expect(parseNumberBR('1.5')).toBe(1.5)
   })
 
   it('importa CSV com ; completando RUP/custo pelo catálogo e apontando erros', () => {
