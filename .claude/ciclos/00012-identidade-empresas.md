@@ -10,8 +10,6 @@ inicio: 2026-10-25
 
 > Adaptado de Sophia.Escolar.Hibrido / SophIA (`.claude/templates/TEMPLATE-CICLO.md`) para o CronoAI em 25/10/2026.
 
-> **RASCUNHO.** A rodada 04 e a auditoria independente ainda não terminaram. Os campos "A PREENCHER" dependem delas.
-
 # Ciclo 00012 — Identidade (OIDC genérico + usuário de desenvolvimento), empresas e isolamento em toda rota
 
 ## Resumo
@@ -38,7 +36,7 @@ inicio: 2026-10-25
   - fazer merge da `master` antes do PR; o PR é empilhado em `feat/00011-backend-esqueleto` se o 00011 não tiver entrado;
   - conferir os jobs do backend e o CodeQL C# verdes no PR;
   - levar à **Segurança da Informação**, ao **Jurídico** e à **Infraestrutura** os itens da última seção.
-- **Estado:** em validação: rodada 04 e auditoria pendentes.
+- **Estado:** validadores aprovados na rodada 04 (46dc9ae): `testes` APROVADO 182/182 3x, `arquiteto` APROVADO, `dba` OK; `seguranca` APROVADO desde a rodada 02. Auditoria independente: A PREENCHER.
 
 ## Pedido
 "Pode fazer todas as fases" → PLANO-FASE-2 §5.2, ciclo 00012.
@@ -59,7 +57,7 @@ inicio: 2026-10-25
 | 74e41de | E4: ADRs 00005 e 00006, R14 a R17 no `validar-regras`, documentação |
 | 8634188 | Rodada 02: 14 itens (fluxo de código exigido, `TypedResults`, nome saneado, logout do handler desligado, novo login encerra a sessão anterior e outros) |
 | b5a3289 | Rodada 03: retry de nome só para rejeição do nome, `SessaoDoCookie` em `Sessao/`, 404 inalcançável removido, controles bidirecionais |
-| A PREENCHER | Rodada 04: `NomeRejeitado` privado, U+061C, testes dos ramos 23514, comentário do P0001, robustez dos gatilhos de teste |
+| 46dc9ae | Rodada 04: `NomeRejeitado` privado, U+061C, testes dos ramos 23514, comentário do P0001, robustez dos gatilhos de teste |
 
 ## Rodadas
 | Rodada | testes | arquiteto | dba | seguranca |
@@ -67,7 +65,7 @@ inicio: 2026-10-25
 | 01 (74e41de) | APROVADO com ressalva: 146/146 na 2ª execução; na 1ª, 2 falhas instáveis em `DataProtectionTestes` | REPROVADO: M1 (`Results.*` em vez de `TypedResults`) e B1 (semente × `CLAUDE.md`); N1–N6 não bloqueiam | OK: 3 baixos; os 10 ajustes da tarefa 0 atendidos | REPROVADO: 1 Médio (fluxo de código não exigido), 1 Baixo (nome do provedor), 5 Info |
 | 02 (8634188) | APROVADO: 163/163 3x | REPROVADO: R2-1 (catch largo apaga o nome); R2-2 e R2-3 não bloqueiam | — | APROVADO: 1 Info (controles bidirecionais) |
 | 03 (b5a3289) | APROVADO: 179/179 3x | REPROVADO (2ª revisão): `public static NomeRejeitado` na região privada; 4 observações. A 1ª revisão desta rodada deu APROVADO, mas não foi entregue (ver "Ressalvas") | — | — |
-| 04 (A PREENCHER) | A PREENCHER | A PREENCHER | — | — |
+| 04 (46dc9ae) | APROVADO: 182/182 3x | APROVADO; 4 observações (B a D não bloqueiam) | OK: 3 baixos (revisão de `74e41de..46dc9ae`, pedida porque as rodadas 02 a 04 mexeram em `ConsultasIdentidade` e no retry) | — |
 | auditoria (A PREENCHER) | — | — | — | A PREENCHER |
 
 ### Testes do backend, antes → depois
@@ -79,11 +77,11 @@ inicio: 2026-10-25
 | E3 (ed6ab0b) e E4 (74e41de) | 146 | `dev-backend`; `testes` r01: 146/146 na 2ª execução |
 | Rodada 02 (8634188) | 163 (+17) | `dev-backend` e `testes` r02, 3 execuções |
 | Rodada 03 (b5a3289) | 179 (+16, todos em `NomeExibicaoTestes`) | `dev-backend` e `testes` r03, 3 execuções |
-| Rodada 04 | A PREENCHER | A PREENCHER |
+| Rodada 04 (46dc9ae) | 182 (+3: ramos 23514 com e sem `ck_usuario_nome_tamanho`, U+061C) | `dev-backend` e `testes` r04, 3 execuções |
 
-Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 e 03.
+Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 a 04.
 
-### Matriz de verificação (HEAD b5a3289; base: `testes` r03, com a evidência das rodadas 01 e 02 onde a r03 diz "mantido")
+### Matriz de verificação (HEAD 46dc9ae; base: `testes` r03 e r04, com a evidência das rodadas 01 e 02 onde as seguintes dizem "mantido")
 
 | Item | Requisito | Verificação | Obrig. | Estado | Evidência |
 |---|---|---|---|---|---|
@@ -93,9 +91,9 @@ Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 e
 | G-vuln | Sem pacote vulnerável | `dotnet list … --vulnerable --include-transitive` | sim | PASS | "não tem nenhum pacote vulnerável" nos 4 projetos (r03) |
 | G-pending | Sem migração pendente | `dotnet ef migrations has-pending-model-changes` com `Host=localhost;Database=cronoai;Username=ef_design` | sim | PASS | `No changes have been made to the model since the last migration.` (r03) |
 | G-openapi | Contrato bate com o build | `git diff --exit-code -- server/openapi/` depois do `--no-incremental` | sim | PASS | rc=0 e `git status` vazio; o `GET /empresas/atual` perdeu o 404 no código e o contrato não mudou (r03) |
-| G-test | Suíte completa, 3 execuções | `dotnet test --solution CronoAI.slnx -c Release --no-build` x3 | sim | PASS | run1, run2 e run3: `total: 179 falhou: 0 concluído com êxito: 179 ignorados: 0` (r03) |
+| G-test | Suíte completa, 3 execuções | `dotnet test --solution CronoAI.slnx -c Release --no-build` x3 | sim | PASS | run1, run2 e run3: `total: 182 falhou: 0 concluído com êxito: 182 ignorados: 0` (r04); 179/179 3x na r03 |
 | G-node | Regras R14 a R17 | `node --test .claude/scripts/lib/regras-cronoai.test.mjs` | sim | PASS | `tests 40 pass 40 fail 0` (r03) |
-| G-regras | validar-regras | `validar-regras.mjs --base feat/00011-backend-esqueleto --commits` | sim | PASS | `138 arquivo(s) … 0 bloqueia, 0 alerta` (r03) |
+| G-regras | validar-regras | `validar-regras.mjs --base feat/00011-backend-esqueleto --commits` | sim | PASS | `139 arquivo(s) … 0 bloqueia, 0 alerta` (r04) |
 | G-lint / G-tsc | Lint e tipos do front | `npm run lint`, `npm run typecheck` | sim | PASS | rc=0 nos dois (r03) |
 | T-1 | Sem `Skip`, `Sleep`, `Task.Delay`, `Explicit` em `NomeExibicaoTestes.cs` | grep | sim | PASS | nenhuma ocorrência (r03) |
 | T-2 | Sem bidi nem U+FFFD cru no fonte | `grep -nP` pelos bytes UTF-8 | sim | PASS | rc=1 em `NomeExibicaoTestes.cs` e em todos os `.cs` de `server/`; valores montados por `(char)0x…` (r03) |
@@ -123,13 +121,13 @@ Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 e
 | AC-16 | Regras de .NET | `node --test`; `validar-regras` | sim | PASS | 40/40; 0 bloqueia (r03). R15 linha a linha com teste (8634188) |
 | AC-17 | Documentação e ADRs | diff e greps | sim | PASS | ADRs 00005 e 00006 `Proposto`; exceção do uuid v4 no ADR 00004 (linha 34); nota "sem `cnpj`" na SPEC-01 (linha 63); checklist V6–V10; `backend-dotnet.md`, `CLAUDE.md`, `server/README.md` (r01, r02) |
 | AC-18 (diff) | Front intacto | `git diff --name-only feat/00011-backend-esqueleto...HEAD`; lint; tipos | sim | PASS | nada em `src/`, `e2e/`, `Dockerfile`, `docker/`, `docker-compose` nem `.github/`; lint e typecheck verdes (r01–r03) |
-| AC-18 (`npm run ci`) | `npm run ci` verde | `npm run ci` | sim | NOT_RUN | não rodado por ninguém; o front não mudou; evidência esperada na CI do PR |
+| AC-18 (`npm run ci`) | `npm run ci` verde | `npm run ci` no worktree c12 | sim | PASS | orquestrador, HEAD 46dc9ae: lint e tipos ok; `Test Files 10 passed (10)`, `Tests 67 passed (67)`; `Statements : 92.79% ( 1817/1958 )`; `✓ built`; exit=0 |
 | AC-19 | Pool sem vazamento | `PoolRlsTestes`, `ConfiguracaoTestes`, R17 | sim | PASS | controle negativo `Sem_sobrescrita_e_sem_reset_o_valor_vaza` (pool 1, mesmo `pg_backend_pid`); `Sobrescrita_independe_do_reset`; concorrência com pool 3 e 60 operações; log `'No Reset On Close=true' não é permitido` (r01) |
 | R-1 | Camadas | `ArquiteturaTestes` | sim | PASS | verde; `Dominio` sem pacote; `Api → Dados → Dominio` (r01) |
 | R-2 | DDL só em migração, bootstrap ou `Rls/`; DML de migração só pelo helper | R15 + `git grep` | sim | PASS | `validar-regras` 0 bloqueia (r03) |
 | R-3 | Sem `Migrate(` na partida | `git grep "Migrate(" -- server/src` | sim | PASS | vazio (r01) |
 | R-4 | Sem aviso novo | build | sim | PASS | 0 avisos com `--no-incremental` (r03) |
-| R-5 | Estilo do ADR 00004 | leitura do `arquiteto` | sim | FAIL | `arquiteto` r03 (2ª revisão): `public static bool NomeRejeitado` em `#region Métodos privados` (`ServicoLogin.cs:179`) → rodada 04 (A PREENCHER) |
+| R-5 | Estilo do ADR 00004 | leitura do `arquiteto` | sim | PASS | r03 (2ª revisão) acusou `public static bool NomeRejeitado` em `#region Métodos privados`; em 46dc9ae virou `private static` (`ServicoLogin.cs:179`); `arquiteto` r04 APROVADO |
 | S-1 | Sem segredo versionado | `ConfiguracaoTestes.Appsettings_sem_segredo_do_cliente_nem_flag_de_desenvolvimento`, R08 | sim | PASS | verde; `validar-regras` 0 bloqueia (r01, r03) |
 | S-2 | Dependências, licenças, vulneráveis | `Directory.Packages.props` × §08; `--vulnerable --include-transitive` | sim | PASS | `Microsoft.AspNetCore.Authentication.OpenIdConnect` 10.0.13 e `Microsoft.IdentityModel.*` / `System.IdentityModel.Tokens.Jwt` 8.19.2, todos MIT; sem vulneráveis. Revisão de segurança e licença com a Segurança |
 | S-3 | Atributos do cookie | `OidcTestes`; curl | sim | PASS | `Set-Cookie: __Host-cronoai-sessao=<redigido>; path=/; secure; samesite=lax; httponly` (r01) |
@@ -144,7 +142,7 @@ Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 e
 | V-2 | API em Production com a flag não sobe | `dotnet run` com `ASPNETCORE_ENVIRONMENT=Production` | sim | PASS | `OptionsValidationException: O usuário de desenvolvimento só pode ser habilitado em Development`; semente: `A semente de desenvolvimento só roda em Development.` (r01) |
 | PLANO | Todo teste previsto no §11 existe | grep de 70 nomes | sim | PASS | só `Contexto_do_banco_e_imutavel_e_sessao_preenchida_uma_vez` divergia (dividido em dois) (r01) |
 | E2E | `npm run e2e` | — | não | NA | não rodado, por instrução (porta compartilhada); front intacto |
-| R04 | Rodada 04: `NomeRejeitado` privado, U+061C, ramos 23514, comentário do P0001, robustez dos gatilhos | `testes` e `arquiteto` sobre o SHA A PREENCHER | sim | A PREENCHER | A PREENCHER |
+| R04 | Rodada 04: `NomeRejeitado` privado, U+061C, ramos 23514, comentário do P0001, robustez dos gatilhos | `testes` e `arquiteto` sobre 46dc9ae | sim | PASS | `testes` r04: T-1 a T-5 PASS (caso `nome-outra-constraint` propaga 23514 com "Nome Original" intacto; `nome-limite-do-nome` grava nulo; U+061C por `(char)`, grep sem byte cru; `try/finally` no `DisposeAsync`); mutação do dev: aceitar 23514 de qualquer constraint faz só `nome-outra-constraint` falhar (total 30, falhou 1); `arquiteto` r04 APROVADO; build 0 avisos |
 | AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | A PREENCHER | A PREENCHER |
 
 ## Ressalvas dos validadores e destino
@@ -156,7 +154,7 @@ Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 e
 | testes r01 / arquiteto r01 | S-9 do plano pede grep vazio, código tem `ShowPII = false` | registrado: S-9 redefinida (decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR) |
 | testes r01 | `npm run ci` completo não rodado | registrado: AC-18 (`npm run ci`) NOT_RUN; CI do PR |
 | testes r02 / r03 | `SpinWait` do `PartidaDoHost` sem mensagem própria | pendência registrada |
-| testes r03 | `GatilhoDeFalhaAsync` e `GatilhoTemporario.DisposeAsync` sem proteção | rodada 04 (A PREENCHER) |
+| testes r03 | `GatilhoDeFalhaAsync` e `GatilhoTemporario.DisposeAsync` sem proteção | corrigido (46dc9ae) |
 | testes r03 | Mutação do T-5 não repetida pelo `testes` | registrado (feita pelo dev) |
 | testes r03 | `GET /empresas/atual` com 200 não exercitado por curl | registrado: coberto por `EmpresaAtualTestes` e `PoolApiTestes` |
 | arquiteto r01 | M1: `Results.*` em vez de `TypedResults`; OpenAPI errado | corrigido (8634188): uniões `Results<…>`, `.ProducesProblem`, OpenAPI regerado; regra em `backend-dotnet.md` |
@@ -176,11 +174,11 @@ Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 e
 | arquiteto r03 (1ª revisão) | Log `NomeDeExibicaoDescartado` com causa errada no falso positivo | pendência registrada |
 | arquiteto r03 (1ª revisão) | `GatilhoTemporario` sem regions | registrado: padrão já aceito nos tipos aninhados de teste |
 | arquiteto r03 (1ª revisão) | U+200B–U+200D e U+FEFF fora da lista | pendência registrada (decisão da Segurança) |
-| arquiteto r03 (2ª revisão) | `public static NomeRejeitado` na região privada (bloqueante) | rodada 04 (A PREENCHER) |
-| arquiteto r03 (2ª revisão) | U+061C (Bidi_Control) fora da lista | rodada 04 (A PREENCHER) |
-| arquiteto r03 (2ª revisão) | Ramos 23514 com e sem `ck_usuario_nome_tamanho` sem teste | rodada 04 (A PREENCHER) |
+| arquiteto r03 (2ª revisão) | `public static NomeRejeitado` na região privada (bloqueante) | corrigido (46dc9ae) |
+| arquiteto r03 (2ª revisão) | U+061C (Bidi_Control) fora da lista | corrigido (46dc9ae) |
+| arquiteto r03 (2ª revisão) | Ramos 23514 com e sem `ck_usuario_nome_tamanho` sem teste | corrigido (46dc9ae) |
 | arquiteto r03 (2ª revisão) | Ramo `EncoderFallbackException` sem teste | pendência registrada (fora da rodada 04) |
-| arquiteto r03 (2ª revisão) | Comentário cita só o 40001, a teoria cobre também o P0001 | rodada 04 (A PREENCHER) |
+| arquiteto r03 (2ª revisão) | Comentário cita só o 40001, a teoria cobre também o P0001 | corrigido (46dc9ae) |
 | arquiteto r03 (2ª revisão) | Log `NomeDeExibicaoDescartado` antes de propagar erro do sujeito (info) | pendência registrada |
 | dba r01 | `DefinirEmpresaAtivaAsync` lança 23503 em vez de devolver `false` | corrigido (8634188), com teste |
 | dba r01 | R15 confere o arquivo, não a linha | corrigido (8634188): teste linha a linha. O dev afirma que o código já conferia por linha (ver divergência) |
@@ -191,7 +189,15 @@ Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 e
 | seguranca r01 (info) | `alg=none` resolvido só em `OnTokenValidated` | corrigido (8634188): `ValidadorTokenAssinado` na origem; cada camada sozinha dá 401 |
 | seguranca r01 (info) | `/signout-oidc` e `/signout-callback-oidc` respondem 200 | corrigido (8634188): 404 sem tocar a sessão |
 | seguranca r01 (info) | Novo login não encerra a sessão anterior | corrigido (8634188), com teste |
-| seguranca r02 (info) | Controles bidirecionais (Cf) passam no nome | corrigido (b5a3289): U+200E, U+200F, U+202A–U+202E, U+2066–U+2069; antecipado do 00014 (decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR). U+061C → rodada 04 (A PREENCHER) |
+| seguranca r02 (info) | Controles bidirecionais (Cf) passam no nome | corrigido (b5a3289): U+200E, U+200F, U+202A–U+202E, U+2066–U+2069; antecipado do 00014 (decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR). U+061C → corrigido (46dc9ae) |
+| testes r04 | `DROP` do gatilho usa o `CancellationToken` do teste: um timeout deixaria o gatilho no banco | pendência registrada (banco efêmero) |
+| arquiteto r04 | B: helper `Executar` assíncrono sem sufixo `Async` | pendência registrada (o ADR não escreve a regra) |
+| arquiteto r04 | C: comentário do `catch` de `GatilhoDeFalhaAsync` otimista se o próprio dispose lançar | registrado (só teste) |
+| arquiteto r04 / dba r04 | D / 8: comentário diz que o 40001 chega embrulhado em `InvalidOperationException`; não há estratégia de retry em `src/` | registrado: sem `EnableRetryOnFailure`, o EF Core usa a estratégia sem retry, que embrulha o erro transitório em `InvalidOperationException` sem repetir; o comentário está correto e o teste não paga atrasos |
+| arquiteto r04 | A: o rascunho deste registro entrou no commit 46dc9ae do dev | registrado: finalizado no commit de documentação seguinte |
+| dba r04 | 6: `RemoverPolitica` removido | registrado: `IdentidadeEmpresas.Down()` só faz `DropTable`, que remove as políticas junto; sem efeito na reversão |
+| dba r04 | 7: gatilho de teste sem `CREATE OR REPLACE`/`DROP ... IF EXISTS` antes do `CREATE TRIGGER` | pendência registrada |
+| dba r04 | 1: com `NomeRejeitado`, a 2ª tentativa grava nulo e apaga o nome antigo | registrado: comportamento documentado (RNF-02.3, nome sempre o do último login); decisão de produto sujeita à revisão do usuário no PR |
 
 ## Pendências registradas
 - **Controle negativo do `PoolApiTestes`:** existe só no nível de dados (`PoolRlsTestes.Sem_sobrescrita_e_sem_reset_o_valor_vaza`). O teste da API prova o comportamento, mas não prova que detectaria um vazamento.
@@ -204,6 +210,7 @@ Regras do `validar-regras` (`node --test`): 39 na rodada 01, 40 nas rodadas 02 e
 - **Índice parcial** `WHERE empresa_ativa_id IS NOT NULL`: avaliar no 00014.
 - **`usuario` fora do RLS:** reavaliação no 00014.
 - **Herdado do 00011, ainda aberto:** teste da R08 fora da CI; cobertura do backend não coletada.
+- **Gatilho de teste (`NomeExibicaoTestes`):** `DROP` com o token do teste e sem `CREATE OR REPLACE`; helper `Executar` sem sufixo `Async`. Só testes, banco efêmero.
 - **Antes do PR:** fazer merge da `master`. PR empilhado em `feat/00011-backend-esqueleto` se o 00011 não tiver entrado.
 
 ## Validação de outras áreas (não substitui o parecer delas)
