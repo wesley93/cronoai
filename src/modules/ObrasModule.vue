@@ -29,7 +29,12 @@ const dadosAtivos = computed<DadosObra>(() => {
     dataBaseSinapi: m.dataBaseSinapi ?? '',
   }
 })
-const contextoInicio = computed(() => ({ inicioOriginal: project.state.meta.startDate, primeiroInicioReal: project.primeiroInicioReal }))
+const contextoInicio = computed(() => ({
+  inicioOriginal: project.state.meta.startDate,
+  statusOriginal: project.state.meta.statusDate,
+  comAvanco: project.obraComAvanco,
+  primeiroInicioReal: project.primeiroInicioReal,
+}))
 const chaveDados = computed(() => JSON.stringify(dadosAtivos.value))
 
 const unica = computed(() => project.obras.length <= 1)

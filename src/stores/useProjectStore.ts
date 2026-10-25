@@ -433,9 +433,11 @@ export const useProjectStore = defineStore('project', () => {
   const packageEvm = computed(() => computePackageEvm(state.tasks, baseCalendar.value, state.meta.statusDate))
   const sCurve = computed(() => computeSCurve(state.tasks, baseCalendar.value, state.meta.statusDate, schedule.value, fmtMonth))
   const delay = computed(() => analyzeDelay(state.tasks, schedule.value, baseCalendar.value))
-  /** Obra sem tarefas: não há entrega nem desempenho a mostrar (o motor devolve a data de início e SPI/CPI 1 por `safeDiv`). */
   /** Menor data de início real entre as tarefas (indefinida enquanto a obra não tem avanço). */
   const primeiroInicioReal = computed(() => state.tasks.map((t) => t.actualStart).filter((d): d is string => !!d).sort()[0])
+  /** Obra com avanço: alguma tarefa com % concluído ou início real. */
+  const obraComAvanco = computed(() => state.tasks.some((t) => t.percentComplete > 0 || !!t.actualStart))
+  /** Obra sem tarefas: não há entrega nem desempenho a mostrar (o motor devolve a data de início e SPI/CPI 1 por `safeDiv`). */
   const semCronograma = computed(() => state.tasks.length === 0)
   /** Sem orçamento (BAC = 0): SPI e CPI 1,00 são só o fallback do `safeDiv`, não desempenho. */
   const semOrcamento = computed(() => evm.value.bac <= 0)
@@ -1162,7 +1164,12 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Edita os dados da obra ativa. A data de status passa por `setStatusDate` (com registro no log). */
   function atualizarDadosObra(dados: DadosObra): { ok: true } | { ok: false; erros: string[] } {
-    const erros = validarDadosObra(dados, { inicioOriginal: state.meta.startDate, primeiroInicioReal: primeiroInicioReal.value })
+    const erros = validarDadosObra(dados, {
+      inicioOriginal: state.meta.startDate,
+      statusOriginal: state.meta.statusDate,
+      comAvanco: obraComAvanco.value,
+      primeiroInicioReal: primeiroInicioReal.value,
+    })
     if (erros.length) return { ok: false, erros }
     const meta = state.meta
     meta.name = dados.nome.trim()
@@ -1205,6 +1212,7 @@ export const useProjectStore = defineStore('project', () => {
     semCronograma,
     semOrcamento,
     primeiroInicioReal,
+    obraComAvanco,
     scenarios,
     scenarioParams,
     scenarioOptions,

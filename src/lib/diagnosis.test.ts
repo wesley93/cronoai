@@ -61,6 +61,30 @@ describe('buildDiagnosis', () => {
     expect(d.actions).toEqual(['Aprovar plano de recuperação no módulo Caminho Crítico (comparar Crashing, Fast Tracking e Hora Extra).'])
   })
 
+  it('BAC = 0 com custo real (AC > 0): não aparece Margem, EAC, TCPI nem auditoria de custo; o prazo continua', () => {
+    const tarefa: Task = {
+      uid: 7, wbs: '01.01', name: 'Estrutura', outlineLevel: 2, isSummary: false, durationDays: 10, predecessors: [],
+      percentComplete: 40, bac: 0, actualCost: 5000, resources: [], baselineStart: '2026-11-10', baselineFinish: '2026-11-23',
+    }
+    const delay: DelayAnalysis = {
+      origin: tarefa, originShift: 5, keysBaseline: '2026-12-01', keysForecast: '2026-12-08', delayDays: 5, delayCalendarDays: 7, affected: [],
+    }
+    const args = { ...argumentos([tarefa]), delay }
+    expect(args.evm.bac).toBe(0)
+    expect(args.evm.ac).toBe(5000)
+    const d = buildDiagnosis(args)
+    const texto = d.paragraphs.join(' ')
+    expect(d.status).toBe('sem-orcamento')
+    expect(texto).not.toContain('Margem')
+    expect(texto).not.toContain('EAC =')
+    expect(texto).not.toContain('TCPI')
+    expect(texto).not.toContain('dreno financeiro')
+    expect(d.actions.join(' ')).not.toContain('Auditar')
+    // O prazo pelo CPM continua
+    expect(texto).toContain('(+5 dias úteis)')
+    expect(d.actions).toEqual(['Aprovar plano de recuperação no módulo Caminho Crítico (comparar Crashing, Fast Tracking e Hora Extra).'])
+  })
+
   it('tarefas sem orçamento e sem atraso: prazo dentro da linha de base', () => {
     const tarefa: Task = {
       uid: 7, wbs: '01.01', name: 'Estrutura', outlineLevel: 2, isSummary: false, durationDays: 10, predecessors: [],

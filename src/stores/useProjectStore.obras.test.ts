@@ -612,7 +612,7 @@ describe('useProjectStore · multiobra', () => {
       expect(store.evm.cpi).toBeCloseTo(0.9349, 4)
     })
 
-    it('adiar o início de uma obra NÃO iniciada desloca a entrega exatamente os mesmos dias úteis', async () => {
+    it('adiar o início de uma obra NÃO iniciada, mantendo a data de status, desloca a entrega 19 d.u. e o atraso fica em +20 d.u.', async () => {
       // Aurora com avanço zerado e data de status no início da obra
       const base = JSON.parse(aurora)
       base.tasks = base.tasks.map((t: Record<string, unknown>) => ({ ...t, percentComplete: 0, actualCost: 0, actualStart: undefined, actualFinish: undefined }))
@@ -621,39 +621,50 @@ describe('useProjectStore · multiobra', () => {
       const m = store.state.meta
       const dados = { nome: m.name, responsavel: m.manager, dataInicio: m.startDate, dataStatus: m.statusDate }
       const baseline = store.taskByUid.get(104)?.baselineStart
-      // Antes: início e status em 04/05/2026
+      expect(store.obraComAvanco).toBe(false)
+      // Antes: início 04/05/2026 e status 04/05/2026
       expect(store.schedule.projectFinish).toBe('2027-06-02')
       expect(store.delay.delayDays).toBe(1)
-      // Depois: início e status em 01/06/2026 (+20 d.u.) => entrega +20 d.u.
-      expect(store.atualizarDadosObra({ ...dados, dataInicio: '2026-06-01', dataStatus: '2026-06-01' })).toEqual({ ok: true })
-      expect(store.schedule.projectFinish).toBe('2027-06-30')
-      expect(store.delay.delayDays).toBe(21)
+      // Depois: início 01/06/2026 (+20 d.u.), status mantido: obra não iniciada, sem regra de coerência
+      expect(store.atualizarDadosObra({ ...dados, dataInicio: '2026-06-01' })).toEqual({ ok: true })
+      expect(store.schedule.projectFinish).toBe('2027-06-29')
+      expect(store.delay.delayDays).toBe(20)
       expect(store.taskByUid.get(104)?.baselineStart).toBe(baseline) // a linha de base não muda
       // O log registra a mudança de início
-      expect(store.state.log.map((l) => l.title)).toContain('Data de início alterada')
       expect(store.state.log.find((l) => l.title === 'Data de início alterada')?.detail).toBe(
         'Nova data de início: 01/06/2026. Tarefas não iniciadas foram reprogramadas; a linha de base não mudou.',
       )
       // Sem mudança de início, nenhuma entrada nova
       const total = store.state.log.length
-      store.atualizarDadosObra({ ...dados, dataInicio: '2026-06-01', dataStatus: '2026-06-01' })
+      store.atualizarDadosObra({ ...dados, dataInicio: '2026-06-01' })
       expect(store.state.log).toHaveLength(total)
     })
 
-    it('a ação da store recusa início depois da data de status ou do primeiro início real', async () => {
+    it('criar obra futura (início depois da data de status) é aceito', async () => {
+      const { store } = await carregarCom(aurora)
+      const r = await store.criarObra({ modelo: 'branco', dados: { ...recife, dataInicio: '2026-12-01', dataStatus: '2026-10-26' } })
+      expect(r.ok).toBe(true)
+      expect(store.state.meta.startDate).toBe('2026-12-01')
+    })
+
+    it('com avanço, a ação da store recusa início depois da data de status ou do primeiro início real e status antes do início', async () => {
       const { store } = await carregarCom(aurora)
       const m = store.state.meta
       const dados = { nome: m.name, responsavel: m.manager, dataInicio: m.startDate, dataStatus: m.statusDate }
+      expect(store.obraComAvanco).toBe(true)
       expect(store.primeiroInicioReal).toBeDefined()
-      const depoisDoStatus = store.atualizarDadosObra({ ...dados, dataInicio: '2026-10-26' })
-      expect(depoisDoStatus).toMatchObject({ ok: false })
+      expect(store.atualizarDadosObra({ ...dados, dataInicio: '2026-10-26' })).toMatchObject({ ok: false })
       const depoisDoReal = store.atualizarDadosObra({ ...dados, dataInicio: '2026-10-20' })
       expect(depoisDoReal).toMatchObject({ ok: false })
       if (!depoisDoReal.ok) expect(depoisDoReal.erros[0]).toContain('primeiro início real')
+      const statusAntes = store.atualizarDadosObra({ ...dados, dataStatus: '2026-04-01' })
+      expect(statusAntes).toMatchObject({ ok: false })
+      if (!statusAntes.ok) expect(statusAntes.erros[0]).toBe('A data de status não pode ser anterior à data de início.')
       expect(store.state.meta.startDate).toBe('2026-05-04') // nada mudou
+      expect(store.state.meta.statusDate).toBe('2026-10-23')
       expect(store.schedule.projectFinish).toBe('2027-06-23')
       expect(store.delay.delayDays).toBe(16)
-      // Editar só o nome, com o início intacto, continua permitido
+      // Editar só o nome, com as datas intactas, continua permitido
       expect(store.atualizarDadosObra({ ...dados, nome: 'Aurora Norte' })).toEqual({ ok: true })
     })
 

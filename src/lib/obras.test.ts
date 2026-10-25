@@ -50,30 +50,53 @@ describe('validarDadosObra', () => {
   })
 })
 
-describe('validarDadosObra · data de início', () => {
-  const edicao = { inicioOriginal: '2026-05-04', primeiroInicioReal: '2026-05-06' }
+describe('validarDadosObra · datas e avanço', () => {
+  const comAvanco = { inicioOriginal: '2026-05-04', statusOriginal: '2026-10-23', comAvanco: true, primeiroInicioReal: '2026-05-06' }
+  const semAvanco = { inicioOriginal: '2026-05-04', statusOriginal: '2026-05-04', comAvanco: false }
   const dados = { ...valido, dataInicio: '2026-05-04', dataStatus: '2026-10-23' }
 
-  it('na criação, o início não pode ser depois da data de status', () => {
-    expect(validarDadosObra({ ...dados, dataInicio: '2026-10-24' })).toEqual(['A data de início não pode ser depois da data de status.'])
-    expect(validarDadosObra({ ...dados, dataInicio: '2026-10-23' })).toEqual([])
+  it('criação de obra futura é livre: início depois da data de status é aceito', () => {
+    expect(validarDadosObra({ ...dados, dataInicio: '2026-12-01', dataStatus: '2026-10-26' })).toEqual([])
   })
 
-  it('na edição, adiar o início depois da data de status é recusado', () => {
-    expect(validarDadosObra({ ...dados, dataInicio: '2026-10-26' }, { inicioOriginal: '2026-05-04' })).toEqual([
+  it('obra sem avanço fica livre na edição: adiar o início mantendo a data de status é aceito', () => {
+    expect(validarDadosObra({ ...dados, dataInicio: '2026-06-01', dataStatus: '2026-05-04' }, semAvanco)).toEqual([])
+    expect(validarDadosObra({ ...dados, dataStatus: '2026-01-01' }, semAvanco)).toEqual([])
+  })
+
+  it('com avanço, o início não pode ser depois da data de status', () => {
+    expect(validarDadosObra({ ...dados, dataInicio: '2026-10-26' }, comAvanco)).toEqual([
       'A data de início não pode ser depois da data de status.',
+      'A data de início não pode ser depois do primeiro início real da obra (06/05/2026).',
     ])
+    expect(validarDadosObra({ ...dados, dataInicio: '2026-05-06' }, comAvanco)).toEqual([])
   })
 
   it('com avanço, o início não pode passar do primeiro início real', () => {
-    expect(validarDadosObra({ ...dados, dataInicio: '2026-05-07' }, edicao)).toEqual([
+    expect(validarDadosObra({ ...dados, dataInicio: '2026-05-07' }, comAvanco)).toEqual([
       'A data de início não pode ser depois do primeiro início real da obra (06/05/2026).',
     ])
-    expect(validarDadosObra({ ...dados, dataInicio: '2026-05-06' }, edicao)).toEqual([])
   })
 
-  it('sem mudar o início, datas incoerentes herdadas (ex.: .xml importado) não bloqueiam a edição de outros campos', () => {
-    expect(validarDadosObra({ ...dados, dataStatus: '2026-01-01' }, { inicioOriginal: '2026-05-04', primeiroInicioReal: '2026-01-10' })).toEqual([])
+  it('com avanço, a data de status não pode ficar antes do início nem do primeiro início real', () => {
+    expect(validarDadosObra({ ...dados, dataStatus: '2026-05-03' }, comAvanco)).toEqual([
+      'A data de status não pode ser anterior à data de início.',
+      'A data de status não pode ser anterior ao primeiro início real da obra (06/05/2026).',
+    ])
+    expect(validarDadosObra({ ...dados, dataStatus: '2026-05-05' }, comAvanco)).toEqual([
+      'A data de status não pode ser anterior ao primeiro início real da obra (06/05/2026).',
+    ])
+    expect(validarDadosObra({ ...dados, dataStatus: '2026-05-06' }, comAvanco)).toEqual([])
+  })
+
+  it('com avanço mas sem início real (só % concluído), confere apenas início × status', () => {
+    const c = { ...comAvanco, primeiroInicioReal: undefined }
+    expect(validarDadosObra({ ...dados, dataStatus: '2026-05-03' }, c)).toEqual(['A data de status não pode ser anterior à data de início.'])
+  })
+
+  it('datas herdadas incoerentes não bloqueiam a edição de outros campos (as datas não mudaram)', () => {
+    const c = { inicioOriginal: '2026-05-04', statusOriginal: '2026-01-01', comAvanco: true, primeiroInicioReal: '2026-01-10' }
+    expect(validarDadosObra({ ...dados, dataStatus: '2026-01-01' }, c)).toEqual([])
   })
 })
 

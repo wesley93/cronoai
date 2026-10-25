@@ -24,10 +24,16 @@ export interface DadosObra {
   dataBaseSinapi?: string
 }
 
-/** Contexto de uma edição da data de início: as regras só valem quando o início muda (obra importada já pode ter datas incoerentes). */
+/**
+ * Contexto da edição das datas de uma obra existente. As regras de coerência só valem em obra COM avanço
+ * (alguma tarefa com % concluído ou início real) e só para a data que mudou: obra futura ou não iniciada fica livre,
+ * e uma obra importada com datas incoerentes pode editar outros campos.
+ */
 export interface ContextoInicio {
   inicioOriginal: string
-  /** Menor data de início real entre as tarefas (existe quando a obra já tem avanço). */
+  statusOriginal: string
+  comAvanco: boolean
+  /** Menor data de início real entre as tarefas. */
   primeiroInicioReal?: string
 }
 
@@ -35,6 +41,27 @@ export type SituacaoCota = 'ok' | 'alerta' | 'indisponivel'
 
 function dataIsoValida(iso: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(iso) && toISO(parseISO(iso)) === iso
+}
+
+const dataBR = (iso: string) => iso.split('-').reverse().join('/')
+
+/** Coerência das datas em obra com avanço: só a data que mudou é conferida. */
+function validarDatasComAvanco(d: DadosObra, c: ContextoInicio): string[] {
+  const erros: string[] = []
+  if (!dataIsoValida(d.dataInicio) || !dataIsoValida(d.dataStatus)) return erros
+  if (d.dataInicio !== c.inicioOriginal) {
+    if (d.dataInicio > d.dataStatus) erros.push('A data de início não pode ser depois da data de status.')
+    if (c.primeiroInicioReal && d.dataInicio > c.primeiroInicioReal) {
+      erros.push(`A data de início não pode ser depois do primeiro início real da obra (${dataBR(c.primeiroInicioReal)}).`)
+    }
+  }
+  if (d.dataStatus !== c.statusOriginal) {
+    if (d.dataStatus < d.dataInicio) erros.push('A data de status não pode ser anterior à data de início.')
+    if (c.primeiroInicioReal && d.dataStatus < c.primeiroInicioReal) {
+      erros.push(`A data de status não pode ser anterior ao primeiro início real da obra (${dataBR(c.primeiroInicioReal)}).`)
+    }
+  }
+  return erros
 }
 
 /** Valida os dados de uma obra; devolve as mensagens de erro em português (lista vazia = válido). */
@@ -48,13 +75,7 @@ export function validarDadosObra(d: DadosObra, contexto?: ContextoInicio): strin
   if ((d.responsavel ?? '').trim().length > MAX_RESPONSAVEL) erros.push(`O responsável deve ter no máximo ${MAX_RESPONSAVEL} caracteres.`)
   if (!dataIsoValida(d.dataInicio)) erros.push('Informe uma data de início válida.')
   if (!dataIsoValida(d.dataStatus)) erros.push('Informe uma data de status válida.')
-  const inicioValido = dataIsoValida(d.dataInicio)
-  if (inicioValido && (!contexto || d.dataInicio !== contexto.inicioOriginal)) {
-    if (dataIsoValida(d.dataStatus) && d.dataInicio > d.dataStatus) erros.push('A data de início não pode ser depois da data de status.')
-    if (contexto?.primeiroInicioReal && d.dataInicio > contexto.primeiroInicioReal) {
-      erros.push(`A data de início não pode ser depois do primeiro início real da obra (${contexto.primeiroInicioReal.split('-').reverse().join('/')}).`)
-    }
-  }
+  if (contexto?.comAvanco) erros.push(...validarDatasComAvanco(d, contexto))
   if (d.regimeSinapi && !REGIMES_SINAPI.includes(d.regimeSinapi)) erros.push('Selecione um regime SINAPI válido.')
   if (d.dataBaseSinapi && !/^\d{4}-(0[1-9]|1[0-2])$/.test(d.dataBaseSinapi)) erros.push('A data-base do SINAPI deve estar no formato AAAA-MM (ex.: 2026-09).')
   return erros

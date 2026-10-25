@@ -44,11 +44,14 @@ export function buildDiagnosis(args: {
   const leaves = tasks.filter((t) => !t.isSummary)
   const active = packages.filter((p) => p.pv > 0 || p.ac > 0)
 
-  const costDrain = [...active].filter((p) => p.cv < 0).sort((a, b) => a.cv - b.cv)[0]
-  const scheduleDrain = [...active].filter((p) => p.sv < 0).sort((a, b) => a.spi - b.spi)[0]
+  // Sem orçamento (BAC = 0), CV, SPI, EAC e TCPI não têm significado, mesmo havendo custo real: nada de custo ou valor agregado
+  const costDrain = semOrcamento ? undefined : [...active].filter((p) => p.cv < 0).sort((a, b) => a.cv - b.cv)[0]
+  const scheduleDrain = semOrcamento ? undefined : [...active].filter((p) => p.sv < 0).sort((a, b) => a.spi - b.spi)[0]
 
   // Tarefa que mais drena margem (CV por tarefa)
-  const taskCv = leaves
+  const taskCv = semOrcamento
+    ? undefined
+    : leaves
     .filter((t) => t.actualCost > 0)
     .map((t) => ({ t, cv: (t.bac * t.percentComplete) / 100 - t.actualCost }))
     .sort((a, b) => a.cv - b.cv)[0]
