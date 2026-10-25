@@ -305,3 +305,11 @@ O usuário autorizou o orquestrador a seguir sem parar até o fim das fases ("n�
 - **P1 → (A)** IndexedDB já neste ciclo; ADR 00002 aceito nessas condições.
 - **P2 → (A)** criar obra em dois passos (em branco + "Importar .xml" existente); a ficha fica na faixa 2.
 - **P3 → (a)** cada obra guarda o próprio desfazer; só os parâmetros do simulador são zerados na troca.
+
+## 15. Emenda 01 (25/10/2026) — obra sem cronograma ou sem orçamento
+Origem: validação do `especialista-obra` (P-2). O ciclo tornou alcançável, ao abrir o app, uma obra sem tarefas, com SPI/CPI = 1,00 em verde pelo `safeDiv` e diagnóstico "sob controle". Isso contraria a regra da dívida do `safeDiv` ("não mostre como desempenho real"). Decisão do orquestrador (autorização do usuário para seguir sem parar), **sujeita à revisão do usuário no PR**:
+- **Escopo ampliado:** entram `src/lib/diagnosis.ts` (+ teste), `src/modules/EvmModule.vue` e as linhas de indicadores do `AppTopbar.vue` (nunca as linhas 19 e 58). Triagem passa a **T2 SIM** só na apresentação; `especialista-obra` passa a obrigatório.
+- **Regra:** dois estados distintos.
+  - **Sem cronograma** (0 tarefas): o topo mostra "—" e "sem cronograma", e o diagnóstico não fala de desempenho.
+  - **Sem orçamento** (BAC = 0, mas com tarefas; ex.: `.xml` sem custos): somem só SPI, CPI e os textos de custo/valor. O diagnóstico de **prazo** pelo CPM (caminho crítico, atraso em d.u., restrições, suprimentos e plano de recuperação) continua.
+- **C-4 e AC-15 emendados:** a obra em branco mostra "sem cronograma" e "—" no lugar de "no prazo" e 1,00. Os números do motor não mudam: SPI = CPI = 1 continuam fixados na store.
