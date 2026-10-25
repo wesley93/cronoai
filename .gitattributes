@@ -1,0 +1,5 @@
+# Fim de linha LF no repositório (scripts, Dockerfile e YAML rodam em Linux no CI/containers)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
