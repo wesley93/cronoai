@@ -125,10 +125,16 @@ public sealed class IsolamentoRotasTestes
         using var idp = new IdpEmMemoria();
         await using var fabrica = CriarFabrica(idp);
         var nomeDaB = "Empresa-B-MARCADOR-" + Guid.NewGuid().ToString("N");
+        var nomeDaObraB = "Obra-B-MARCADOR-" + Guid.NewGuid().ToString("N");
         var usuarioB = await _dados.CriarUsuarioAsync();
         var empresaB = await _dados.CriarEmpresaAsync(nomeDaB);
         await _dados.VincularAsync(empresaB, usuarioB);
-        var marcadores = new[] { nomeDaB, empresaB.ToString("D"), usuarioB.ToString("D") };
+
+        // O {id} das rotas de obra é uma obra REAL da empresa B (nunca um guid aleatório: o 404 viria por "não existir").
+        var obraB = await _dados.CriarObraAsync(empresaB, usuarioB, DadosTeste.DadosObraValidos(nomeDaObraB));
+
+        // Marcadores de vazamento: nomes e ids de B. NÃO o id da obra: ele está na URL e pode voltar no ProblemDetails sem vazamento.
+        var marcadores = new[] { nomeDaB, nomeDaObraB, empresaB.ToString("D"), usuarioB.ToString("D") };
         var falhas = new List<string>();
 
         foreach (var entrada in CatalogoRotas.Entradas.Where(e => e.Cenario != CenarioIsolamento.DesenvolvimentoApenas))
@@ -139,7 +145,7 @@ public sealed class IsolamentoRotasTestes
             var rota = new RotaRegistrada(entrada.Metodo, entrada.Padrao, entrada.Cenario == CenarioIsolamento.Anonima);
             var token = rota.EhEscrita ? await ClienteAutenticado.ObterTokenAntiforgeryAsync(navegador) : null;
 
-            using var resposta = await EnviarAsync(navegador, rota, empresaB, token);
+            using var resposta = await EnviarAsync(navegador, rota, empresaB, token, entrada.Recurso == RecursoAlheio.Obra ? obraB.Id : null);
             var corpo = await resposta.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
             if (entrada.Cenario == CenarioIsolamento.ComIdDeOutraEmpresa && resposta.StatusCode != HttpStatusCode.NotFound)
@@ -154,6 +160,38 @@ public sealed class IsolamentoRotasTestes
         }
 
         Assert.Empty(falhas);
+    }
+
+    [Fact]
+    public async Task Concretizacao_de_id_usa_obra_real_da_empresa_B()
+    {
+        // Meta-teste: o {id} concretizado É uma obra existente e da empresa B. Com um id aleatório o teste genérico passaria
+        // por "não existir" sem provar nada; o controle negativo abaixo mostra que este meta-teste acusaria isso.
+        var usuarioB = await _dados.CriarUsuarioAsync();
+        var empresaB = await _dados.CriarEmpresaComMembrosAsync(usuarioB);
+        var obraB = await _dados.CriarObraAsync(empresaB, usuarioB);
+
+        var comId = CatalogoRotas.Entradas.Where(e => e.Padrao.Contains("{id}", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(comId);
+
+        // Toda rota com {id} declara de que recurso real ele é: nenhuma cai no guid aleatório sem querer.
+        Assert.All(comId, e => Assert.Equal(RecursoAlheio.Obra, e.Recurso));
+        Assert.All(
+            CatalogoRotas.Entradas.Where(e => e.Cenario == CenarioIsolamento.ComIdDeOutraEmpresa && e.Padrao.Contains("{id}", StringComparison.Ordinal)),
+            e => Assert.Equal(RecursoAlheio.Obra, e.Recurso));
+
+        foreach (var entrada in comId)
+        {
+            var caminho = DetectorDeRotas.Concretizar(entrada.Padrao, obraB.Id);
+            var id = Guid.Parse(System.Text.RegularExpressions.Regex.Match(caminho, "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").Value);
+
+            Assert.Equal(obraB.Id, id);
+            Assert.Equal(empresaB.ToString("D"), await _banco.ConsultarComoSuperusuarioAsync($"SELECT empresa_id FROM cronoai.obra WHERE id = '{id}'"));
+
+            // Controle negativo: sem o recurso, o id concretizado NÃO existe (é o defeito que este meta-teste existe para barrar).
+            var aleatorio = Guid.Parse(System.Text.RegularExpressions.Regex.Match(DetectorDeRotas.Concretizar(entrada.Padrao), "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").Value);
+            Assert.Equal("0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.obra WHERE id = '{aleatorio}'"));
+        }
     }
 
     [Fact]
@@ -182,10 +220,10 @@ public sealed class IsolamentoRotasTestes
     private static IReadOnlyList<RotaRegistrada> Rotas(ApiFactory fabrica) =>
         DetectorDeRotas.Enumerar(fabrica.Services.GetRequiredService<EndpointDataSource>());
 
-    private static async Task<HttpResponseMessage> EnviarAsync(HttpClient navegador, RotaRegistrada rota, Guid empresaAlheia, string? antiforgery)
+    private static async Task<HttpResponseMessage> EnviarAsync(HttpClient navegador, RotaRegistrada rota, Guid empresaAlheia, string? antiforgery, Guid? obraAlheia = null)
     {
         var entrada = CatalogoRotas.Entradas.FirstOrDefault(e => e.Chave == rota.Chave);
-        using var requisicao = new HttpRequestMessage(new HttpMethod(rota.Metodo), DetectorDeRotas.Concretizar(rota.Padrao));
+        using var requisicao = new HttpRequestMessage(new HttpMethod(rota.Metodo), DetectorDeRotas.Concretizar(rota.Padrao, obraAlheia));
         if (antiforgery is not null)
         {
             requisicao.Headers.Add("X-XSRF-TOKEN", antiforgery);

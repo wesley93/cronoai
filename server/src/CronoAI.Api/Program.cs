@@ -3,6 +3,7 @@ using CronoAI.Api.Autenticacao;
 using CronoAI.Api.Borda;
 using CronoAI.Api.Desenvolvimento;
 using CronoAI.Api.Empresas;
+using CronoAI.Api.Obras;
 using CronoAI.Api.Sessao;
 using CronoAI.Dados;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -42,6 +43,10 @@ builder.Services.AddSingleton<IFabricaCronoDbContext>(servicos =>
 builder.AdicionarBorda();
 builder.AdicionarAutenticacao();
 
+// Obras (ciclo 00013): scoped, porque depende do CronoDbContext e do ContextoSessao da requisição. Singleton aqui seria
+// capturar serviço scoped (e vazar a empresa de uma requisição para outra).
+builder.Services.AddScoped<ServicoObras>();
+
 // Usuário de desenvolvimento: falha fechada na partida fora de Development (ValidateOnStart).
 builder.Services.AddSingleton<IValidateOptions<OpcoesUsuarioDesenvolvimento>, ValidadorOpcoesUsuarioDesenvolvimento>();
 builder.Services.AddOptions<OpcoesUsuarioDesenvolvimento>()
@@ -69,6 +74,8 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseRouting();
 app.UseRateLimiter();
+// Limite de corpo por endpoint (ex.: escritas de obra, 64 KB); não é terminal. Antes da autenticação: recusar custa pouco.
+app.UseMiddleware<LimiteDeCorpoMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 // ATENÇÃO: nada de middleware terminal (Run/Map de ramo) depois daqui. O tratador de resultado da autorização deixa
@@ -103,6 +110,7 @@ var api = app.MapGroup("/api/v1").AddEndpointFilter<FiltroAntiforgery>();
 api.MapearAutenticacao();
 api.MapearEu();
 api.MapearEmpresas();
+api.MapearObras();
 app.MapearDesenvolvimento();
 
 app.Run();

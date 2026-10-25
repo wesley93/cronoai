@@ -22,6 +22,14 @@ public static class CatalogoRotas
         new("GET", Raiz + "/eu", CenarioIsolamento.SemRecurso),
         new("GET", Raiz + "/empresas/atual", CenarioIsolamento.SemRecurso),
         new("PUT", Raiz + "/empresas/atual", CenarioIsolamento.ComIdDeOutraEmpresa, empresaAlheia => new { empresaId = empresaAlheia }),
+
+        // Obras (ciclo 00013): o {id} é uma obra REAL da empresa B (meta-teste Concretizacao_de_id_usa_obra_real_da_empresa_B).
+        new("GET", Raiz + "/obras", CenarioIsolamento.SemRecurso),
+        new("POST", Raiz + "/obras", CenarioIsolamento.SemRecurso, _ => CorpoDeObra()),
+        new("GET", Raiz + "/obras/{id}", CenarioIsolamento.ComIdDeOutraEmpresa, Recurso: RecursoAlheio.Obra),
+        new("PUT", Raiz + "/obras/{id}", CenarioIsolamento.ComIdDeOutraEmpresa, _ => CorpoDeAtualizacao(), RecursoAlheio.Obra),
+        new("POST", Raiz + "/obras/{id}/arquivar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { versao = 1 }, RecursoAlheio.Obra),
+        new("POST", Raiz + "/obras/{id}/restaurar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { versao = 1 }, RecursoAlheio.Obra),
     ];
 
     /// <summary>Únicas rotas que podem ser anônimas (AllowAnonymous), por chave.</summary>
@@ -33,6 +41,17 @@ public static class CatalogoRotas
         "GET " + Raiz + "/autenticacao/entrar",
         "POST " + Raiz + "/autenticacao/desenvolvimento/entrar",
     };
+
+    #endregion
+
+    #region Métodos privados
+
+    // Corpo válido e fictício (município 2699999 de PE, dígito verificador conferido). Nome único por chamada.
+    private static object CorpoDeObra() =>
+        new { nome = "Obra Ficticia " + Guid.NewGuid().ToString("N")[..10], uf = "PE", municipioIbge = "2699999" };
+
+    private static object CorpoDeAtualizacao() =>
+        new { versao = 1, nome = "Obra Ficticia " + Guid.NewGuid().ToString("N")[..10], uf = "PE", municipioIbge = "2699999" };
 
     #endregion
 }

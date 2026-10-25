@@ -44,12 +44,16 @@ public static class DetectorDeRotas
         return catalogo.Select(c => c.Chave).Where(chave => !chaves.Contains(chave)).Order(StringComparer.Ordinal).ToList();
     }
 
-    /// <summary>Substitui parâmetros de rota (<c>{id}</c>) por um valor de exemplo (guid novo; OpenAPI usa "v1").</summary>
-    public static string Concretizar(string padrao)
+    /// <summary>
+    /// Substitui parâmetros de rota por um valor de exemplo: <c>{id}</c> vira a obra REAL da empresa B quando o recurso é
+    /// informado, ou um guid novo (que não existe) quando não; o OpenAPI usa "v1". Um id aleatório só serve onde o 404 não
+    /// prova nada (401, antiforgery); nunca para provar o isolamento.
+    /// </summary>
+    public static string Concretizar(string padrao, Guid? obraAlheia = null)
     {
         return padrao
             .Replace("{documentName}", "v1", StringComparison.Ordinal)
-            .Replace("{id}", Guid.NewGuid().ToString("D"), StringComparison.Ordinal);
+            .Replace("{id}", (obraAlheia ?? Guid.NewGuid()).ToString("D"), StringComparison.Ordinal);
     }
 
     #endregion
