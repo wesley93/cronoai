@@ -1,4 +1,5 @@
 using CronoAI.Dominio;
+using SessaoDominio = CronoAI.Dominio.Sessao;
 
 namespace CronoAI.Api.Testes.Dominio;
 
@@ -46,18 +47,18 @@ public sealed class EntidadesTestes
     {
         var criada = new DateTime(2026, 10, 25, 12, 0, 0, DateTimeKind.Utc);
 
-        var sessao = Sessao.Criar(Guid.CreateVersion7(), criada, criada.AddHours(8));
+        var sessao = SessaoDominio.Criar(Guid.CreateVersion7(), criada, criada.AddHours(8));
 
         Assert.Equal(4, sessao.Id.Version);
         Assert.Equal(criada.AddHours(8), sessao.ExpiraEm);
         Assert.Null(sessao.EncerradaEm);
-        Assert.Throws<ArgumentException>(() => Sessao.Criar(Guid.CreateVersion7(), criada, criada));
+        Assert.Throws<ArgumentException>(() => SessaoDominio.Criar(Guid.CreateVersion7(), criada, criada));
     }
 
     [Fact]
     public void Ids_de_sessao_nao_se_repetem()
     {
-        var ids = Enumerable.Range(0, 1000).Select(_ => Sessao.GerarId()).ToHashSet();
+        var ids = Enumerable.Range(0, 1000).Select(_ => SessaoDominio.GerarId()).ToHashSet();
 
         Assert.Equal(1000, ids.Count);
     }

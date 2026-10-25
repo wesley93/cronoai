@@ -2,6 +2,7 @@ using CronoAI.Dados;
 using CronoAI.Dados.Identidade;
 using CronoAI.Dominio;
 using Microsoft.EntityFrameworkCore;
+using SessaoDominio = CronoAI.Dominio.Sessao;
 
 namespace CronoAI.Api.Testes.Infra;
 
@@ -75,10 +76,10 @@ public sealed class DadosTeste
     }
 
     /// <summary>Cria uma sessão aberta (8 h) para o usuário, opcionalmente com empresa ativa.</summary>
-    public async Task<Sessao> CriarSessaoAsync(Guid usuarioId, Guid? empresaAtivaId = null, DateTime? criadaEm = null, DateTime? expiraEm = null)
+    public async Task<SessaoDominio> CriarSessaoAsync(Guid usuarioId, Guid? empresaAtivaId = null, DateTime? criadaEm = null, DateTime? expiraEm = null)
     {
         var criada = criadaEm ?? DateTime.UtcNow;
-        var sessao = Sessao.Criar(usuarioId, criada, expiraEm ?? criada.AddHours(8), empresaAtivaId);
+        var sessao = SessaoDominio.Criar(usuarioId, criada, expiraEm ?? criada.AddHours(8), empresaAtivaId);
         await _consultas.CriarSessaoAsync(sessao);
         return sessao;
     }

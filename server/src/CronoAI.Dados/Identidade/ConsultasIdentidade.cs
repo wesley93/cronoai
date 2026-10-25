@@ -55,6 +55,20 @@ public sealed class ConsultasIdentidade
         return ids.Single();
     }
 
+    /// <summary>Usuário desativado? O login não reativa conta: quem está desativado não ganha sessão.</summary>
+    public async Task<bool> EstaDesativadoAsync(Guid usuarioId, CancellationToken cancelamento = default)
+    {
+        await using var contexto = _fabrica.Criar(ContextoSessaoBanco.Vazio);
+        return await contexto.Usuarios.AnyAsync(u => u.Id == usuarioId && u.DesativadoEm != null, cancelamento);
+    }
+
+    /// <summary>Nome de exibição do usuário (pode ser nulo). Único ponto de leitura de <c>usuario</c> fora do upsert.</summary>
+    public async Task<string?> ObterNomeExibicaoAsync(Guid usuarioId, CancellationToken cancelamento = default)
+    {
+        await using var contexto = _fabrica.Criar(ContextoSessaoBanco.Vazio);
+        return await contexto.Usuarios.Where(u => u.Id == usuarioId).Select(u => u.NomeExibicao).SingleOrDefaultAsync(cancelamento);
+    }
+
     /// <summary>
     /// Passo 2: limpeza oportunista no login. Apaga só as sessões DO PRÓPRIO usuário terminadas antes do corte.
     /// Passa pelo RLS (política de DELETE por usuário). A limpeza em lote fica para o 00023.
@@ -130,7 +144,7 @@ public sealed class ConsultasIdentidade
                 || contexto.Membros.IgnoreQueryFilters(_ignorarFiltroEmpresa)
                     .Any(m => m.UsuarioId == s.UsuarioId && m.EmpresaId == s.EmpresaAtivaId)
             where vinculoVigente
-            select new SessaoValidada(s.EmpresaAtivaId, s.ExpiraEm))
+            select new SessaoValidada(s.EmpresaAtivaId, s.ExpiraEm, u.Emissor))
             .SingleOrDefaultAsync(cancelamento);
     }
 

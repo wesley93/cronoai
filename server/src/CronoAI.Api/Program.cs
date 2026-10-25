@@ -1,7 +1,13 @@
 using CronoAI.Api;
+using CronoAI.Api.Autenticacao;
+using CronoAI.Api.Borda;
+using CronoAI.Api.Desenvolvimento;
+using CronoAI.Api.Empresas;
+using CronoAI.Api.Sessao;
 using CronoAI.Dados;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,7 +23,7 @@ builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 
 // A API conecta como cronoai_app (só DML). A senha vem de user-secrets/variável de ambiente, nunca do appsettings.
-// Fábrica singleton + contexto scoped criado por ela (não AddDbContext): o contexto de banco é imutável por instância.
+// Fábrica singleton: cada DbContext nasce com um contexto de banco imutável (o scoped dos endpoints sai da sessão).
 builder.Services.AddSingleton<IFabricaCronoDbContext>(servicos =>
 {
     var ambiente = servicos.GetRequiredService<IHostEnvironment>();
@@ -32,7 +38,16 @@ builder.Services.AddSingleton<IFabricaCronoDbContext>(servicos =>
     var montador = new NpgsqlConnectionStringBuilder(stringConexao) { IncludeErrorDetail = ambiente.IsDevelopment() };
     return new FabricaCronoDbContext(montador.ConnectionString);
 });
-builder.Services.AddScoped(servicos => servicos.GetRequiredService<IFabricaCronoDbContext>().Criar(ContextoSessaoBanco.Vazio));
+
+builder.AdicionarBorda();
+builder.AdicionarAutenticacao();
+
+// Usuário de desenvolvimento: falha fechada na partida fora de Development (ValidateOnStart).
+builder.Services.AddSingleton<IValidateOptions<OpcoesUsuarioDesenvolvimento>, ValidadorOpcoesUsuarioDesenvolvimento>();
+builder.Services.AddOptions<OpcoesUsuarioDesenvolvimento>()
+    .Bind(builder.Configuration.GetSection(OpcoesUsuarioDesenvolvimento.Secao))
+    .ValidateOnStart();
+builder.Services.AddSingleton<SementeDesenvolvimento>();
 
 // Vivo = só o processo (sem dependências); pronto = inclui o banco. Corpo apenas "Healthy"/"Unhealthy".
 const string TagPronto = "ready";
@@ -41,11 +56,24 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
+// Comando de semente: só em Development, como cronoai_app; não sobe o servidor.
+if (args.Length > 0 && args[0] == "semear-desenvolvimento")
+{
+    await app.Services.GetRequiredService<SementeDesenvolvimento>().ExecutarAsync();
+    return;
+}
+
+// Ordem preservada: cabeçalhos de segurança primeiro (também em 302, 401, 403 e 429), depois erros.
 app.UseMiddleware<CabecalhosSegurancaMiddleware>();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+app.UseRouting();
+app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false })
+    .AllowAnonymous()
     .ExcludeFromDescription();
 app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
@@ -56,16 +84,23 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
         [HealthStatus.Degraded] = StatusCodes.Status200OK,
         [HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable,
     },
-}).ExcludeFromDescription();
+})
+    .AllowAnonymous()
+    .RequireRateLimiting(BordaExtensoes.PoliticaSaude)
+    .ExcludeFromDescription();
 
 // Mapa da API exposto só em desenvolvimento.
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.MapOpenApi().AllowAnonymous();
 }
 
-// Grupo versionado: os endpoints de negócio começam no ciclo 00012.
-app.MapGroup("/api/v1");
+// Grupo versionado. Fallback de autorização = autenticado; antiforgery em toda escrita do grupo.
+var api = app.MapGroup("/api/v1").AddEndpointFilter<FiltroAntiforgery>();
+api.MapearAutenticacao();
+api.MapearEu();
+api.MapearEmpresas();
+app.MapearDesenvolvimento();
 
 app.Run();
 
