@@ -32,7 +32,7 @@ inicio: 2026-10-25
 - **O que você precisa fazer:**
   - revisar no PR as decisões acima (o desempenho do modo "frentes escolhidas" foi resolvido na rodada 05: agenda separada do custo);
   - levar a **RH + Jurídico**, **Jurídico**, **Orçamento/Custos** e **Engenharia de planejamento** os itens da última seção.
-- **Estado:** validadores aprovados na rodada 05 (139262d): `testes` APROVADO (614 testes; todos os modos < 1 s), `arquiteto` APROVADO, `especialista-obra` APROVADO; `seguranca` APROVADO até a rodada 04 (a 05 não abre superfície nova). Auditoria r01 REPROVADO → rodada 05 e ajustes finais; reauditoria: A PREENCHER.
+- **Estado:** validadores aprovados na rodada 05 (139262d): `testes` APROVADO (614 testes; todos os modos < 1 s), `arquiteto` APROVADO, `especialista-obra` APROVADO; `seguranca` APROVADO até a rodada 04 (a 05 não abre superfície nova). Auditoria independente: r01 e reauditoria REPROVADAS com achados corrigidos; delta **APROVADO** em 02a5aee. Estado: **aprovado**; falta o CI do PR.
 
 ## Pedido
 "Pode fazer todas as fases" → PLANO-FASE-1 §3.5, ciclo 00005.
@@ -63,9 +63,9 @@ inicio: 2026-10-25
 | 01 (a9b42b4) | REPROVADO: P-2 FAIL, P-1 INCONCLUSIVE, M-3 NOT_RUN | REPROVADO: R-1 (calendário de HE órfão); R-2 a R-10 não bloqueiam | REPROVADO: E-1 (horas do sábado); E-2 a E-10 | APROVADO: 3 Baixos, 2 Info | — |
 | 02 (833cb5f) | APROVADO: 589 testes; M-3 idêntico | APROVADO: R-11 a R-15 | REPROVADO: E-13 (primeiro sábado); E-12, E-14, E-15 | APROVADO: 1 Info (resíduo do `undo`) | — |
 | 03 (2c3e8a3) | APROVADO: 603 testes; ressalva de desempenho | REPROVADO: R-16 (desempenho do `scenarioOptions`); R-17 a R-20 | APROVADO: admite o próprio erro de conta (R$ 1.040,40 contra R$ 2.080,80); O-1, O-2 | APROVADO: Info A, Info B | — |
-| 04 (4223154) | APROVADO: 609 testes; AC-6 nas 3 execuções; defeito: asserção vazia do "não estabilizou" (corrigida em d8b5ae6) | APROVADO: R-21, R-22 | APROVADO (confirmação): nenhum número mudou; ressalva de redação "8 h" (corrigida em d8b5ae6); tarefa 0 não houve (desvio) | APROVADO (confirmação): Info A e Info B fechados | A PREENCHER |
+| 04 (4223154) | APROVADO: 609 testes; AC-6 nas 3 execuções; defeito: asserção vazia do "não estabilizou" (corrigida em d8b5ae6) | APROVADO: R-21, R-22 | APROVADO (confirmação): nenhum número mudou; ressalva de redação "8 h" (corrigida em d8b5ae6); tarefa 0 não houve (desvio) | APROVADO (confirmação): Info A e Info B fechados | auditoria r01 em aa35221: REPROVADO (ver a linha da auditoria r01) |
 | auditoria r01 (aa35221) | — | — | — | — | REPROVADO: 2 Médios (AC-6 no modo "frentes escolhidas" acima de 1 s; RNF-03.2 com R$ inteiro nos cenários) e 3 Baixos (registro desatualizado, N-8, antes → depois nos testes); nenhum erro de cálculo; 35 de 40 evidências reexecutadas |
-| 05 (139262d) | APROVADO: 614 testes; todos os modos < 1 s nas 3 execuções; falha intermitente pré-existente de tempo no parser (ver Pendências) | APROVADO: R-23 a R-25 | APROVADO: nenhum número mudou; observação do custo comprometido (D13) | — (sem superfície nova) | reauditoria: A PREENCHER |
+| 05 (139262d) | APROVADO: 614 testes; todos os modos < 1 s nas 3 execuções; falha intermitente pré-existente de tempo no parser (ver Pendências) | APROVADO: R-23 a R-25 | APROVADO: nenhum número mudou; observação do custo comprometido (D13) | — (sem superfície nova) | reauditoria em 125f637: REPROVADO, 1 Baixo (comentário de `custoHoraExtra`), corrigido em 02a5aee; delta APROVADO |
 
 ### Testes, antes → depois
 | Ponto | Vitest | E2E | Fonte |
@@ -137,7 +137,7 @@ Corpus local: 419/419 em todas as rodadas.
 | V-2 | Rótulo da versão nos cenários | `npm run dev` | não | PASS | orquestrador, a9b42b4: rótulo em cada cartão e no texto do indireto |
 | V-3 | Editor de calendários e feriados | `npm run dev` | não | PASS | orquestrador, a9b42b4: jornada, cópia, "Aplica os feriados da obra", cadastro manual com fonte |
 | V-4 | HE com frentes e meio período | `npm run dev` | não | PASS | orquestrador, a9b42b4: PR-1 na tela; meio período {104}: −1 d.u., R$ 2.081, 22/06/27. "Risco Baixo" sem frente → "Risco —" em 833cb5f |
-| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | A PREENCHER | A PREENCHER |
+| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | PASS | Três passes: r01 (aa35221) REPROVADO, 2 Médios e 3 Baixos, 35 de 40 evidências; reauditoria (125f637) REPROVADO, 1 Baixo (comentário), 38 de 43; delta (02a5aee) **APROVADO**. No HEAD 125f637, em primeiro plano: lint e tipos rc 0; `test:coverage` 614 passaram, 12 pulados (97,93 / 92,42 / 98,89 / 97,93); build rc 0; corpus 419/419; `validar-regras` 68 arquivos, 0 bloqueia; `classificar-diff` faixa 3 (T1–T4); `CI=1 npm run e2e` 28 passed; M-3 IDENTICA (79.706 bytes, 30 tarefas, 24 vínculos); desempenho com a CPU entre 96 e 100% (CPM 274 ms): 351 ms ("todas"), 289 ms (3 frentes), 287 e 285 ms (30 frentes, 4 e 8 sábados). Caracterização verde na base f252517 (7 de 7); contas à mão de PR-1, PR-3, PR-8, PR-9, PR-10, PR-15, CF-2, CF-5, B2, E-13, E-14 e RNF-03.2. Delta 02a5aee: só comentário, linhas em branco e registro; eslint rc 0; `scenarios.test.ts` 44/44. Não conferidos pela auditoria: N-8 (relatório bruto não versionado), V-1 a V-4 (feitos pelo orquestrador), M-5 (NOT_RUN) |
 
 ## Números que mudaram de propósito (antes → depois)
 Todos fixados em teste, com o antes → depois no próprio teste (Inviolável 1). Tabelas dos relatórios do `dev-frontend`.
