@@ -30,9 +30,9 @@ inicio: 2026-10-25
   - Todas: **decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR.**
 - **Números do Edifício Aurora:** entrega 2027-06-23, 16 d.u., SPI 0,8883, CPI 0,9349 — **iguais**. PR-1 igual (crashing R$ 12.616,80; fast tracking R$ 25.350,00; HE R$ 22.315,20, 2 d.u., 2027-06-21). Exportação do seed idêntica à da base. As mudanças de propósito estão em "Números que mudaram".
 - **O que você precisa fazer:**
-  - revisar no PR as decisões acima e o desvio de desempenho do modo "frentes escolhidas" (R-21);
+  - revisar no PR as decisões acima (o desempenho do modo "frentes escolhidas" foi resolvido na rodada 05: agenda separada do custo);
   - levar a **RH + Jurídico**, **Jurídico**, **Orçamento/Custos** e **Engenharia de planejamento** os itens da última seção.
-- **Estado:** validadores aprovados na rodada 04 (4223154): `testes` APROVADO (609 testes; AC-6 891/643/641 ms), `arquiteto` APROVADO, `especialista-obra` e `seguranca` APROVADOS (confirmação curta da r04). Auditoria independente: A PREENCHER.
+- **Estado:** validadores aprovados na rodada 05 (139262d): `testes` APROVADO (614 testes; todos os modos < 1 s), `arquiteto` APROVADO, `especialista-obra` APROVADO; `seguranca` APROVADO até a rodada 04 (a 05 não abre superfície nova). Auditoria r01 REPROVADO → rodada 05 e ajustes finais; reauditoria: A PREENCHER.
 
 ## Pedido
 "Pode fazer todas as fases" → PLANO-FASE-1 §3.5, ciclo 00005.
@@ -63,7 +63,9 @@ inicio: 2026-10-25
 | 01 (a9b42b4) | REPROVADO: P-2 FAIL, P-1 INCONCLUSIVE, M-3 NOT_RUN | REPROVADO: R-1 (calendário de HE órfão); R-2 a R-10 não bloqueiam | REPROVADO: E-1 (horas do sábado); E-2 a E-10 | APROVADO: 3 Baixos, 2 Info | — |
 | 02 (833cb5f) | APROVADO: 589 testes; M-3 idêntico | APROVADO: R-11 a R-15 | REPROVADO: E-13 (primeiro sábado); E-12, E-14, E-15 | APROVADO: 1 Info (resíduo do `undo`) | — |
 | 03 (2c3e8a3) | APROVADO: 603 testes; ressalva de desempenho | REPROVADO: R-16 (desempenho do `scenarioOptions`); R-17 a R-20 | APROVADO: admite o próprio erro de conta (R$ 1.040,40 contra R$ 2.080,80); O-1, O-2 | APROVADO: Info A, Info B | — |
-| 04 (4223154) | APROVADO: 609 testes; AC-6 nas 3 execuções; defeito: asserção vazia do "não estabilizou" (corrigida no registro) | APROVADO: R-21, R-22 | APROVADO (confirmação): nenhum número mudou; ressalva de redação "8 h" (corrigida no registro); tarefa 0 não houve (desvio) | APROVADO (confirmação): Info A e Info B fechados | A PREENCHER |
+| 04 (4223154) | APROVADO: 609 testes; AC-6 nas 3 execuções; defeito: asserção vazia do "não estabilizou" (corrigida em d8b5ae6) | APROVADO: R-21, R-22 | APROVADO (confirmação): nenhum número mudou; ressalva de redação "8 h" (corrigida em d8b5ae6); tarefa 0 não houve (desvio) | APROVADO (confirmação): Info A e Info B fechados | A PREENCHER |
+| auditoria r01 (aa35221) | — | — | — | — | REPROVADO: 2 Médios (AC-6 no modo "frentes escolhidas" acima de 1 s; RNF-03.2 com R$ inteiro nos cenários) e 3 Baixos (registro desatualizado, N-8, antes → depois nos testes); nenhum erro de cálculo; 35 de 40 evidências reexecutadas |
+| 05 (139262d) | APROVADO: 614 testes; todos os modos < 1 s nas 3 execuções; falha intermitente pré-existente de tempo no parser (ver Pendências) | APROVADO: R-23 a R-25 | APROVADO: nenhum número mudou; observação do custo comprometido (D13) | — (sem superfície nova) | reauditoria: A PREENCHER |
 
 ### Testes, antes → depois
 | Ponto | Vitest | E2E | Fonte |
@@ -73,6 +75,7 @@ inicio: 2026-10-25
 | Rodada 02 (833cb5f) | 589 (+22), 9 pulados | 28 | `dev-frontend`; `testes` r02 |
 | Rodada 03 (2c3e8a3) | 603 (+14), 10 pulados (+1 teste local de desempenho) | 28 | `dev-frontend`; `testes` r03 |
 | Rodada 04 (4223154) | 609 (+6), 12 pulados (+2 testes locais do pacote de 30 frentes) | 28 | `dev-frontend`; `testes` r04 (609 passaram, 12 pulados) |
+| Rodada 05 (139262d) | 614 (+5: 3 de identidade agenda × custo, 2 de R$ com 2 casas), 12 pulados | 28 | `dev-frontend`; `testes` r05 |
 
 Corpus local: 419/419 em todas as rodadas.
 
@@ -84,8 +87,9 @@ Corpus local: 419/419 em todas as rodadas.
 | Rodada 03 (2c3e8a3) | 697 ms (dev); 518 ms (`testes`), sem ler `scenarioOptions` | 3 frentes: 1.024 a 1.180 ms (dev); 1.041 ms (`testes`) | r03 |
 | Antes do R-16 (2c3e8a3, lendo `scenarioOptions`) | 1.241 ms | 3 frentes: 1.069 ms; 30 frentes: 1.391 ms (4 sáb.), 1.667 ms (8 sáb.) | dev r04 |
 | Rodada 04 (4223154) | 610 ms com a máquina livre; 902 a 1.017 ms com a CPU entre 80 e 100% | 3 frentes: 1.049 a 1.231 ms; 30 frentes: 995 a 1.320 ms (4 sáb.), 1.030 a 1.423 ms (8 sáb.); 2 voltas | dev r04 |
+| Rodada 05 (139262d) | 344 / 446 / 321 ms (pior individual 861 ms; 3 a 6 processos .NET; CPM 167–296 ms) | 3 frentes: 279 / 344 / 241 ms; 30 frentes: 222 / 160 / 252 ms (4 sáb.), 189 / 290 / 176 ms (8 sáb.); 2 voltas | `testes` r05 |
 
-### Matriz de verificação (HEAD 4223154; linhas com a rodada da evidência)
+### Matriz de verificação (HEAD da rodada 05 e dos ajustes finais; gates reexecutados pelo `testes` em 139262d e pela auditoria r01 em aa35221; demais linhas com a rodada da evidência)
 
 | Item | Requisito | Verificação | Obrig. | Estado | Evidência |
 |---|---|---|---|---|---|
@@ -102,8 +106,10 @@ Corpus local: 419/419 em todas as rodadas.
 | AC-5 / P-1 | Esquema 3 real → 4, desfazer até o PR-1 | `migracaoEstado.test.ts:391`, `useProjectStore.obras.test.ts:159` | sim | PASS | registro real com 52 exceções, sem a marca, 3 cenários aplicados; entrega 2027-06-02; desfeitos → ['2027-06-23', 16], SPI 0,8883, CPI 0,9349 (`testes` r02). Na r01: INCONCLUSIVE |
 | AC-5 / P-2 | Indireto 11.000, margem 7, DLP igual | `useProjectStore.obras.test.ts:189` | sim | PASS | ['2026-11-03', '2026-10-24', 'atencao'], igual a `analyzeSupplies(…, 7)` (`testes` r02). Na r01: FAIL |
 | AC-5 / P-3 a P-6 | Cadeia v1 → 4; esquema 5 recusado; esquema 4 sem premissas; HE do 00004 desfeita | `migracaoEstado.test.ts`, `useProjectStore.obras.test.ts` | sim | PASS | P-4: "Obra salva por uma versão mais nova do CronoAI (esquema 5)."; P-6: 2027-06-21 → 2027-06-23 (`testes` r01, r02) |
-| AC-6 | Mudança de premissa < 1 s, modo padrão "todas" (RNF-03.1) | `premissas.desempenho.test.ts` lendo `scenarios`, `supplies` e `scenarioOptions`, 3 execuções | sim | PASS | `testes` r04, 4223154: medianas 891, 643 e 641 ms (séries `793, 883, 891, 896, 974`; `593, 605, 643, 661, 674`; `527, 607, 641, 652, 657`), com 3 processos `dotnet.exe` ativos; CPM de referência 202–219 ms. O dev mediu 610 ms livre e 902–1.017 ms com a CPU entre 80 e 100% (2 de 5 acima de 1 s) |
-| AC-6-F | Mudança de premissa < 1 s, modo "frentes escolhidas" | mesmo arquivo, testes locais de 3 e 30 frentes | não | INCONCLUSIVE (desvio registrado) | `testes` r04: 3 frentes 735/938/817 ms; 30 frentes com 4 sábados 834/877/980 ms; com 8 sábados 800/729/837 ms (todas abaixo de 1 s, margem pequena). Dev r04, sob carga: 1.049 a 1.423 ms. Desvio do plano e dívida R-21 no `CLAUDE.md` e em `divida-conhecida.md`, para o usuário decidir no PR |
+| AC-6 | Mudança de premissa < 1 s, modo padrão "todas" (RNF-03.1) | `premissas.desempenho.test.ts` lendo `scenarios`, `supplies` e `scenarioOptions`, 3 execuções | sim | PASS | `testes` r05, 139262d: medianas 344, 446 e 321 ms (pior individual 861 ms), com 3 a 6 processos `dotnet.exe`; CPM 167–296 ms. Na r04: 891/643/641 ms; auditoria r01 (aa35221): mediana 902 ms com a CPU a 90% |
+| AC-6-F | Mudança de premissa < 1 s, modo "frentes escolhidas" (3 e 30 frentes) | mesmo arquivo; desde a rodada 05 os testes locais falham acima de 1.000 ms | sim | PASS | `testes` r05, 139262d: 3 frentes 279/344/241 ms; 30 frentes com 4 sábados 222/160/252 ms; com 8 sábados 189/290/176 ms. Antes da separação agenda × custo (auditoria r01, aa35221): 1.098 / 1.280 / 1.341 ms (FAIL) |
+| AGENDA-CUSTO | Mudar premissa não reprograma; cada parâmetro refaz só a sua agenda | `useProjectStore.test.ts:733` (3 testes por identidade) | sim | PASS | `agendaHE` e `agendaFT` com a mesma identidade depois da premissa; custo refeito (24.000; 156.000; 4.161,60) (`testes` r05; `arquiteto` r05) |
+| RNF-03.2 | R$ com 2 casas e arredondamento bancário na exibição | `scenarios.test.ts:517`; E2E | sim | PASS | cenários com `fmtBRLCents`: "R$ 12.617" → "R$ 12.616,80", "+ R$ 4.162" → "+ R$ 4.161,60" e outros 5 textos, com o antes no comentário (139262d). Valores gravados ao aplicar seguem a dívida D13 |
 | R-16 | Mudar premissa não recalcula `scenarioOptions` | `premissas.desempenho.test.ts:108` | sim | PASS | identidade do objeto: premissa → mesmo `scenarioOptions`, `scenarios` novo; agenda → `scenarioOptions` novo (dev r04; `arquiteto` r04) |
 | AC-7 / R-3 | Tela, selo "ilustrativa", margem da DLP só leitura | E2E `premissas.spec.ts`, `premissas.test.ts`, V-1 | sim | PASS | E2E verde; memória "Ilustrativas, sem validação: …" (`testes` r01) |
 | AC-8 / CF-1 a CF-6 | Feriados da obra | `calendar.test.ts`, `feriadosObra.test.ts`, `useProjectStore.test.ts` | sim | PASS | CF-1: ['2027-06-23', 16], 52 exceções 2026–2029. CF-2: 2027-06-21, 14 (701 em 2027-03-12 → 2027-03-10, D5). CF-3: 2027-06-22, 15. CF-4: 2027-06-18, 13. CF-5: 2023-11-24. CF-6: 2026-08-24 / 2026-08-21 (`testes` r01, r02) |
@@ -112,14 +118,14 @@ Corpus local: 419/419 em todas as rodadas.
 | AC-11 / CF-8 | Troca de UF | `previaImpacto.test.ts`, `useProjectStore.test.ts` | sim | PASS | 2026-07-13 → 2026-07-10; "manter" não muda (`testes` r01) |
 | AC-12 / PR-7 a PR-15 | HE com meio período e frentes | `scenarios.test.ts`, `cpm.test.ts` | sim | PASS | PR-7 2 d.u., 22.315,20; PR-8 4.161,60, 2027-06-21; PR-9 18.153,60, 0 d.u.; PR-10 11.157,60, 1 d.u.; PR-11 2.080,80; PR-12 e PR-14 mensagens literais; PR-15 26/10 08:00, 26/10 13:00, 27/10 08:00 (`testes` r01; `especialista-obra` r03: inalterados) |
 | AC-13 / PR-13 | Desfazer a HE por frente | `useProjectStore.test.ts`, E2E | sim | PASS | uid 2 removido; 2027-06-21 → 2027-06-23; `recoveryCosts` [] (`testes` r01) |
-| AC-14 | Docs | revisão | sim | PASS | `CLAUDE.md`, `calculo-precisao.md` (Calendário, Cenários com a hipótese máxima), `divida-conhecida.md`, `msproject-mspdi.md` (avisos novos) (`arquiteto` r02–r04). Linhas de dívida do R-21: rascunho, sem commit |
+| AC-14 | Docs | revisão | sim | PASS | `CLAUDE.md`, `calculo-precisao.md` (Calendário, Cenários com a hipótese máxima), `divida-conhecida.md`, `msproject-mspdi.md` (avisos novos) (`arquiteto` r02–r04). Regra "Agenda × custo" em `calculo-precisao.md` (139262d); a dívida do R-21 saiu do `CLAUDE.md` e de `divida-conhecida.md` porque foi resolvida |
 | B2 | Custo da HE com as horas do sábado agendado | `scenarios.test.ts:196` e o seguinte | sim | PASS | mpd 450 → 22.315,20 (antes 20.920,50); 9 h → 28.615,95, 73 profissionais-dia (`testes` r02; `especialista-obra` r02) |
 | E-13 | Frentes na hipótese máxima | `scenarios.test.ts` (describe E-13) | sim | PASS | [104], 1 sábado: 2.080,80, 1 d.u., 6; [302]: 9.076,80, 0 d.u.; `overtimeTargets(ctx, 1)` = [104, 302] (`testes` r03; `especialista-obra` r03) |
 | E-14 | Ponto fixo até estabilizar | `scenarios.test.ts` (cadeia de 3 frentes) | sim | PASS | 3 voltas; só a T4 convocada; 376,80 (`testes` r03; conta à mão do `especialista-obra` r03) |
 | E-12 | Memória com minutos e alerta de convocação | teste B2 de 9 h | sim | PASS | 3 linhas literais e o alerta de RH uma vez (`testes` r03) |
 | R-18 | Limite de 30 frentes | `scenarios.test.ts:498`, `premissas.desempenho.test.ts:195` | sim | PASS | 30 aceito, 31 recusado, repetidas contam uma vez; pacote de 30 com 2 voltas (dev r04; `arquiteto` r04) |
 | UNDO | Desfazer com registro adulterado recusa sem alterar nada | `useProjectStore.test.ts` (`it.each`) | sim | PASS | 7 casos na r03 (`testes` r03); caso `result` nulo na r04 (dev; `arquiteto` r04) |
-| N-8 | Itens "a confirmar" conferidos pelo `especialista-obra` | revisão r01 | sim | PASS | 20/11, Sexta-feira Santa, Carnaval e Corpus (E-7); divisor do indireto (E-6); arredondamento (E-8); PR conferidos à mão. Sem parecer separado da tarefa 0 (ver Desvios) |
+| N-8 | Itens "a confirmar" conferidos pelo `especialista-obra` | revisão r01 (depois da implementação) | sim | PASS com desvio | sem parecer separado da tarefa 0, que deveria vir antes da implementação (desvio de processo, ver Desvios). Resumo dos itens: (i) 20/11 nacional desde 2024 (Lei 14.759/2023), Sexta-feira Santa, Carnaval e Corpus Christi com o Jurídico (E-7); (ii) regras de HE contra a P1 emendada (E-2, E-3, refinadas no E-13, E-14 e O-1); (iii) PR-7 a PR-15 e CF-2 a CF-5 conferidos à mão; (iv) arredondamento bancário só na exibição, ABNT NBR 5891 a confirmar com o Orçamento (E-8, N-12) |
 | M-1 | Ida e volta do seed com `strictOrder` | `core.test.ts` | sim | PASS | verde na suíte (`testes` r01) |
 | M-2 | Ida e volta com calendário alternativo, feriado manual e derivado | `msProjectXmlParser.test.ts:961-1020` | sim | PASS | `errors` = []; `CalendarUID` [2,3,undefined]; datas iguais na reimportação (`testes` r01) |
 | M-3 | Exportação do seed idêntica à da base | `exportXml()` em c04 (f252517) e c05; `cmp` com `CreationDate`/`LastSaved` normalizados | sim | PASS | 79.706 bytes, 30 tarefas, 24 vínculos, `IDENTICOS` em 833cb5f (`testes` r02) e 2c3e8a3 (`testes` r03). Na r01: NOT_RUN |
@@ -196,10 +202,10 @@ Avaliação do `arquiteto` r01 para D1 a D13; os demais vêm das rodadas 02 a 04
 | D11 | Testes antigos atualizados com antes → depois | Aceitável: divergências, E2E de cronograma e migração explicados em comentário |
 | D12 | API da store (`removerExcecao`, `editarCalendario`, `PreviaTrocaLocal`, opção em `atualizarDadosObra`) | Aceitável com registro; ver R-1 sobre o calendário de HE |
 | D13 | `Math.round` de `applyScenario` mantido (R$ 4.161,60 → R$ 4.162) | Aceitável: é o gate P2 = (a) e o fora do escopo; dívida registrada |
-| R-21 | Desempenho do modo "frentes escolhidas" acima de 1 s. A tarefa 8 e a seção 14 mandavam separar agenda de custo antes de aceitar | Feito só em parte (R-16: opções sem premissas). O ponto fixo e a reprogramação de `simulateOvertime` continuam junto do custo. Registrado como dívida no `CLAUDE.md` e em `divida-conhecida.md`; o usuário decide no PR |
+| R-21 | Desempenho do modo "frentes escolhidas" acima de 1 s. A tarefa 8 e a seção 14 mandavam separar agenda de custo antes de aceitar | **Resolvido na rodada 05 (139262d):** `agendaHoraExtra`/`custoHoraExtra` e `agendaFastTracking`/`custoFastTracking`; o crashing não se separa porque a duração usa a premissa de congestionamento. Todos os modos abaixo de 1 s |
 | R-17 | E-13 muda a regra do plano: a entrada das frentes passa a ser a hipótese máxima (todos os sábados candidatos no calendário), e não "ativas no cronograma atual (antes da HE)" | Aceito pelo `arquiteto` r04. PR-7 a PR-15 inalterados. O `especialista-obra` reconfirmou na r03. `calculo-precisao.md › Cenários` atualizado (4223154). Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR |
 | Derivado | "Um derivado por base e conjunto de sábados", em vez de "um por calendário base" (efeito do E-3) | Aceitável com registro (`arquiteto` r02). O sábado feriado no calendário da frente também deixou de ser convocado (E-9). Números PR-8 a PR-15 inalterados |
-| Tarefa 0 | Não localizei parecer separado da tarefa 0 do `especialista-obra` para este ciclo. Os itens (i) a (iv) aparecem na revisão r01 dele (E-6, E-7, E-8 e PR conferidos à mão) | A confirmar pelo orquestrador |
+| Tarefa 0 | A tarefa 0 do `especialista-obra` não teve parecer separado antes da implementação. Os itens (i) a (iv) foram cobertos na revisão r01 dele, depois | Desvio de processo registrado (confirmado pelo `especialista-obra` na r04); os achados viraram correções nas rodadas 02 a 05, sem número perdido. A partir do 00007 a tarefa 0 roda antes |
 
 ## Ressalvas dos validadores e destino
 | Origem | Ressalva | Destino |
@@ -224,7 +230,7 @@ Avaliação do `arquiteto` r01 para D1 a D13; os demais vêm das rodadas 02 a 04
 | arquiteto r03 R-18 / seguranca r03 Info B | Ponto fixo sem teto prático com pacote inteiro | corrigido (4223154): limite de 30 frentes na lib e na tela (decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR); medição com 30 frentes |
 | arquiteto r03 R-19 | Mensagem "não estabilizou" inalcançável e imprecisa | corrigido (4223154) |
 | arquiteto r03 R-20 | Memória do E-12 coerente com o plano | registrado (info) |
-| arquiteto r04 R-21 | Desempenho do modo "frentes escolhidas" acima do RNF-03.1 | registrado: desvio neste registro e linhas de dívida no `CLAUDE.md` e em `divida-conhecida.md` (rascunho, sem commit); decisão do usuário no PR |
+| arquiteto r04 R-21 | Desempenho do modo "frentes escolhidas" acima do RNF-03.1 | resolvido (139262d): agenda separada do custo |
 | arquiteto r04 R-22 | Obra sintética do AC-6 perto do horizonte de 50 anos | pendência registrada |
 | especialista r01 E-1 (bloqueante) | Sábado do cronograma e sábado cobrado com horas diferentes | corrigido (833cb5f, B2): minutos úteis do sábado ÷ 60; antes → depois acima |
 | especialista r01 E-2 | "Todas" pode custar sem ganhar sem o usuário perceber | corrigido (833cb5f): rótulo, memória com as frentes de fora, `daysRecovered` fixado |
@@ -261,23 +267,34 @@ Avaliação do `arquiteto` r01 para D1 a D13; os demais vêm das rodadas 02 a 04
 | seguranca r02 (Info) | `undo` sem validação de forma (desfazer pela metade) | corrigido (2c3e8a3): `erroDoRegistroDeDesfazer`, 7 casos |
 | seguranca r03 Info A | `result: null` passa na validação | corrigido (4223154) |
 | verificação visual r01 | Coluna "Origem" cortada a 800 px; "Risco Baixo" sem frente | corrigido (833cb5f); conferido pelo orquestrador na r02 |
-| testes r04 | Asserção `includes('não estabilizou')` ficou vazia depois da troca do texto do aviso (r04) | corrigido no commit do registro: procura "sem estabilizar" (`scenarios.test.ts:494`, 42/42 verdes) |
-| especialista-obra r04 | Redação "8 h no dia inteiro do calendário" na regra e no comentário de `simulateOvertime`: vale o expediente do dia útil do calendário da frente | corrigido no commit do registro (`calculo-precisao.md:54`, `scenarios.ts:592`) |
+| testes r04 | Asserção `includes('não estabilizou')` ficou vazia depois da troca do texto do aviso (r04) | corrigido (d8b5ae6): procura "sem estabilizar" (`scenarios.test.ts:494`, 42/42 verdes) |
+| especialista-obra r04 | Redação "8 h no dia inteiro do calendário" na regra e no comentário de `simulateOvertime`: vale o expediente do dia útil do calendário da frente | corrigido (d8b5ae6) (`calculo-precisao.md:54`, `scenarios.ts:592`) |
 | especialista-obra r04 | Não houve tarefa 0 separada; a r01 cobre os 4 itens a posteriori | desvio de processo registrado (ver "Desvios do plano") |
-| auditoria | A PREENCHER | A PREENCHER |
+| auditoria r01 #1 (Médio) | AC-6 no modo "frentes escolhidas" medido acima de 1 s (1.098 / 1.280 / 1.341 ms) e classificado como não obrigatório | corrigido (139262d): agenda separada do custo; todos os modos < 1 s; linha AC-6-F obrigatória e PASS |
+| auditoria r01 #2 (Médio) | RNF-03.2 sem linha na matriz; cenários em R$ inteiro | corrigido (139262d): `fmtBRLCents` nos cenários; linha RNF-03.2 na matriz |
+| auditoria r01 #3 (Baixo) | Registro desatualizado (HEAD da matriz, SHAs "no registro", dívida "sem commit") | corrigido neste registro |
+| auditoria r01 #4 (Baixo) | N-8 PASS sem a tarefa 0; linha "A confirmar" aberta | corrigido neste registro: N-8 "PASS com desvio" com o resumo dos itens (i) a (iv); desvio fechado |
+| auditoria r01 #5 (Baixo) | Antes → depois ausente nos testes do B2 de 9 h e do E-13 | corrigido (139262d): comentários em `scenarios.test.ts:210` e `:437` |
+| auditoria r01 (observação) | Arquivos fora das listas do plano: `AppSidebar.vue`, `App.vue`, `horizonte.ts`, `useMsProject.ts`, `types/previas.ts` | registrado: justificativa técnica direta (módulo novo no `Record<ModuleId>`, feriados no `calcularObra`, título da exportação recusada, tipos da prévia) |
+| auditoria r01 (limitação fechada) | Caracterização "verde antes de mexer" | conferida pela auditoria na base f252517: 7 de 7 verdes (PR-1, PR-7) |
+| arquiteto r05 R-23 | Dívida e desvio de desempenho resolvidos ainda constavam como abertos | corrigido no commit de ajustes finais: linhas de dívida removidas; R-21 e AC-6-F fechados |
+| arquiteto r05 R-24 / especialista-obra r05 | Toast "custo comprometido R$ 22.315,20" × valor gravado R$ 22.315 (D13) | corrigido no commit de ajustes finais: o toast diz "custo do cenário"; o log continua "custo comprometido" com o valor gravado (dívida D13, Orçamento) |
+| arquiteto r05 R-25 | `agendaHoraExtra` guardava a referência ao array reativo de frentes | corrigido no commit de ajustes finais: cópia `[...p.frentes]` |
+| testes r05 | Teste de tempo do parser (`msProjectXmlParser.test.ts:798`, teto de 2.000 ms) falhou 1 vez com a máquina carregada (2.016 ms), passou isolado (481 ms) e na repetição | pendência registrada: pré-existente, fora do diff do ciclo |
+| testes r05 | 3º teste de identidade só afirma direção do `extraCost` | registrado (menor): a pré-condição de identidade é exata |
+| reauditoria | A PREENCHER | A PREENCHER |
 
 ## Pendências registradas
 - **Rodada 04:** `especialista-obra` e `seguranca` confirmaram depois (APROVADO); nenhum número de cálculo mudou.
-- **AC-6 no modo "todas":** repetir em máquina livre (2 de 5 execuções passaram de 1.000 ms com a CPU entre 80 e 100%).
-- **R-21:** modo "frentes escolhidas" acima de 1 s; decisão do usuário no PR.
+- **Teste de tempo do parser** (`msProjectXmlParser.test.ts:798`, teto de 2.000 ms de relógio): instável com a máquina carregada; pré-existente. Sugestão: medir só o `parseMspdiXml` com teto maior, num ciclo de processo.
 - **R-22:** encurtar a obra sintética do AC-6 para ficar folgada no horizonte.
-- **Caracterização (PR-1):** "verde antes de mexer" não verificável; o arquivo nasceu no ciclo.
+- **Caracterização (PR-1):** conferida pela auditoria r01 na base f252517 (7 de 7 verdes).
 - **Comentário do CF-8** em `previaImpacto.test.ts`: texto confuso, asserções exatas.
-- **D13 / E-8:** `Math.round` em `applyScenario` e cartões em R$ inteiro.
+- **D13 / E-8:** `Math.round` em `applyScenario` (custo gravado, log e `recoveryCosts` em R$ inteiro); a exibição dos cenários já está em 2 casas (139262d). O Orçamento decide.
 - **E-6:** divisor do indireto usa o ano da vigência (2027 tem 251 d.u.: R$ 11.904,38/dia) e fica congelado na versão.
 - **O-1:** resultado do ponto fixo pode ser conservador.
 - **M-5:** `NOT_RUN`.
-- **Antes do PR:** commitar este registro e as duas linhas de dívida. PR empilhado em `feat/00004-motor-minutos-calendarios` se o 00004 não tiver entrado na `master`.
+- **Antes do PR:** PR empilhado em `feat/00004-motor-minutos-calendarios` se o 00004 não tiver entrado na `master`.
 
 ## Validação de outras áreas (não substitui o parecer delas)
 - **RH + Jurídico:**
