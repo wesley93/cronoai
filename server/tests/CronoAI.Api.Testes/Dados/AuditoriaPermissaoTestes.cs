@@ -81,6 +81,20 @@ public sealed class AuditoriaPermissaoTestes
             Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, erro.SqlState);
         }
 
+        // Rodada 02: trilha SEM obra (da empresa) só o administrador grava. Os demais perfis, mesmo em nome próprio, levam 42501;
+        // o administrador (controle negativo) grava.
+        foreach (var naoAdmin in new[] { c.B, c.C, c.G, c.D })
+        {
+            await using var contexto = Como(naoAdmin, c.EmpresaX);
+            var erro = await Assert.ThrowsAsync<PostgresException>(() => InserirTrilhaAsync(contexto, c.EmpresaX, usuarioDaLinha: naoAdmin, obra: null));
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, erro.SqlState);
+        }
+
+        await using (var comoAdministrador = Como(c.A, c.EmpresaX))
+        {
+            Assert.Equal(1, await InserirTrilhaAsync(comoAdministrador, c.EmpresaX, usuarioDaLinha: c.A, obra: null));
+        }
+
         // Controle negativo: o mesmo INSERT em obra visível, em nome do próprio usuário, passa.
         await using (var comoB = Como(c.B, c.EmpresaX))
         {
@@ -106,6 +120,21 @@ public sealed class AuditoriaPermissaoTestes
             mutacao: "ALTER POLICY pol_auditoria_insert ON cronoai.auditoria WITH CHECK (true)");
 
         Assert.True(resultado.Afetadas == 1, resultado.Erro);
+    }
+
+    [Fact]
+    public async Task Auditoria_sem_obra_so_do_administrador_mutacao()
+    {
+        // Mutação do WITH CHECK do INSERT: sem a regra "obra nula só administrador", B (engenheiro) grava trilha da empresa.
+        // O mesmo script sem a mutação é o controle (42501).
+        var c = await CenarioPermissoes.CriarAsync(_dados);
+        var dml = $"INSERT INTO cronoai.auditoria (empresa_id, usuario_id, entidade, entidade_id, acao, origem, em) VALUES ('{c.EmpresaX}', '{c.B}', 'membro_empresa', '{c.B}', 'alterar', 'ui', now())";
+
+        var semMutacao = await ScriptRls.ExecutarAsync(_banco, c.B, c.EmpresaX, dml);
+        var comMutacao = await ScriptRls.ExecutarAsync(_banco, c.B, c.EmpresaX, dml, mutacao: "ALTER POLICY pol_auditoria_insert ON cronoai.auditoria WITH CHECK (true)");
+
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, semMutacao.SqlState);
+        Assert.True(comMutacao.Afetadas == 1, comMutacao.Erro);
     }
 
     [Fact]

@@ -130,18 +130,23 @@ public sealed class ServicoObras
             return ufInvalida;
         }
 
-        // O responsável é um membro da EMPRESA (não revela nada de obra): o mesmo 400 para removido, alheio e inexistente.
-        var responsavelInvalido = await ConferirResponsavelAsync(dados, cancelamento);
-        if (responsavelInvalido is not null)
-        {
-            return responsavelInvalido;
-        }
-
         var obra = await _banco.Obras.SingleOrDefaultAsync(o => o.Id == id, cancelamento);
         var recusa = Recusar(obra, versao, exigeAtiva: true);
         if (recusa is not null)
         {
             return recusa;
+        }
+
+        // O responsável é conferido SÓ quando muda em relação à obra carregada: reenviar o valor atual não pode falhar, senão a obra
+        // restaurada com o responsável já removido ficaria sem edição (e o engenheiro nem poderia trocá-lo, 403). Depois do 404 (a
+        // obra invisível não chega aqui) e antes do 403 de campo; removido, alheio e inexistente seguem o mesmo 400.
+        if (dados.ResponsavelId != obra!.ResponsavelId)
+        {
+            var responsavelInvalido = await ConferirResponsavelAsync(dados, cancelamento);
+            if (responsavelInvalido is not null)
+            {
+                return responsavelInvalido;
+            }
         }
 
         // Ordem das recusas: 404 → 409 de versão → 409 de arquivada → 403 de campo (acima). Quem edita a obra mas não o cadastro

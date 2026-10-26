@@ -249,6 +249,50 @@ public sealed class PermissaoObrasTestes
         Assert.Equal(HttpStatusCode.OK, editada.Status);
     }
 
+    // R-2 da rodada 02: o responsável só é conferido quando MUDA. Obra restaurada com responsável já removido continua editável
+    // (reenviar o mesmo valor é 200, também para o engenheiro de planejamento, que não pode trocá-lo) e trocar para outro removido ainda é 400.
+    [Fact]
+    public async Task Obra_restaurada_com_responsavel_removido_continua_editavel()
+    {
+        await using var api = await AmbienteApi.CriarAsync(_banco, _dados);
+        var responsavel = await api.NovoUsuarioNaEmpresaAsync(Perfis.EngenheiroObra);
+        var nome = "Obra Do Responsavel " + Guid.NewGuid().ToString("N")[..8];
+        var corpoDeCriacao = AmbienteApi.CorpoValido(nome);
+        corpoDeCriacao["responsavelId"] = responsavel.UsuarioId;
+        var obra = await api.CriarObraAsync(corpoDeCriacao);
+        var engenheiro = await api.NovoUsuarioNaEmpresaAsync(Perfis.EngenheiroPlanejamento);
+        await _dados.CriarAcessoObraAsync(api.EmpresaId, obra.Id, engenheiro.UsuarioId);
+
+        var arquivada = await api.EscreverAsync(HttpMethod.Post, $"/api/v1/obras/{obra.Id}/arquivar", new { versao = obra.Versao });
+        Assert.Equal(HttpStatusCode.OK, arquivada.Status);
+        await _dados.RemoverMembroAsync(api.EmpresaId, responsavel.UsuarioId);
+        var restaurada = await api.EscreverAsync(HttpMethod.Post, $"/api/v1/obras/{obra.Id}/restaurar", new { versao = arquivada.Versao });
+        Assert.Equal(HttpStatusCode.OK, restaurada.Status);
+
+        // O engenheiro reenvia o cadastro IGUAL (responsável removido incluso): 200, não 400.
+        var corpoDoEngenheiro = AmbienteApi.CorpoDeAtualizacao(restaurada.Versao, nome);
+        corpoDoEngenheiro["responsavelId"] = responsavel.UsuarioId;
+        corpoDoEngenheiro["dataStatus"] = "2026-11-01";
+        var doEngenheiro = await EnviarAsync(engenheiro.Navegador, "PUT", $"/api/v1/obras/{obra.Id}", corpoDoEngenheiro);
+        Assert.Equal(HttpStatusCode.OK, doEngenheiro.Status);
+
+        // O administrador também reenvia o mesmo valor sem tropeçar.
+        var corpoDoAdministrador = AmbienteApi.CorpoDeAtualizacao(doEngenheiro.Versao, nome);
+        corpoDoAdministrador["responsavelId"] = responsavel.UsuarioId;
+        corpoDoAdministrador["dataStatus"] = "2026-11-02";
+        var doAdministrador = await api.EscreverAsync(HttpMethod.Put, $"/api/v1/obras/{obra.Id}", corpoDoAdministrador);
+        Assert.Equal(HttpStatusCode.OK, doAdministrador.Status);
+
+        // Controle: trocar para OUTRO removido segue sendo 400 (a conferência continua valendo quando o valor muda).
+        var outroRemovido = await api.NovoUsuarioNaEmpresaAsync(Perfis.EngenheiroObra);
+        await _dados.RemoverMembroAsync(api.EmpresaId, outroRemovido.UsuarioId);
+        var troca = AmbienteApi.CorpoDeAtualizacao(doAdministrador.Versao, nome);
+        troca["responsavelId"] = outroRemovido.UsuarioId;
+        var recusada = await api.EscreverAsync(HttpMethod.Put, $"/api/v1/obras/{obra.Id}", troca);
+        Assert.Equal(HttpStatusCode.BadRequest, recusada.Status);
+        Assert.True(recusada.Corpo.GetProperty("errors").TryGetProperty("responsavelId", out _));
+    }
+
     #endregion
 
     #region Métodos privados

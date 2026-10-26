@@ -147,6 +147,15 @@ public sealed class ServicoMembros
             return ResultadoEscritaMembro.ConflitoDeResponsavel(obras, frentes);
         }
 
+        // Os vínculos de obra do membro saem JUNTO, no mesmo salvamento auditado (uma linha de trilha "remover" por vínculo): a
+        // reativação NÃO os restaura, então quem volta não herda o acesso antigo e o administrador reconcede o que for preciso.
+        // Os acessos de frente saem antes porque o vínculo da obra é a chave estrangeira deles (Restrict). O administrador enxerga
+        // todos os vínculos da empresa pelo RLS.
+        var acessosDeFrente = await _banco.AcessosFrente.Where(a => a.UsuarioId == usuarioId).ToListAsync(cancelamento);
+        var acessosDeObra = await _banco.AcessosObra.Where(a => a.UsuarioId == usuarioId).ToListAsync(cancelamento);
+        _banco.AcessosFrente.RemoveRange(acessosDeFrente);
+        _banco.AcessosObra.RemoveRange(acessosDeObra);
+
         membro!.Remover(metadados.InstanteUtc);
         var falha = await SalvarAsync(membro, metadados, cancelamento);
         if (falha is not null)
@@ -243,7 +252,7 @@ public sealed class ServicoMembros
         }
         catch (DbUpdateConcurrencyException erro)
         {
-            return await ResolverConcorrenciaAsync(erro, cancelamento);
+            return await ResolverConcorrenciaAsync(erro, membro.UsuarioId, cancelamento);
         }
         catch (Exception erro) when (MapeadorErrosMembros.Classificar(erro) is DesfechoDeBanco.UltimoAdministrador)
         {
@@ -255,17 +264,27 @@ public sealed class ServicoMembros
     }
 
     // Zero linhas: o membro sumiu (404) ou outra gravação o mudou depois do meu carregamento (409 com o estado do banco).
-    private async Task<ResultadoEscritaMembro> ResolverConcorrenciaAsync(DbUpdateConcurrencyException erro, CancellationToken cancelamento)
+    private async Task<ResultadoEscritaMembro> ResolverConcorrenciaAsync(DbUpdateConcurrencyException erro, Guid usuarioId, CancellationToken cancelamento)
     {
-        var entrada = erro.Entries.FirstOrDefault(e => e.Entity is MembroEmpresa)
-            ?? throw new InvalidOperationException("Conflito de concorrência sem o membro entre as entradas.", erro);
-        var valores = await entrada.GetDatabaseValuesAsync(cancelamento);
-        if (valores is null)
+        // A zero linha pode ser do membro ou de um vínculo que outra pessoa já revogou (remoção do membro): nos dois casos o estado
+        // mudou depois do meu carregamento, e o que se devolve é o membro como está no banco agora.
+        var entrada = erro.Entries.FirstOrDefault(e => e.Entity is MembroEmpresa);
+        MembroEmpresa? atual;
+        if (entrada is not null)
+        {
+            var valores = await entrada.GetDatabaseValuesAsync(cancelamento);
+            atual = (MembroEmpresa?)valores?.ToObject();
+        }
+        else
+        {
+            atual = await _banco.Membros.AsNoTracking().SingleOrDefaultAsync(m => m.UsuarioId == usuarioId, cancelamento);
+        }
+
+        if (atual is null)
         {
             return ResultadoEscritaMembro.NaoEncontrado();
         }
 
-        var atual = (MembroEmpresa)valores.ToObject();
         _logger.EscritaDeMembroRecusada(atual.UsuarioId, ResultadoEscritaMembro.ConflitoDeVersao);
         return ResultadoEscritaMembro.Conflito(ResultadoEscritaMembro.ConflitoDeVersao, await RespostaAsync(atual, cancelamento));
     }

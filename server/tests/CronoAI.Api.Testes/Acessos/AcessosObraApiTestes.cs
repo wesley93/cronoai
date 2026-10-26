@@ -2,7 +2,9 @@ using System.Net;
 using System.Text.Json;
 using CronoAI.Api.Testes.Infra;
 using CronoAI.Api.Testes.Infra.IdpTeste;
+using CronoAI.Dados;
 using CronoAI.Dominio;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CronoAI.Api.Testes.Acessos;
 
@@ -172,6 +174,49 @@ public sealed class AcessosObraApiTestes
             var naObra1 = await EnviarAsync(navegadorG, "POST", $"/api/v1/obras/{c.Obra1}/acessos", new { usuarioId = c.D });
             Assert.Equal(HttpStatusCode.Created, naObra1.Status);
         }
+    }
+
+    [Fact]
+    public async Task Recusa_de_politica_com_obra_ainda_visivel_vira_500_generico_sem_detalhe()
+    {
+        // Seguranca 3 (rodada 02): o 42501 só vira 404 quando a obra DEIXOU de ser visível. Aqui o administrador é rebaixado no meio
+        // da escrita para engenheiro VINCULADO à obra: a obra segue visível, a política de INSERT de acesso_obra recusa (42501) e a
+        // exceção sobe como 500 genérico (ProblemDetails com traceId), sem nome de tabela, de política, de constraint nem SQL.
+        using var idp = new IdpEmMemoria();
+        var gancho = new GanchoUmaVez();
+        await using var fabrica = new ApiFactory(
+            _banco.StringConexaoApp,
+            "Production",
+            servicos => servicos.AddSingleton<IFabricaCronoDbContext>(new FabricaComGancho(_banco, gancho)))
+        { Idp = idp };
+        var empresa = await _dados.CriarEmpresaAsync();
+        var outroAdministrador = await _dados.CriarUsuarioAsync();
+        await _dados.VincularAsync(empresa, outroAdministrador);
+        var cenario = await CenarioLogin.NaEmpresaAsync(fabrica, idp, _dados, empresa, Perfis.Administrador);
+        using var navegador = cenario.Navegador;
+        var obra = await _dados.CriarObraAsync(empresa, cenario.UsuarioId);
+        await _dados.CriarAcessoObraAsync(empresa, obra.Id, cenario.UsuarioId);
+        var destino = await _dados.CriarUsuarioAsync();
+        await _dados.VincularAsync(empresa, destino, Perfis.EngenheiroObra);
+
+        gancho.Armar(() => _banco.ProduzirEstadoComoSuperusuarioAsync(
+            $"SELECT set_config('app.usuario_id', '{cenario.UsuarioId}', true), set_config('app.empresa_id', '{empresa}', true); "
+            + $"UPDATE cronoai.membro_empresa SET perfil = 'engenheiro_obra', escopo_obras = 'vinculadas', atualizado_em = greatest(now(), criado_em) WHERE empresa_id = '{empresa}' AND usuario_id = '{cenario.UsuarioId}'"));
+
+        var resposta = await EnviarAsync(navegador, "POST", $"/api/v1/obras/{obra.Id}/acessos", new { usuarioId = destino });
+
+        Assert.True(gancho.Executou);
+        Assert.Equal(HttpStatusCode.InternalServerError, resposta.Status);
+        Assert.Equal(500, resposta.Corpo.GetProperty("status").GetInt32());
+        Assert.True(resposta.Corpo.TryGetProperty("traceId", out _));
+        foreach (var vazamento in new[] { "acesso_obra", "cronoai", "policy", "política", "violates", "row-level", "42501", "INSERT", "Npgsql", "Postgres" })
+        {
+            Assert.DoesNotContain(vazamento, resposta.Texto, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Nada gravado: nem o vínculo, nem a trilha dele.
+        Assert.Equal("0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.acesso_obra WHERE obra_id = '{obra.Id}' AND usuario_id = '{destino}'"));
+        Assert.Equal("0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.auditoria WHERE entidade = 'acesso_obra' AND obra_id = '{obra.Id}' AND acao = 'criar'"));
     }
 
     #endregion

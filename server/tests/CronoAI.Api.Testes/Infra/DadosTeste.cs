@@ -107,9 +107,11 @@ public sealed class DadosTeste
     public static Guid AdministradorDe(Guid empresaId) =>
         _administradores.TryGetValue(empresaId, out var id) ? id : throw new InvalidOperationException("Empresa sem administrador conhecido no helper.");
 
-    /// <summary>Contexto (administrador, empresa): o RLS por obra exige um usuário. Sem administrador conhecido, só a empresa.</summary>
-    public static ContextoSessaoBanco ComoAdministrador(Guid empresaId) =>
-        _administradores.TryGetValue(empresaId, out var id) ? new ContextoSessaoBanco(id, empresaId) : ContextoSessaoBanco.DaEmpresa(empresaId);
+    /// <summary>
+    /// Contexto (administrador, empresa): o RLS por obra exige um usuário. Lança se a empresa não tem administrador conhecido: cair
+    /// num contexto sem usuário esconderia o defeito do teste (a leitura voltaria vazia, e não com erro).
+    /// </summary>
+    public static ContextoSessaoBanco ComoAdministrador(Guid empresaId) => new(AdministradorDe(empresaId), empresaId);
 
     /// <summary>Vínculo membro × obra, como superusuário da fixture (produz estado; a API de acessos é o que se testa noutro lugar).</summary>
     public async Task<Guid> CriarAcessoObraAsync(Guid empresaId, Guid obraId, Guid usuarioId)

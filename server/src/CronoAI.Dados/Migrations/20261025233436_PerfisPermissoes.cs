@@ -428,6 +428,11 @@ namespace CronoAI.Dados.Migrations
             // por isso aceita "promover B e rebaixar A" na mesma transação). O advisory lock por empresa serializa dois rebaixamentos
             // concorrentes (em READ COMMITTED cada um ainda veria o outro como administrador). O CONSTRAINT do RAISE chega ao cliente
             // como PostgresException.ConstraintName, que a API mapeia para 409.
+            // ATENÇÃO: o gatilho SÓ é correto em READ COMMITTED (o padrão do PostgreSQL e o único nível que a aplicação usa). Em
+            // REPEATABLE READ ou SERIALIZABLE a consulta de dentro do gatilho enxergaria o snapshot da transação, e não o commit do
+            // concorrente que acabou de sair do lock: dois rebaixamentos poderiam passar. Não eleve o nível de isolamento sem reabrir isto
+            // (ADR 00010). Forma de duas chaves do lock: classe 14001 (constante deste gatilho; evita colidir com outro uso de advisory
+            // lock no banco) + hash da empresa, ambos int4.
             migrationBuilder.Sql(
                 """
                 CREATE FUNCTION cronoai.membro_garante_administrador() RETURNS trigger
@@ -435,7 +440,7 @@ namespace CronoAI.Dados.Migrations
                 SET search_path = pg_catalog
                 AS $$
                 BEGIN
-                  PERFORM pg_advisory_xact_lock(hashtextextended(NEW.empresa_id::text, 0));
+                  PERFORM pg_advisory_xact_lock(14001, hashtext(NEW.empresa_id::text));
                   IF NOT EXISTS (
                        SELECT 1 FROM cronoai.membro_empresa m
                         WHERE m.empresa_id = NEW.empresa_id AND m.perfil = 'administrador' AND m.removido_em IS NULL) THEN
@@ -469,7 +474,6 @@ namespace CronoAI.Dados.Migrations
             var e = MigrationBuilderRlsExtensoes.ExpressaoEmpresa;
             var u = MigrationBuilderRlsExtensoes.ExpressaoUsuario;
             var admin = ExpressoesPermissao.Admin;
-            var gestor = ExpressoesPermissao.Gestor;
             var todas = ExpressoesPermissao.Todas;
             var carteirasMinhas = ExpressoesPermissao.CarteirasMinhas;
 
@@ -489,7 +493,9 @@ namespace CronoAI.Dados.Migrations
             migrationBuilder.SubstituirPoliticaInsert("obra", "pol_obra_insert", $"empresa_id = {e} AND {todas}");
             migrationBuilder.SubstituirPoliticaUpdate("obra", "pol_obra_update", visibilidadeDaObra, visibilidadeDaObra);
 
-            var lerVinculo = $"empresa_id = {e} AND (usuario_id = {u} OR {admin} OR {gestor})";
+            // Leitura do vínculo: o próprio usuário, o administrador, ou o gestor SÓ no alcance dele (escopo todas ou obra de carteira
+            // sua). Antes o gestor lia os vínculos da empresa inteira.
+            var lerVinculo = $"empresa_id = {e} AND (usuario_id = {u} OR {admin} OR {ExpressoesPermissao.AlcanceGestor("obra_id")})";
 
             migrationBuilder.HabilitarRlsForcado("acesso_obra");
             var escreverAcessoObra = $"empresa_id = {e} AND ({admin} OR {ExpressoesPermissao.AlcanceGestor("obra_id")})";
@@ -534,7 +540,7 @@ namespace CronoAI.Dados.Migrations
             migrationBuilder.SubstituirPoliticaInsert(
                 "auditoria",
                 "pol_auditoria_insert",
-                $"empresa_id = {e} AND usuario_id = {u} AND (obra_id IS NULL OR {ExpressoesPermissao.ObraVisivel("obra_id")})");
+                $"empresa_id = {e} AND usuario_id = {u} AND ((obra_id IS NULL AND {admin}) OR (obra_id IS NOT NULL AND {ExpressoesPermissao.ObraVisivel("obra_id")}))");
 
             // 8. A trilha ganha a ação "remover" (revogar vínculo e remover membro).
             migrationBuilder.DropCheckConstraint(

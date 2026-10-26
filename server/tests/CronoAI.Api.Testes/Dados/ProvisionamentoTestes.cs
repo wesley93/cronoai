@@ -81,6 +81,43 @@ public sealed class ProvisionamentoTestes
         await AfirmarForceAsync();
     }
 
+    [Fact]
+    public async Task Provisionamento_desiste_por_lock_timeout_e_nao_deixa_nada_pela_metade()
+    {
+        // Outra sessão segura um lock que conflita com o NO FORCE (ACCESS EXCLUSIVE): o provisionamento desiste em ~5 s (55P03)
+        // em vez de ficar na fila bloqueando a aplicação, e o rollback não deixa NO FORCE nem empresa para trás.
+        var provisionamento = new ProvisionamentoEmpresa(_banco.FabricaMigrador);
+        var admin = await _dados.CriarUsuarioAsync();
+        var agora = DateTime.UtcNow;
+        var empresa = Empresa.Criar("Empresa Lock Ficticia", agora);
+        var membros = new[] { MembroEmpresa.Criar(empresa.Id, admin, Perfis.Administrador, EscoposObras.Todas, agora) };
+
+        await using (var segurando = new NpgsqlConnection(_banco.StringConexaoMigrador))
+        {
+            await segurando.OpenAsync(TestContext.Current.CancellationToken);
+            await using var transacaoDoLock = await segurando.BeginTransactionAsync(TestContext.Current.CancellationToken);
+            await using (var comando = new NpgsqlCommand("LOCK TABLE cronoai.empresa IN ACCESS SHARE MODE", segurando, transacaoDoLock))
+            {
+                await comando.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            }
+
+            var cronometro = System.Diagnostics.Stopwatch.StartNew();
+            var falha = await Assert.ThrowsAnyAsync<Exception>(() => provisionamento.ProvisionarAsync(empresa, membros, TestContext.Current.CancellationToken));
+            cronometro.Stop();
+
+            Assert.Equal(PostgresErrorCodes.LockNotAvailable, PostgresDaCadeia(falha).SqlState);
+            Assert.InRange(cronometro.Elapsed, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(30));
+            await transacaoDoLock.RollbackAsync(TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal("0|0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT (SELECT count(*) FROM cronoai.empresa WHERE id = '{empresa.Id}') || '|' || (SELECT count(*) FROM cronoai.membro_empresa WHERE empresa_id = '{empresa.Id}')"));
+        await AfirmarForceAsync();
+
+        // Controle: sem o lock da outra sessão o mesmo provisionamento passa.
+        await provisionamento.ProvisionarAsync(empresa, membros, TestContext.Current.CancellationToken);
+        Assert.Equal("1|1", await _banco.ConsultarComoSuperusuarioAsync($"SELECT (SELECT count(*) FROM cronoai.empresa WHERE id = '{empresa.Id}') || '|' || (SELECT count(*) FROM cronoai.membro_empresa WHERE empresa_id = '{empresa.Id}')"));
+    }
+
     #endregion
 
     #region Métodos privados

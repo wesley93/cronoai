@@ -22,7 +22,8 @@ public static class RequisicaoDeIsolamento
         var reais = recursos ?? RecursosDeIsolamento.Nenhum;
         var declarados = new RecursosDeIsolamento(
             entrada?.Recurso is RecursoAlheio.Obra or RecursoAlheio.ObraEMembro ? reais.Obra : null,
-            entrada?.Recurso is RecursoAlheio.Membro or RecursoAlheio.ObraEMembro ? reais.Membro : null);
+            entrada?.Recurso is RecursoAlheio.Membro or RecursoAlheio.ObraEMembro ? reais.Membro : null,
+            entrada?.CorpoDosRecursos is not null ? reais.MembroDoChamador : null);
         var requisicao = new HttpRequestMessage(new HttpMethod(rota.Metodo), DetectorDeRotas.Concretizar(rota.Padrao, declarados));
         if (antiforgery is not null)
         {
@@ -31,7 +32,7 @@ public static class RequisicaoDeIsolamento
 
         if (rota.EhEscrita)
         {
-            requisicao.Content = JsonContent.Create(entrada?.Corpo?.Invoke(empresaAlheia) ?? new { });
+            requisicao.Content = JsonContent.Create(entrada?.CorpoDosRecursos?.Invoke(declarados) ?? entrada?.Corpo?.Invoke(empresaAlheia) ?? new { });
         }
 
         return requisicao;

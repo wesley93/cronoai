@@ -3,9 +3,6 @@ using System.Text.RegularExpressions;
 
 namespace CronoAI.Api.Testes.Infra;
 
-/// <summary>Resultado de um DML rodado pelo <see cref="ScriptRls"/>: linhas afetadas ou o SQLSTATE do erro.</summary>
-public sealed record ResultadoDml(long? Afetadas, string? SqlState, string Erro);
-
 /// <summary>
 /// Controle por MUTAÇÃO dos testes de RLS (plano 00014, seção 11.0). Numa transação do superusuário da fixture (que nunca é
 /// confirmada: a conexão fecha com a transação aberta e o PostgreSQL a desfaz) o script (1) prepara o estado, (2) AFROUXA a

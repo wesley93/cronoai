@@ -105,13 +105,19 @@ public sealed class RlsObraAuditoriaTestes
         var usuario = await _dados.CriarUsuarioAsync();
         var inexistente = Guid.NewGuid();
 
-        // O contexto e a linha são da MESMA empresa (o WITH CHECK passa), mas ela não existe: só a FK recusa.
+        // Como app: a linha sem obra exige administrador (rodada 02) e uma empresa inexistente não tem nenhum, então a POLÍTICA recusa
+        // (42501) antes de a FK ser avaliada.
         var erro = await Assert.ThrowsAsync<PostgresException>(() => _dados.InserirAuditoriaBrutaAsync(inexistente, inexistente, usuario));
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, erro.SqlState);
 
-        Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, erro.SqlState);
-        Assert.Equal("fk_auditoria_empresa", erro.ConstraintName);
+        // A FK da empresa, por si, recusa (superusuário: o RLS não se aplica). Prova que ela existe independente da política.
+        var (codigo, _, erroDaFk) = await _banco.ExecutarScriptComoSuperusuarioAsync(
+            $"INSERT INTO cronoai.auditoria (empresa_id, usuario_id, entidade, entidade_id, acao, origem, em) VALUES ('{inexistente}', '{usuario}', 'obra', '{Guid.NewGuid()}', 'criar', 'ui', now())");
+        Assert.NotEqual(0, codigo);
+        Assert.Contains("23503", erroDaFk, StringComparison.Ordinal);
+        Assert.Contains("fk_auditoria_empresa", erroDaFk, StringComparison.Ordinal);
 
-        // Controle negativo: com empresa existente, o mesmo INSERT passa.
+        // Controle negativo: com empresa existente (e o usuário administrador dela), o mesmo INSERT passa.
         var empresa = await _dados.CriarEmpresaComMembrosAsync(usuario);
         await _dados.InserirAuditoriaBrutaAsync(empresa, empresa, usuario);
     }

@@ -47,10 +47,11 @@ public static class CatalogoRotas
         new("POST", Raiz + "/membros/{usuarioId}/reativar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { versao = 1 }, RecursoAlheio.Membro),
 
         // Acessos de obra (ciclo 00014, E3): a obra é REAL de B e, na revogação, o {usuarioId} é membro REAL de B. O corpo do conceder
-        // leva um usuário qualquer: a obra invisível (404) é decidida ANTES de olhar o destino, então o 404 prova a obra e não o corpo.
+        // leva um membro REAL da empresa de quem chama (plano 3.7): com visibilidade a mesma requisição seria 201 ou 409, então o 404 prova a obra.
+        // O {usuarioId} da revogação é um membro REAL COM vínculo na obra: com visibilidade seria 204, então o 404 prova a obra, e não "vínculo inexistente".
         // Quem tem a ação e não tem a obra é o gestor de portfólio sem carteira atribuída (escopo carteiras).
         new("GET", Raiz + "/obras/{id}/acessos", CenarioIsolamento.ComIdDeOutraEmpresa, Recurso: RecursoAlheio.Obra, SemVinculo: new("gestor_portfolio", HttpStatusCode.NotFound, Escopo: "carteiras")),
-        new("POST", Raiz + "/obras/{id}/acessos", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { usuarioId = Guid.NewGuid() }, RecursoAlheio.Obra, new("gestor_portfolio", HttpStatusCode.NotFound, Escopo: "carteiras")),
+        new("POST", Raiz + "/obras/{id}/acessos", CenarioIsolamento.ComIdDeOutraEmpresa, Recurso: RecursoAlheio.Obra, SemVinculo: new("gestor_portfolio", HttpStatusCode.NotFound, Escopo: "carteiras"), CorpoDosRecursos: r => new { usuarioId = r.MembroDoChamador ?? Guid.NewGuid() }),
         new("POST", Raiz + "/obras/{id}/acessos/{usuarioId}/revogar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { }, RecursoAlheio.ObraEMembro, new("gestor_portfolio", HttpStatusCode.NotFound, Escopo: "carteiras")),
     ];
 

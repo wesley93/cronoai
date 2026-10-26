@@ -233,6 +233,63 @@ public sealed partial class MembroTestes
     }
 
     [Fact]
+    public async Task Promocao_e_rebaixamento_cruzados_em_paralelo_passam()
+    {
+        // Concorrência LEGÍTIMA: cada transação rebaixa o outro administrador e promove um novo. Cada uma deixa um administrador
+        // ativo, então as duas passam (o lock serializa, mas não recusa quem está certo). Termina com c e d administradores.
+        var empresa = await _dados.CriarEmpresaAsync(comAdministradorTecnico: false);
+        var a1 = await _dados.CriarUsuarioAsync();
+        var a2 = await _dados.CriarUsuarioAsync();
+        var c = await _dados.CriarUsuarioAsync();
+        var d = await _dados.CriarUsuarioAsync();
+        await _dados.VincularAsync(empresa, a1);
+        await _dados.VincularAsync(empresa, a2);
+        await _dados.VincularAsync(empresa, c, Perfis.EngenheiroObra);
+        await _dados.VincularAsync(empresa, d, Perfis.EngenheiroObra);
+
+        var resultados = await ExecutarEmParaleloAsync(empresa, a1, a2, rebaixar: a2, promover: c, rebaixar2: a1, promover2: d);
+
+        Assert.All(resultados, r => Assert.Null(r));
+        Assert.Equal("2", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.membro_empresa WHERE empresa_id = '{empresa}' AND perfil = 'administrador' AND removido_em IS NULL"));
+        Assert.Equal("2", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.membro_empresa WHERE empresa_id = '{empresa}' AND usuario_id IN ('{c}', '{d}') AND perfil = 'administrador'"));
+    }
+
+    [Fact]
+    public async Task Dois_rebaixamentos_em_paralelo_sem_o_lock_deixam_a_empresa_sem_administrador_mutacao()
+    {
+        // CONTROLE POR MUTAÇÃO: troca a função do gatilho por uma SEM o advisory lock (e com uma pausa depois da conferência, para
+        // os dois COMMITs não se atropelarem por acaso) e repete o teste de paralelismo: agora os dois rebaixamentos PASSAM e a empresa
+        // fica sem administrador. Prova que o teste de 1 sucesso e 1 erro depende do lock. A função original volta no finally.
+        var definicao = await _banco.ConsultarComoSuperusuarioAsync("SELECT pg_get_functiondef('cronoai.membro_garante_administrador'::regproc)");
+        Assert.Contains("pg_advisory_xact_lock", definicao, StringComparison.Ordinal);
+        var semLock = Regex.Replace(definicao, @"^\s*PERFORM pg_advisory_xact_lock\(.*\);\s*$", "", RegexOptions.Multiline)
+            .Replace("RETURN NULL;", "PERFORM pg_sleep(1); RETURN NULL;", StringComparison.Ordinal);
+        Assert.DoesNotContain("pg_advisory_xact_lock", semLock, StringComparison.Ordinal);
+
+        var empresa = await _dados.CriarEmpresaAsync(comAdministradorTecnico: false);
+        var a1 = await _dados.CriarUsuarioAsync();
+        var a2 = await _dados.CriarUsuarioAsync();
+        await _dados.VincularAsync(empresa, a1);
+        await _dados.VincularAsync(empresa, a2);
+
+        try
+        {
+            await _banco.ProduzirEstadoComoSuperusuarioAsync(semLock);
+
+            var resultados = await ExecutarEmParaleloAsync(empresa, a1, a2, rebaixar: a1, promover: null, rebaixar2: a2, promover2: null);
+
+            Assert.All(resultados, r => Assert.Null(r));
+            Assert.Equal("0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.membro_empresa WHERE empresa_id = '{empresa}' AND perfil = 'administrador' AND removido_em IS NULL"));
+        }
+        finally
+        {
+            await _banco.ProduzirEstadoComoSuperusuarioAsync(definicao);
+        }
+
+        Assert.Contains("pg_advisory_xact_lock", await _banco.ConsultarComoSuperusuarioAsync("SELECT pg_get_functiondef('cronoai.membro_garante_administrador'::regproc)"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Membro_insert_recusado_para_aplicacao()
     {
         // ESCALADA DE PRIVILÉGIO (achado bloqueante): a política antiga (empresa_id = E) deixava o app criar vínculo para QUALQUER
@@ -317,6 +374,43 @@ public sealed partial class MembroTestes
     #region Métodos privados
 
     private CronoDbContext Como(Guid usuario, Guid empresa) => _dados.Fabrica.Criar(new ContextoSessaoBanco(usuario, empresa));
+
+    // Duas transações (cada uma como um administrador) que rebaixam um membro e, se informado, promovem outro; as duas chegam ao
+    // COMMIT juntas (barreira). Devolve o nome da constraint que falhou no COMMIT de cada uma (nulo = passou).
+    private async Task<string?[]> ExecutarEmParaleloAsync(Guid empresa, Guid chamador1, Guid chamador2, Guid rebaixar, Guid? promover, Guid rebaixar2, Guid? promover2)
+    {
+        using var barreira = new Barrier(2);
+
+        async Task<string?> EscreverAsync(Guid chamador, Guid aRebaixar, Guid? aPromover)
+        {
+            await using var contexto = Como(chamador, empresa);
+            await using var transacao = await contexto.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+            await contexto.Database.ExecuteSqlAsync(
+                $"UPDATE cronoai.membro_empresa SET perfil = {Perfis.EngenheiroObra}, escopo_obras = {EscoposObras.Vinculadas} WHERE usuario_id = {aRebaixar}",
+                TestContext.Current.CancellationToken);
+            if (aPromover is { } promovido)
+            {
+                await contexto.Database.ExecuteSqlAsync(
+                    $"UPDATE cronoai.membro_empresa SET perfil = {Perfis.Administrador}, escopo_obras = {EscoposObras.Todas} WHERE usuario_id = {promovido}",
+                    TestContext.Current.CancellationToken);
+            }
+
+            barreira.SignalAndWait(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+            try
+            {
+                await transacao.CommitAsync(TestContext.Current.CancellationToken);
+                return null;
+            }
+            catch (PostgresException erro)
+            {
+                return erro.ConstraintName ?? erro.SqlState;
+            }
+        }
+
+        return await Task.WhenAll(
+            Task.Run(() => EscreverAsync(chamador1, rebaixar, promover), TestContext.Current.CancellationToken),
+            Task.Run(() => EscreverAsync(chamador2, rebaixar2, promover2), TestContext.Current.CancellationToken));
+    }
 
     private static MetadadosEscrita Metadados() => new(OrigensAuditoria.Ui, null, null, DateTime.UtcNow);
 

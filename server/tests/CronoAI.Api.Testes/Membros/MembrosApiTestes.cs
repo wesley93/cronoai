@@ -216,6 +216,48 @@ public sealed class MembrosApiTestes
     }
 
     [Fact]
+    public async Task Remover_membro_revoga_os_vinculos_e_reativar_nao_os_restaura()
+    {
+        // Decisão da rodada 02 (Segurança): remover revoga os vínculos de obra (e os de frente, que dependem deles) com UMA trilha
+        // "remover" por vínculo, na mesma transação; reativar volta o membro SEM nenhum acesso antigo.
+        await using var api = await AmbienteApi.CriarAsync(_banco, _dados);
+        var obra1 = await api.CriarObraAsync();
+        var obra2 = await api.CriarObraAsync();
+        var engenheiro = await api.NovoUsuarioNaEmpresaAsync(Perfis.EngenheiroObra);
+        await _dados.CriarAcessoObraAsync(api.EmpresaId, obra1.Id, engenheiro.UsuarioId);
+        await _dados.CriarAcessoObraAsync(api.EmpresaId, obra2.Id, engenheiro.UsuarioId);
+        var frente = await _dados.CriarFrenteAsync(api.EmpresaId, obra1.Id);
+        await _dados.CriarAcessoFrenteAsync(api.EmpresaId, obra1.Id, frente, engenheiro.UsuarioId);
+
+        // Antes: o engenheiro vê as duas obras.
+        Assert.Equal(HttpStatusCode.OK, (await LerComoAsync(engenheiro.Navegador, $"/api/v1/obras/{obra1.Id}")).Status);
+        Assert.Equal(HttpStatusCode.OK, (await LerComoAsync(engenheiro.Navegador, $"/api/v1/obras/{obra2.Id}")).Status);
+
+        var atual = await LerMembroAsync(api.Navegador, engenheiro.UsuarioId);
+        var removido = await api.EscreverAsync(HttpMethod.Post, $"/api/v1/membros/{engenheiro.UsuarioId}/remover", new { versao = atual.GetProperty("versao").GetInt64() });
+        Assert.Equal(HttpStatusCode.OK, removido.Status);
+
+        // Os vínculos saíram, cada um com a sua trilha "remover" (2 de obra, 1 de frente).
+        Assert.Equal("0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.acesso_obra WHERE usuario_id = '{engenheiro.UsuarioId}'"));
+        Assert.Equal("0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.acesso_frente WHERE usuario_id = '{engenheiro.UsuarioId}'"));
+        Assert.Equal("2", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.auditoria WHERE entidade = 'acesso_obra' AND acao = 'remover' AND obra_id IN ('{obra1.Id}', '{obra2.Id}')"));
+        Assert.Equal("1", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.auditoria WHERE entidade = 'acesso_frente' AND acao = 'remover' AND obra_id = '{obra1.Id}'"));
+
+        // Reativar: o membro volta, mas sem ver as obras antigas (404 igual ao de obra inexistente) e com a lista vazia.
+        var reativado = await api.EscreverAsync(HttpMethod.Post, $"/api/v1/membros/{engenheiro.UsuarioId}/reativar", new { versao = removido.Corpo.GetProperty("versao").GetInt64() });
+        Assert.Equal(HttpStatusCode.OK, reativado.Status);
+        Assert.Equal(HttpStatusCode.NotFound, (await LerComoAsync(engenheiro.Navegador, $"/api/v1/obras/{obra1.Id}")).Status);
+        Assert.Equal(HttpStatusCode.NotFound, (await LerComoAsync(engenheiro.Navegador, $"/api/v1/obras/{obra2.Id}")).Status);
+        var lista = await LerComoAsync(engenheiro.Navegador, "/api/v1/obras");
+        Assert.Equal(HttpStatusCode.OK, lista.Status);
+        Assert.Empty(lista.Corpo.EnumerateArray());
+
+        // Controle: reconceder o vínculo traz a obra de volta (a perda era mesmo dos vínculos).
+        await _dados.CriarAcessoObraAsync(api.EmpresaId, obra1.Id, engenheiro.UsuarioId);
+        Assert.Equal(HttpStatusCode.OK, (await LerComoAsync(engenheiro.Navegador, $"/api/v1/obras/{obra1.Id}")).Status);
+    }
+
+    [Fact]
     public async Task Membro_de_outra_empresa_404_identico()
     {
         await using var api = await AmbienteApi.CriarAsync(_banco, _dados);
@@ -265,6 +307,12 @@ public sealed class MembrosApiTestes
         using var resposta = await navegador.GetAsync("/api/v1/membros?incluirRemovidos=true", TestContext.Current.CancellationToken);
         var lida = await AmbienteApi.RespostaJson.LerAsync(resposta);
         return lida.Corpo.EnumerateArray().Single(i => i.GetProperty("usuarioId").GetGuid() == usuario);
+    }
+
+    private static async Task<AmbienteApi.RespostaJson> LerComoAsync(HttpClient navegador, string url)
+    {
+        using var resposta = await navegador.GetAsync(url, TestContext.Current.CancellationToken);
+        return await AmbienteApi.RespostaJson.LerAsync(resposta);
     }
 
     private static async Task<AmbienteApi.RespostaJson> EnviarAsync(HttpClient navegador, string metodo, string url, object corpo)

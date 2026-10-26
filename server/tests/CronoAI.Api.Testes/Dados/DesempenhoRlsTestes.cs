@@ -50,13 +50,17 @@ public sealed partial class DesempenhoRlsTestes
         var semRls = await MedirAsync(c, null, null);
 
         // O que é afirmado (funcional, não de tempo): quantas linhas cada perfil enxerga e que o padrão não correlacionado vira
-        // subplano executado uma vez por consulta (hashed SubPlan ou InitPlan), e não uma subconsulta por linha.
+        // subplano executado uma vez por consulta (hashed SubPlan), e não uma subconsulta por linha.
         Assert.Equal(4500, adminNaoCorrelacionado.Linhas);
         Assert.Equal(1500, engenheiroNaoCorrelacionado.Linhas);
         Assert.Equal(4500, adminCorrelacionado.Linhas);
         Assert.Equal(1500, engenheiroCorrelacionado.Linhas);
         Assert.Equal(6000, semRls.Linhas);
-        Assert.Matches("SubPlan|InitPlan", adminNaoCorrelacionado.Plano);
+        // O padrão adotado vira "hashed SubPlan" (a subconsulta roda UMA vez e vira tabela hash). Se uma versão do PostgreSQL mudar o
+        // plano, este teste avisa antes de a política piorar. (O correlacionado NÃO é afirmado ausente: o plano dele também mostra
+        // "hashed SubPlan" aninhado, e o que o distingue é o tempo, que este teste não afirma.)
+        Assert.Contains("hashed SubPlan", adminNaoCorrelacionado.Plano, StringComparison.Ordinal);
+        Assert.Contains("hashed SubPlan", engenheiroNaoCorrelacionado.Plano, StringComparison.Ordinal);
 
         var resumo = string.Create(
             CultureInfo.InvariantCulture,

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using CronoAI.Api.Testes.Infra;
 using CronoAI.Api.Testes.Infra.IdpTeste;
+using CronoAI.Dominio;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -133,8 +134,14 @@ public sealed class IsolamentoRotasTestes
         // O {id} das rotas de obra é uma obra REAL da empresa B (nunca um guid aleatório: o 404 viria por "não existir").
         var obraB = await _dados.CriarObraAsync(empresaB, usuarioB, DadosTeste.DadosObraValidos(nomeDaObraB));
 
+        // O {usuarioId} da revogação é um membro REAL de B COM vínculo REAL na obra de B: se a rota deixasse A ver a obra, a revogação
+        // daria 204 (e não 404), então o 404 prova a visibilidade e não "vínculo inexistente".
+        var engenheiroB = await _dados.CriarUsuarioAsync();
+        await _dados.VincularAsync(empresaB, engenheiroB, Perfis.EngenheiroObra);
+        await _dados.CriarAcessoObraAsync(empresaB, obraB.Id, engenheiroB);
+
         // Marcadores de vazamento: nomes e ids de B. NÃO o id da obra: ele está na URL e pode voltar no ProblemDetails sem vazamento.
-        var marcadores = new[] { nomeDaB, nomeDaObraB, empresaB.ToString("D"), usuarioB.ToString("D") };
+        var marcadores = new[] { nomeDaB, nomeDaObraB, empresaB.ToString("D"), usuarioB.ToString("D"), engenheiroB.ToString("D") };
         var falhas = new List<string>();
 
         foreach (var entrada in CatalogoRotas.Entradas.Where(e => e.Cenario != CenarioIsolamento.DesenvolvimentoApenas))
@@ -145,7 +152,11 @@ public sealed class IsolamentoRotasTestes
             var rota = new RotaRegistrada(entrada.Metodo, entrada.Padrao, entrada.Cenario == CenarioIsolamento.Anonima);
             var token = rota.EhEscrita ? await ClienteAutenticado.ObterTokenAntiforgeryAsync(navegador) : null;
 
-            using var resposta = await EnviarAsync(navegador, rota, empresaB, new RecursosDeIsolamento(obraB.Id, usuarioB), token);
+            // O corpo do conceder leva um membro REAL da empresa de A (a de quem chama), nunca um usuário aleatório.
+            var membroDeA = await _dados.CriarUsuarioAsync();
+            await _dados.VincularAsync(cenario.Empresas[0], membroDeA, Perfis.EngenheiroObra);
+
+            using var resposta = await EnviarAsync(navegador, rota, empresaB, new RecursosDeIsolamento(obraB.Id, engenheiroB, membroDeA), token);
             var corpo = await resposta.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
             if (entrada.Cenario == CenarioIsolamento.ComIdDeOutraEmpresa && resposta.StatusCode != HttpStatusCode.NotFound)

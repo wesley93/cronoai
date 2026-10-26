@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Security.Claims;
 using CronoAI.Api.Borda;
 using CronoAI.Api.Sessao;
 using CronoAI.Dominio;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace CronoAI.Api.Membros;
@@ -28,10 +30,13 @@ public static class MembrosEndpoints
         ArgumentNullException.ThrowIfNull(api);
 
         // A coleção fica fora do grupo (barra final no padrão), como as obras.
-        api.MapGet("/membros", async Task<Results<Ok<IReadOnlyList<MembroResposta>>, ProblemHttpResult>> (ContextoSessao contexto, ServicoMembros servico, CancellationToken cancelamento, bool incluirRemovidos = false) =>
+        api.MapGet("/membros", async Task<Results<Ok<IReadOnlyList<MembroResposta>>, ProblemHttpResult>> (ClaimsPrincipal usuario, IAuthorizationService autorizacao, ServicoMembros servico, CancellationToken cancelamento, bool incluirRemovidos = false) =>
             {
                 // Listar removidos é gerir: o perfil que só LÊ (gestor de portfólio) recebe 403, como em qualquer ação fora da matriz.
-                if (incluirRemovidos && !(contexto.Perfil is { } perfil && MatrizPermissoes.Permite(perfil, AcoesPermissao.MembrosGerir)))
+                // EXCEÇÃO ÀS REGRAS DA ROTA (uma ação por rota, 403 antes do handler): a ação depende de um parâmetro de consulta, então
+                // a segunda ação é conferida AQUI, mas pela MESMA política por ação (IAuthorizationService), e não por uma cópia da
+                // matriz. Registrada em backend-dotnet.md e no ADR 00010.
+                if (incluirRemovidos && !(await autorizacao.AuthorizeAsync(usuario, PoliticasPermissao.Nome(AcoesPermissao.MembrosGerir))).Succeeded)
                 {
                     return TypedResults.Problem(
                         statusCode: StatusCodes.Status403Forbidden,

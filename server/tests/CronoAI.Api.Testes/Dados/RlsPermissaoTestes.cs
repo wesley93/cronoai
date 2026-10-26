@@ -282,13 +282,17 @@ public sealed class RlsPermissaoTestes
     {
         var c = await CenarioPermissoes.CriarAsync(_dados);
 
-        // Leitura: B só os próprios; A, C (gestor) e G leem todos os vínculos da empresa (B, R e F).
+        // Leitura: B só os próprios; A e G (escopo todas) leem todos os vínculos da empresa (B, R e F); C (gestor de CARTEIRAS) lê
+        // SÓ os das obras das carteiras dele: os três vínculos estão na obra1, que não é da carteira K, então C não lê nenhum
+        // (rodada 02: antes o gestor lia os vínculos da empresa inteira).
         Assert.Equal([c.B], await UsuariosDeAcessoObraAsync(c.B, c.EmpresaX));
         var todos = new[] { c.B, c.R, c.F }.Order().ToList();
-        foreach (var leitor in new[] { c.A, c.C, c.G })
+        foreach (var leitor in new[] { c.A, c.G })
         {
             Assert.Equal(todos, await UsuariosDeAcessoObraAsync(leitor, c.EmpresaX));
         }
+
+        Assert.Empty(await UsuariosDeAcessoObraAsync(c.C, c.EmpresaX));
 
         // B não insere (42501) e DELETE sem WHERE afeta 0 (o USING esconde todas as linhas).
         await using (var comoB = Como(c.B, c.EmpresaX))
@@ -309,6 +313,9 @@ public sealed class RlsPermissaoTestes
         {
             await InserirAcessoObraAsync(comoC, c.EmpresaX, c.Obra2, c.D);
         }
+
+        // Agora C lê o vínculo que acabou de criar na obra2 (do alcance dele) e continua sem ler os da obra1.
+        Assert.Equal([c.D], await UsuariosDeAcessoObraAsync(c.C, c.EmpresaX));
 
         foreach (var obra in new[] { c.Obra1, c.Obra3 })
         {
@@ -357,18 +364,39 @@ public sealed class RlsPermissaoTestes
     }
 
     [Fact]
+    public async Task AcessoObra_leitura_do_gestor_so_no_alcance_mutacao()
+    {
+        // Mutação do USING do SELECT: sem o alcance o gestor de carteiras C (que lê 0 vínculos) passaria a ler os da empresa toda.
+        // O DML é um PERFORM (ROW_COUNT = linhas visíveis); o mesmo script sem a mutação é o controle.
+        var c = await CenarioPermissoes.CriarAsync(_dados);
+
+        var semMutacao = await ScriptRls.ExecutarAsync(_banco, c.C, c.EmpresaX, "PERFORM 1 FROM cronoai.acesso_obra");
+        var comMutacao = await ScriptRls.ExecutarAsync(
+            _banco,
+            c.C,
+            c.EmpresaX,
+            "PERFORM 1 FROM cronoai.acesso_obra",
+            mutacao: "ALTER POLICY pol_acesso_obra_select ON cronoai.acesso_obra USING (true)");
+
+        Assert.True(semMutacao.Afetadas == 0, semMutacao.Erro);
+        Assert.True(comMutacao.Afetadas >= 3, comMutacao.Erro);
+    }
+
+    [Fact]
     public async Task AcessoFrente_leitura_e_escrita()
     {
         var c = await CenarioPermissoes.CriarAsync(_dados);
         var frente2 = await _dados.CriarFrenteAsync(c.EmpresaX, c.Obra2);
         await _dados.CriarAcessoObraAsync(c.EmpresaX, c.Obra2, c.D);
 
-        // Leitura: B não tem frente (0); A, C e G leem a de F.
+        // Leitura: B não tem frente (0); A e G (escopo todas) leem a de F; C (carteiras, sem a obra1) não lê (rodada 02).
         Assert.Empty(await UsuariosDeAcessoFrenteAsync(c.B, c.EmpresaX));
-        foreach (var leitor in new[] { c.A, c.C, c.G })
+        foreach (var leitor in new[] { c.A, c.G })
         {
             Assert.Equal([c.F], await UsuariosDeAcessoFrenteAsync(leitor, c.EmpresaX));
         }
+
+        Assert.Empty(await UsuariosDeAcessoFrenteAsync(c.C, c.EmpresaX));
 
         // B não insere (42501) e DELETE sem WHERE afeta 0.
         await using (var comoB = Como(c.B, c.EmpresaX))
