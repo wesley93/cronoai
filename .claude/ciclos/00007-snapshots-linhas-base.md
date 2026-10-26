@@ -35,7 +35,7 @@ inicio: 2026-10-25
   - abrir no MS Project real o `.xml` com LB1 a LB3 e `BaselineForEarnedValue` (M-4);
   - olhar na tela os textos que mudaram depois da verificação visual (feita em 6aeda18);
   - levar a **Planejamento/Controle**, **Orçamento/Controladoria**, **Jurídico** e **Infraestrutura** os itens da última seção.
-- **Estado:** validadores aprovados na rodada 03 (e99486a): `testes` (gates verdes com `--maxWorkers=2`; mutação (x) fechada; migração 5 → 6 idêntica byte a byte nas fixtures reais), `arquiteto` e `especialista-obra` APROVADOS; `seguranca` APROVADO na rodada 02 (031f156) e não acionado na 03 (só texto e teste). A rodada 04 (9a05047) mudou só 2 textos, sem revalidação; 2ab750b só alinha um comentário. Auditoria independente r01 (318a9f7): REPROVADO só pelo registro (corrigido) e pelo `npm run ci` sem prova de verde na máquina carregada; código e gates obrigatórios PASS. **Estado: aguardando a prova do `npm run ci` e a reauditoria**; falta o CI do PR.
+- **Estado:** validadores aprovados na rodada 03 (e99486a): `testes` (gates verdes com `--maxWorkers=2`; mutação (x) fechada; migração 5 → 6 idêntica byte a byte nas fixtures reais), `arquiteto` e `especialista-obra` APROVADOS; `seguranca` APROVADO na rodada 02 (031f156) e não acionado na 03 (só texto e teste). A rodada 04 (9a05047) mudou só 2 textos, sem revalidação; 2ab750b só alinha um comentário. Auditoria independente r01 (318a9f7): REPROVADO só pelo registro (corrigido) e pelo `npm run ci` sem prova de verde na máquina carregada; código e gates obrigatórios PASS. **Estado: `npm run ci` verde em f34214e (orquestrador); aguardando a reauditoria**; falta o CI do PR.
 
 ## Pedido
 Ciclo 00007 do `docs/specs/PLANO-FASE-1.md` §3.7 (SPEC-04), conforme a §01 do plano. O pedido do usuário é o mesmo do ciclo 00006 ("Pode fazer todas as fases").
@@ -63,7 +63,8 @@ Ciclo 00007 do `docs/specs/PLANO-FASE-1.md` §3.7 (SPEC-04), conforme a §01 do 
 | 9a05047 | Rodada 04: texto livre do arquivo fora da mensagem e notas do recorte por pacote |
 | 2ab750b | Comentário da mensagem da rede de segurança alinhado à rodada 04 (orquestrador; 1 linha de `fechamentos.ts`) |
 | 318a9f7 | Registro do ciclo (rodadas 01 a 04, matriz e ressalvas) |
-| (este commit) | Registro com a auditoria r01 e as correções que ela pediu |
+| f34214e | Registro com a auditoria r01 e as correções que ela pediu |
+| (este commit) | Prova do `npm run ci` com todos os workers, em máquina menos carregada |
 
 ## Rodadas
 | Rodada | testes | arquiteto | especialista-obra | seguranca |
@@ -328,7 +329,7 @@ Avaliação do `arquiteto` r01 para os desvios 1 a 15 do `dev-frontend`; os dema
 
 ## Pendências registradas
 - **V-6 (acessibilidade, Baixo):** no diálogo de retificar, o foco inicial cai no "Fechar", porque as linhas de tarefa carregam depois da abertura. Correção: focar o 1º campo quando o detalhe termina de carregar.
-- **Auditoria independente:** r01 REPROVADO só por registro e pelo CI; reauditoria A PREENCHER. **O gate do PR (`npm run ci`, todos os workers) precisa de prova de verde:** o CI do GitHub do PR ou uma execução numa máquina livre. Na máquina carregada, testes antigos com teto interno de 2.000 ms (`cpm.desempenho`, S-1 "101 calendários") falham de forma intermitente; isolados levam 368 a 897 ms.
+- **Auditoria independente:** r01 REPROVADO só por registro e pelo CI; reauditoria A PREENCHER. **Prova do gate do PR:** o orquestrador rodou `npm run ci` (todos os workers) em f34214e (código = 2ab750b), com a máquina menos carregada: "Test Files 53 passed | 2 skipped (55)", "Tests 1170 passed | 56 skipped (1226)", cobertura 98,46 / 93,92 / 99,39 / 98,46, "✓ built in 15.19s", exit 0. O CI do GitHub do PR segue como confirmação. Na máquina carregada, testes antigos com teto interno de 2.000 ms (`cpm.desempenho`, S-1 "101 calendários") falham de forma intermitente; isolados levam 368 a 897 ms.
 - **Desempenho depois da rede de segurança (NB-1):** medido duas vezes no código final: pelo orquestrador em 2ab750b (mediana 1.392 ms) e pela auditoria r01 em 318a9f7 (mediana 1.443 ms), abaixo dos 2.000 ms do RNF-04.1. Resta só a guarda do CI, mais fraca que a do plano (600 tarefas, 30 s).
 - **Textos da r04 sem teste:** subtítulo e nota da tendência no recorte por pacote e o `{n}` da LB ativa.
 - **Rede de segurança no retificar** sem teste; **`ConstraintError` do IndexedDB real** sem teste (o E2E passa com a mutação b1).
