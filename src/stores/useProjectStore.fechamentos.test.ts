@@ -816,7 +816,7 @@ describe('rodada 02: SEG-1, SEG-2, SEG-5, desvio 9, nota da LB e gravação pend
     const r = await store.fecharDataDeStatus()
     expect(r).toEqual({
       ok: false,
-      erro: `Este fechamento não pode ser gravado: o registro da tarefa UID 2 (EAP "1.${'9'.repeat(38)}…") não passa na validação de leitura (por exemplo, um código de EAP com mais de 200 caracteres) e o registro ficaria ilegível. Corrija o dado (por exemplo, encurte o WBS no MS Project e importe de novo) e tente de novo. Nada foi gravado.`,
+      erro: `Este fechamento não pode ser gravado: o registro da tarefa UID 2 (código de EAP com 302 caracteres) não passa na validação de leitura (por exemplo, um código de EAP com mais de 200 caracteres) e o registro ficaria ilegível. Corrija o dado (por exemplo, encurte o WBS no MS Project e importe de novo) e tente de novo. Nada foi gravado.`,
     })
     expect(adaptador.fechamentos.size).toBe(0)
     expect(adaptador.detalhes.size).toBe(0)

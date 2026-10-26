@@ -421,10 +421,19 @@ describe('rodada 02: SEG-1 (registro que não passa na leitura), SEG-2 (sequênc
   it('SEG-1 (rede de segurança): um código de EAP acima do limite (200) não passa na leitura: a verificação antes de gravar recusa, em português', () => {
     const { cabecalho, detalhe } = comWbs('02.01.' + '9'.repeat(300))
     expect(lerDetalheFechamento(serializarDetalhe(detalhe), cabecalho)).toBeUndefined()
-    // A mensagem diz QUAL tarefa causa a recusa: o UID (301) e os primeiros 40 caracteres do WBS
+    // A mensagem diz QUAL tarefa causa a recusa: só o UID (301) e o TAMANHO do WBS (306), nunca o texto do arquivo
     expect(erroDeGravacaoDoRegistro(cabecalho, serializarDetalhe(detalhe))).toBe(
-      `Este fechamento não pode ser gravado: o registro da tarefa UID 301 (EAP "02.01.${'9'.repeat(34)}…") não passa na validação de leitura (por exemplo, um código de EAP com mais de 200 caracteres) e o registro ficaria ilegível. Corrija o dado (por exemplo, encurte o WBS no MS Project e importe de novo) e tente de novo. Nada foi gravado.`,
+      `Este fechamento não pode ser gravado: o registro da tarefa UID 301 (código de EAP com 306 caracteres) não passa na validação de leitura (por exemplo, um código de EAP com mais de 200 caracteres) e o registro ficaria ilegível. Corrija o dado (por exemplo, encurte o WBS no MS Project e importe de novo) e tente de novo. Nada foi gravado.`,
     )
+    // O-1: quando a causa NÃO é o tamanho do WBS, a mensagem cita só o UID (nada de texto do arquivo)
+    const outra = comWbs('02.01.1')
+    const bruto = JSON.parse(serializarDetalhe(outra.detalhe).json) as { tarefas: unknown[][] }
+    const alvo = bruto.tarefas.find((t) => t[0] === 301) as unknown[]
+    alvo[POS.wbs === 1 ? 2 : 1] = 'texto-do-arquivo-no-lugar-errado'
+    const msg = erroDeGravacaoDoRegistro(outra.cabecalho, { ...serializarDetalhe(outra.detalhe), json: JSON.stringify(bruto) })
+    expect(msg).toContain('o registro da tarefa UID 301 não passa')
+    expect(msg).not.toContain('texto-do-arquivo')
+    expect(msg).not.toContain('(código de EAP com')
     expect(tarefasComWbsLongo([{ wbs: '1' }, { wbs: 'x'.repeat(201) }, { wbs: 'y'.repeat(200) }])).toBe(1)
     // um campo inválido qualquer do cabeçalho também é pego (aqui, um R$ fora da faixa)
     const ruim = { ...cabecalho, totais: { ...cabecalho.totais, ev: -1 } }

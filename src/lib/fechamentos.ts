@@ -434,18 +434,23 @@ export function erroDeGravacaoDoRegistro(cabecalho: CabecalhoFechamento, detalhe
   if (lido && lerDetalheFechamento(detalhe, lido)) return undefined
   // Diz QUAL tarefa causa a recusa (o UID e o início do WBS): o usuário precisa saber o que encurtar no MS Project
   const culpada = tarefaQueNaoPassa(detalhe)
-  const onde = culpada ? `o registro da tarefa UID ${culpada.uid} (EAP "${culpada.wbs.slice(0, 40)}${culpada.wbs.length > 40 ? '…' : ''}") ` : 'algum dado da obra '
+  // Texto livre do arquivo (o WBS) não entra na mensagem: só o UID e o TAMANHO do código (regra de msproject-mspdi.md)
+  const onde = !culpada
+    ? 'algum dado da obra '
+    : culpada.tamanhoWbs > LIMITES_FECHAMENTO.wbs
+      ? `o registro da tarefa UID ${culpada.uid} (código de EAP com ${culpada.tamanhoWbs} caracteres) `
+      : `o registro da tarefa UID ${culpada.uid} `
   return `Este fechamento não pode ser gravado: ${onde}não passa na validação de leitura (por exemplo, um código de EAP com mais de ${LIMITES_FECHAMENTO.wbs} caracteres) e o registro ficaria ilegível. Corrija o dado (por exemplo, encurte o WBS no MS Project e importe de novo) e tente de novo. Nada foi gravado.`
 }
 
-/** A 1ª tarefa do detalhe cuja tupla não passa na validação de leitura (UID e WBS para a mensagem), se houver. */
-function tarefaQueNaoPassa(detalhe: RegistroDetalheFechamento): { uid: number; wbs: string } | undefined {
+/** A 1ª tarefa do detalhe cuja tupla não passa na validação de leitura (UID e tamanho do WBS para a mensagem), se houver. */
+function tarefaQueNaoPassa(detalhe: RegistroDetalheFechamento): { uid: number; tamanhoWbs: number } | undefined {
   try {
     const bruto: unknown = JSON.parse(detalhe.json)
     const tarefas = eObjeto(bruto) && Array.isArray(bruto.tarefas) ? bruto.tarefas : []
     for (const t of tarefas) {
       if (tuplaValida(t)) continue
-      if (Array.isArray(t) && eInteiro(t[0]) && typeof t[1] === 'string') return { uid: t[0], wbs: t[1] }
+      if (Array.isArray(t) && eInteiro(t[0]) && typeof t[1] === 'string') return { uid: t[0], tamanhoWbs: t[1].length }
     }
   } catch {
     /* detalhe que nem é JSON: sem tarefa para apontar */

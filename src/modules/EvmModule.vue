@@ -245,10 +245,10 @@ async function copyReport() {
     </div>
 
     <div class="grid items-start gap-5 xl:grid-cols-2">
-      <SectionCard title="Tendência de SPI e CPI" :subtitle="`${porFechamento ? 'Índices gravados em cada fechamento' : 'Índices acumulados mês a mês'} · ${pkgName ? `pacote ${pkg}` : 'obra inteira'} · abaixo de 1,00 = atraso / estouro`" :icon="Activity">
+      <SectionCard title="Tendência de SPI e CPI" :subtitle="`${porFechamento ? (pkgName ? 'Índices dos fechamentos' : 'Índices gravados em cada fechamento') : 'Índices acumulados mês a mês'} · ${pkgName ? `pacote ${pkg}` : 'obra inteira'} · abaixo de 1,00 = atraso / estouro`" :icon="Activity">
         <IndexTrendChart v-if="indexPoints.length" :points="indexPoints" />
         <p v-else class="py-10 text-center text-xs text-zinc-500">Sem execução registrada neste recorte.</p>
-        <p v-if="project.fechamentos.length" class="mt-2 text-[11px] leading-relaxed text-zinc-500">{{ pkg ? 'Recorte por pacote: índices dos fechamentos (PV da LB vigente).' : 'Índices dos fechamentos calculados contra a linha de base vigente em cada fechamento.' }}</p>
+        <p v-if="project.fechamentos.length" class="mt-2 text-[11px] leading-relaxed text-zinc-500">{{ pkg ? `PV da LB${project.linhaBaseAtiva} do valor agregado atual` : 'Índices dos fechamentos calculados contra a linha de base vigente em cada fechamento.' }}</p>
         <div v-if="indexPoints.length >= 2" class="mt-2 text-[11.5px] text-zinc-500">
           {{ porFechamento ? 'Entre os dois últimos fechamentos' : 'No último mês' }} o SPI {{ trendWord(indexPoints.at(-2)!.spi, indexPoints.at(-1)!.spi) }}
           ({{ fmtIndex(indexPoints.at(-2)!.spi) }} → {{ fmtIndex(indexPoints.at(-1)!.spi) }}) e o CPI {{ trendWord(indexPoints.at(-2)!.cpi, indexPoints.at(-1)!.cpi) }}
