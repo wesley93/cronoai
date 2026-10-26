@@ -44,7 +44,7 @@ inicio: 2026-10-25
   - fazer merge da `master` antes do PR; o PR é empilhado em `feat/00013-obras-auditoria` se o 00013 não tiver entrado (o 00013 ainda depende da sua conferência das UFs, V-1 dele);
   - conferir os jobs do backend e o CodeQL C# verdes no PR;
   - levar à **Segurança da Informação**, ao **Jurídico**, ao **RH** e à **Infraestrutura** os itens da última seção.
-- **Estado:** **validadores aprovados; auditoria independente r01 (42f82cf) REPROVADO por 2 achados Baixo, corrigidos em 675ef32; reauditoria: A PREENCHER.** Falta o CI do PR.
+- **Estado:** **aprovado.** Validadores aprovados na r03 (d8b9637). Auditoria independente: r01 (42f82cf) REPROVADO por 2 Baixos, corrigidos em 675ef32; reauditoria delta (2655744) APROVADO, com a condição de corrigir 2 trechos deste registro, cumprida no commit que o fecha. Falta o CI do PR.
   - `testes`: APROVADO na r01 (796ef21, 597/597 2x, V-2 completa) e na r02 (d6bf1dd, 606/606 2x, mutações reais na migração detectadas). Não foi acionado na r03.
   - `arquiteto`: REPROVADO na r01 (R-1 a R-4) → AJUSTAR na r02 (5 itens) → APROVADO na r03 (d8b9637).
   - `dba`: AJUSTAR na r01 (10 itens, sem bloqueante) → APROVADO na r02 (O1 a O3). Não foi acionado na r03.
@@ -82,10 +82,10 @@ Ciclo 00014 do PLANO-FASE-2 (§5.4): perfis e permissão por obra e por frente, 
 | 01 (796ef21) | APROVADO: 597/597 2x; V-2 completa; 2 defeitos de teste e 1 ressalva da R19 (não bloqueiam) | REPROVADO: R-1 (Média, R19 cega ao Up), R-2 (Média, obra restaurada com responsável removido), R-3 (Baixa, dois tipos públicos por arquivo), R-4 (Baixa, docs); avaliação dos 16 desvios | AJUSTAR: 10 itens (2 MÉDIA, 6 BAIXA, 1 INFO e 1 observação), sem bloqueante | APROVADO: 1 Baixo e 7 Info |
 | 02 (d6bf1dd) | APROVADO: 606/606 2x; mutações reais na migração detectadas; 3 defeitos de teste (não bloqueiam) | AJUSTAR: 5 itens (4 brechas da R19 e 1 de documentação); R-1 a R-4 fechados | APROVADO: O1 a O3, sem bloqueante | APROVADO: 2 Baixo e 2 Info |
 | 03 (d8b9637) | — (não acionado) | APROVADO: sonda H2, H3, H4, H5, S6, H9 e M2 acusam; flag `i` sem falso positivo nos 163 `.cs`; nenhum nome de tabela fora do padrão; docs coerentes; 1 observação (`GerarSql`) | — (não acionado) | — (não acionada) |
-| auditoria r01 (42f82cf) | — | — | — | REPROVADO: 2 Baixos (AUD-1 S-6; AUD-2 documentação); gates no HEAD verdes (613/613); 37 de 48 evidências conferidas |
-| reauditoria (A PREENCHER) | — | — | — | A PREENCHER |
 
-Auditoria independente: r01 (42f82cf) REPROVADO, 2 Baixos (AUD-1: 413 provado só em 1 das 5 escritas novas; AUD-2: `backend-dotnet.md:39` afirmava validação de nome no helper de DML) → 675ef32. Reauditoria: A PREENCHER.
+Auditoria independente (`revisor`, MODO AUDITAR), fora das colunas dos validadores:
+- **r01 (42f82cf):** REPROVADO, 2 Baixos. AUD-1: o 413 só era provado em 1 das 5 escritas novas. AUD-2: `backend-dotnet.md:39` afirmava validação de nome no helper de DML. Gates verdes no HEAD (613/613); 37 de 48 evidências conferidas. Corrigido em 675ef32.
+- **Reauditoria delta (2655744):** APROVADO. AUD-1 e AUD-2 fechados; `server/src` sem diff; gates mínimos verdes no HEAD. Condição: corrigir no registro a tabela de rodadas (o veredito da auditoria estava na coluna `seguranca`) e o cabeçalho da matriz. Corrigido neste registro.
 
 ### Testes do backend, antes → depois
 | Ponto | Total | Fonte |
@@ -96,8 +96,8 @@ Auditoria independente: r01 (42f82cf) REPROVADO, 2 Baixos (AUD-1: 413 provado s�
 | Rodada 03 (d8b9637) | 613 (+7) | só o `dev-backend` r03: 613/613, 9m22s, exit 0. Nenhum validador reexecutou a suíte .NET neste SHA; a auditoria r01 reexecutou no HEAD 42f82cf: "total 613, falhou 0, ignorados 0", 12m12s |
 | Correção da auditoria (675ef32) | 618 (+5) | `dev-backend`: 618/618, exit 0; Theory de 5 casos em `EscritasNovasTestes` |
 
-Regras do `validar-regras` (`node --test`): 111 no fim do 00013; 140 em 796ef21 (`dev-backend`, `testes` r01 e `arquiteto` r01); 146 em d6bf1dd (`dev-backend`, `testes` r02, `dba` r02 e `arquiteto` r02); 160 em d8b9637 (`dev-backend` r03 e `arquiteto` r03).
-`validar-regras --base feat/00013-obras-auditoria --commits`: `149 arquivo(s) | 0 bloqueia, 2 alerta` em 796ef21 (`dev-backend` e `testes` r01); `153 arquivo(s) | 0 bloqueia, 8 alerta` em d6bf1dd (`testes` r02); 0 bloqueia e 8 alertas, os mesmos, em d8b9637 (`dev-backend` r03 e `arquiteto` r03).
+Regras do `validar-regras` (`node --test`): 111 no fim do 00013; 140 em 796ef21 (`dev-backend`, `testes` r01 e `arquiteto` r01); 146 em d6bf1dd (`dev-backend`, `testes` r02, `dba` r02 e `arquiteto` r02); 160 em d8b9637 (`dev-backend` r03 e `arquiteto` r03), 42f82cf (auditoria r01) e 2655744 (reauditoria).
+`validar-regras --base feat/00013-obras-auditoria --commits`: `149 arquivo(s) | 0 bloqueia, 2 alerta` em 796ef21 (`dev-backend` e `testes` r01); `153 arquivo(s) | 0 bloqueia, 8 alerta` em d6bf1dd (`testes` r02); 0 bloqueia e 8 alertas, os mesmos, em d8b9637 (`dev-backend` r03 e `arquiteto` r03), 675ef32 (`dev-backend`) e 2655744 (`154 arquivo(s) | 0 bloqueia, 8 alerta`, reauditoria); `154 arquivo(s) | 0 bloqueia, 8 alerta` em 42f82cf (auditoria r01).
 
 ### Desvios do plano e avaliação do `arquiteto`
 | # | Desvio declarado pelo `dev-backend` | Avaliação do `arquiteto` (r01) e destino |
@@ -124,7 +124,7 @@ Regras do `validar-regras` (`node --test`): 111 no fim do 00013; 140 em 796ef21 
 | r02-c | `Auditoria_de_empresa_inexistente…`: o app agora recebe 42501 antes da FK; a FK é provada pelo superusuário (23503) | `testes` r02: não ficou mais fraco, mas deixa de provar a FK pelo caminho do app, o que agora é impossível por desenho. Registro |
 | r02-d | `PerfisPermissoes` editada no lugar (sem push) | `arquiteto` r02: permitido porque ainda não tem push; diff da `ObrasAuditoria` vazio. Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR |
 
-### Matriz de verificação (HEAD d8b9637; cada linha com a evidência da rodada indicada; a suíte .NET em d8b9637 só foi rodada pelo `dev-backend`)
+### Matriz de verificação (cada linha com a evidência da rodada e do SHA indicados; código de produção final em d8b9637, sem mudança em `server/src` depois dele; suíte .NET reexecutada pela auditoria r01 no HEAD 42f82cf, 613/613, e pelo `dev-backend` em 675ef32, 618/618; reauditoria em 2655744)
 
 | Item | Requisito | Verificação | Obrig. | Estado | Evidência |
 |---|---|---|---|---|---|
@@ -178,7 +178,7 @@ Regras do `validar-regras` (`node --test`): 111 no fim do 00013; 140 em 796ef21 
 | E2E | `npm run e2e` | — | não | NA | front intacto |
 | R02 | Rodada 02: 3 bloqueantes e 13 itens | `testes`, `arquiteto`, `dba` e `seguranca` sobre d6bf1dd | sim | PASS | `testes` r02 APROVADO (606 2x; D1, D2, M1 a M4 e mutações reais PASS); `dba` r02 APROVADO; `seguranca` r02 APROVADO; `arquiteto` r02 AJUSTAR (R-1 a R-4 fechados; 5 itens novos) → rodada 03 |
 | R03 | Rodada 03: R19 (argumento nomeado, caixa, `DROP CONSTRAINT`, `ExecutarDmlComRls`), `ValidarNomeDeTabela`, docs, opcionais | `arquiteto` sobre d8b9637 | sim | PASS | `arquiteto` r03 APROVADO (ver AC-18). Suíte .NET 613/613 declarada pelo `dev-backend`. `testes`, `dba` e `seguranca` não foram acionados |
-| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | A PREENCHER | r01 (42f82cf, 26/10/2026): REPROVADO por 2 Baixos. Gates no HEAD: restore exit 0; build "0 Aviso(s) 0 Erro(s)"; format exit 0; `dotnet test` "total 613, falhou 0, ignorados 0" (12m12s); openapi exit 0; has-pending limpo; vulneráveis: nenhum; `node --test` 160/160; validar-regras "154 arquivo(s) \| 0 bloqueia, 8 alerta"; classificar-diff faixa 3; `npm run ci` exit 0; escopo sem diff no front, Docker, CI e dependências; `*ObrasAuditoria*` vazio; 9/9 commits com o trailer Opus 5.5; 37 de 48 evidências conferidas. Achados AUD-1 (S-6) e AUD-2 (documentação) → 675ef32. Reauditoria: A PREENCHER |
+| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | PASS | r01 (42f82cf, 26/10/2026): REPROVADO por 2 Baixos (AUD-1 S-6; AUD-2 documentação). Gates verdes no HEAD: restore exit 0; build "0 Aviso(s) 0 Erro(s)"; format exit 0; `dotnet test` "total 613, falhou 0, ignorados 0" (12m12s); openapi exit 0; has-pending limpo; vulneráveis: nenhum; `node --test` 160/160; validar-regras "154 arquivo(s) \| 0 bloqueia, 8 alerta"; classificar-diff faixa 3; `npm run ci` exit 0; 37 de 48 evidências conferidas. Reauditoria delta (2655744, 26/10/2026): APROVADO. AUD-1 fechado: Theory `EscritasNovasTestes.Corpo_acima_do_limite_de_8_KB_responde_413_e_nao_grava` nas 5 escritas, corpo de 9 KB contra o limite de 8192 bytes das rotas, e "nada gravado" afirmado em cada caso (último id da trilha, perfil, `removido_em`, `acesso_obra`). Sem o limite a rota daria 400 pelo tamanho do `motivo`, então o 413 distingue. AUD-2 fechado: `backend-dotnet.md:39` e ADR 00009 §6 qualificados, `ExecutarDmlComRls` como pendência do 00014b. `git diff 42f82cf..HEAD -- server/src` vazio. Gates: build Release --no-incremental "0 Aviso(s) 0 Erro(s)"; format exit 0; openapi exit 0; `EscritasNovasTestes` "total 8, falhou 0"; `node --test` 160/160; validar-regras "154 arquivo(s) \| 0 bloqueia, 8 alerta" (os R19 esperados); `npm run lint` exit 0; 2/2 commits com o trailer Opus 5.5. Condição cumprida neste registro: veredito da auditoria fora da coluna `seguranca` na tabela de rodadas, e cabeçalho da matriz com o HEAD atual |
 
 ## Ressalvas dos validadores e destino
 | Origem | Ressalva | Destino |
@@ -220,6 +220,8 @@ Regras do `validar-regras` (`node --test`): 111 no fim do 00013; 140 em 796ef21 
 | auditoria r01 (observação) | Desvio 4 citava `ServicoMembros.cs:248`, linha de 796ef21 (`:257` desde d6bf1dd) | corrigido neste registro |
 | auditoria r01 (observação) | V-2 não refeita depois das mudanças de comportamento da r02 (AUD-4) | registrado (item não obrigatório) |
 | auditoria r01 (observação) | 11 linhas PASS cobertas só pela suíte verde no HEAD, sem leitura do corpo do teste (AC-6, AC-8, AC-10, AC-12, AC-17, AC-19, R-1, S-4, S-5, INV-1, V-2) | registrado |
+| reauditoria | R1 [Baixo]: veredito da auditoria na coluna `seguranca` da tabela de rodadas | corrigido neste registro (auditoria em parágrafo próprio) |
+| reauditoria | R2 [Baixo]: cabeçalho da matriz com "HEAD d8b9637" e a suíte só do `dev-backend` | corrigido neste registro; contagens das regras por SHA completadas |
 | dba r01 | 1 (MÉDIA): T36 com `SubPlan\|InitPlan` não prova o padrão | corrigido (d6bf1dd): afirma `hashed SubPlan` no admin e no engenheiro; negativo retirado (r02-b) |
 | dba r01 | 2 (MÉDIA): R19 não alerta o Up nem o DROP/ADD de `ck_auditoria_acao` | corrigido (6919a73), junto com o R-1 |
 | dba r01 | 3: R19 nas linhas 595-596 (Down): falso positivo aceitável | registrado (alertas esperados e conferidos) |
