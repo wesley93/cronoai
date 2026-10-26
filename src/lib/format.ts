@@ -35,5 +35,9 @@ export function fmtDays(n: number, unit = 'dia útil', plural = 'dias úteis'): 
 }
 
 export function uid(prefix = 'id'): string {
+  // Security enhancement: Use crypto API instead of Math.random for better unpredictability
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return `${prefix}-${crypto.randomUUID().split('-')[0]}-${Date.now().toString(36).slice(-3)}`
+  }
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-3)}`
 }
