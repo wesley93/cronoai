@@ -55,8 +55,9 @@ function reset() {
       <button
         v-for="m in MODULES"
         :key="m.id"
-        class="group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors"
+        class="group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
         :class="ui.current === m.id ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800/80 dark:text-white' : 'text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-900'"
+        :aria-current="ui.current === m.id ? 'page' : undefined"
         @click="ui.current = m.id"
       >
         <component :is="icons[m.id]" class="h-4 w-4 shrink-0" :class="ui.current === m.id ? 'text-amber-500 dark:text-amber-400' : ''" />
