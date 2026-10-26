@@ -85,6 +85,21 @@ describe('FechamentosPainel: lendo × erro de leitura (N-3)', () => {
   })
 })
 
+describe('FechamentosPainel: nota da linha de base do fechamento (ESP, opinião b)', () => {
+  it('a LB do fechamento ainda existe e é a mesma: só "fechado contra a LB0 de ..."; se deixou de existir, a lista mostra "não existe mais" (antes: nada)', async () => {
+    const { store, pinia } = await abrir()
+    const r = await store.fecharDataDeStatus()
+    if (!r.ok) throw new Error(r.erro)
+    montar(FechamentosPainel, pinia)
+    await nextTick()
+    expect(texto('lista-fechamentos')).toContain('fechado contra a LB0 de 27/04/2026')
+    expect(texto('lista-fechamentos')).not.toContain('não existe mais')
+    store.state.linhasBase = [] // a importação de um arquivo sem a LB0 deixa a LB do fechamento sem metadado
+    await nextTick()
+    expect(texto('lista-fechamentos')).toContain('fechado contra a LB0 de 27/04/2026; a LB0 do fechamento não existe mais')
+  })
+})
+
 describe('RetificarFechamentoDialog: erro na prévia (N-10)', () => {
   it('um % acima de 100 mostra o erro NA PRÉVIA, antes de gravar; corrigido o valor, a prévia mostra os totais', async () => {
     const { store, pinia } = await abrir()

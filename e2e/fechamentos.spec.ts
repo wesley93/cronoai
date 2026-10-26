@@ -230,6 +230,7 @@ test('3 fechamentos com avanços diferentes: a tabela da Curva S mostra o EV e o
   await expect(page.getByText('TCPI · obra na data de status')).toBeVisible()
   await expect(page.getByText('Linha de base (LB0 do valor agregado)')).toBeVisible()
   await expect(page.getByText('rede reprogramada; o atraso é medido contra a LB0')).toBeVisible()
+  await expect(page.getByText('(término da LB0:')).toBeVisible() // o término da LB0, dado que a tela já calcula
   await expect(page.getByText('Entre os dois últimos fechamentos o SPI')).toBeVisible()
   await expect(page.getByText('Índices gravados em cada fechamento')).toBeVisible()
   // Tendência e entrega: a tabela traz os 3 fechamentos e a nota dos índices

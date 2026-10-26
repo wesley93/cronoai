@@ -50,6 +50,10 @@ export function rotuloLinhaBase(info: LinhaBaseInfo): string {
   return `LB${info.numero} — ${info.nome}${info.salvaEm && dataHoraIsoValida(info.salvaEm) ? ` (${dataLocalDeIso(info.salvaEm)})` : ''}`
 }
 
+/** A LB0 tem dado: alguma folha com início OU término de linha de base. Uma regra só (migração, tela e salvar). */
+export const temDadoLb0 = (tasks: readonly { isSummary?: unknown; baselineStart?: unknown; baselineFinish?: unknown }[]): boolean =>
+  tasks.some((t) => !t.isSummary && (t.baselineStart !== undefined || t.baselineFinish !== undefined))
+
 /** Dados de uma linha de base de uma tarefa. LB0: os campos atuais, com o custo = `bac`; LB n: o mapa da tarefa. */
 export function dadosDaLinhaBase(t: Task, n: number): DadosLinhaBase | undefined {
   if (n === 0) {

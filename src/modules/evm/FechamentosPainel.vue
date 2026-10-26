@@ -3,10 +3,9 @@
 import { computed, ref } from 'vue'
 import { Download, History, Lock } from '@lucide/vue'
 import SectionCard from '@/components/common/SectionCard.vue'
-import { LIMITES_FECHAMENTO, dmy } from '@/lib/fechamentos'
+import { LIMITES_FECHAMENTO, dmy, trechoDaLinhaBaseDoFechamento } from '@/lib/fechamentos'
 import { downloadText } from '@/lib/download'
 import { fmtBRLCents, fmtIndex } from '@/lib/format'
-import { dataLocalDeIso } from '@/lib/linhasBase'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import FecharDataStatusDialog from './FecharDataStatusDialog.vue'
@@ -24,14 +23,8 @@ const retificadas = computed(() => new Set(project.fechamentos.filter((c) => c.t
 const linhas = computed(() => [...project.fechamentos].sort((a, b) => (a.dataStatus < b.dataStatus ? 1 : a.dataStatus > b.dataStatus ? -1 : b.sequencia - a.sequencia)))
 const quantidadeFechamentos = computed(() => project.fechamentos.filter((c) => c.tipo === 'fechamento').length)
 const indice = (v: number | null) => (v === null ? '—' : fmtIndex(v))
-const linhaBaseAtual = (n: number) => project.state.linhasBase.find((i) => i.numero === n)
-/** "fechado contra a LB1 de 25/10/2026": a LB pode ter sido sobrescrita depois, e a data diz de qual versão se fala. */
-const notaDaLinhaBase = (c: { linhaBase: number; linhaBaseSalvaEm?: string }) => {
-  const atual = linhaBaseAtual(c.linhaBase)
-  const salva = c.linhaBaseSalvaEm ? ` de ${dataLocalDeIso(c.linhaBaseSalvaEm)}` : ''
-  const mudou = c.linhaBaseSalvaEm !== undefined && atual?.salvaEm !== undefined && atual.salvaEm !== c.linhaBaseSalvaEm
-  return `fechado contra a LB${c.linhaBase}${salva}${mudou ? `; a LB${c.linhaBase} atual é de ${dataLocalDeIso(atual!.salvaEm!)}` : ''}`
-}
+/** "fechado contra a LB1 de 25/10/2026": a LB pode ter sido sobrescrita, trocada por importação ou deixado de existir, e a frase diz isso (a mesma das notas da curva). */
+const notaDaLinhaBase = (c: { linhaBase: number; linhaBaseSalvaEm?: string }) => trechoDaLinhaBaseDoFechamento(c, project.state.linhasBase).texto
 /** Exporta o histórico (JSON): as linhas de base e todos os fechamentos e retificações. Só saída: nada é enviado pela rede. */
 async function exportarHistorico() {
   const r = await project.exportarHistorico()

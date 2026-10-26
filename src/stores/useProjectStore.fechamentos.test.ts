@@ -14,6 +14,8 @@ import { buildSeedState, useProjectStore } from './useProjectStore'
 const SET_SEM_FECHAMENTO_EV = 5396674.208144797
 /** Entrega do arquivo de teste importado com início em 01/12/2026 (a data de início da obra, 04/05/2026, é mantida; as folhas têm SNET inferida do arquivo). Medido. */
 const ENTREGA_DEPOIS_DO_IMPORT = '2026-12-17'
+/** Atraso (d.u.) do arquivo de teste importado com a LB0 calculada a partir da data de início mantida. Medido. */
+const ATRASO_DEPOIS_DO_IMPORT = 159
 const MSG_JA_EXISTE = "Já existe fechamento em 23/10/2026: use 'Retificar'."
 const MSG_ANTERIOR = "A data de status não pode ser anterior ao último fechamento (23/10/2026). Para corrigir um fechamento, use 'Retificar'."
 const MSG_OBRA_MUDOU = 'A obra ativa mudou durante a operação. Nada foi gravado: refaça na obra desejada.'
@@ -781,14 +783,40 @@ describe('rodada 02: SEG-1, SEG-2, SEG-5, desvio 9, nota da LB e gravação pend
     expect(JSON.parse(exportado.texto).fechamentos).toHaveLength(1)
   })
 
+  it('SEG-1 (testes, nota 1): TAB e U+0085 no WBS de uma folha e de um pacote: fechar, reabrir e 0 ilegíveis, com o WBS gravado já limpo', async () => {
+    const pacote = '1	0'
+    const folha = '1	0.12'
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Project xmlns="http://schemas.microsoft.com/project"><Title>Obra fictícia</Title><StartDate>2026-03-02T08:00:00</StartDate><StatusDate>2026-03-06T17:00:00</StatusDate>
+<Tasks>
+<Task><UID>1</UID><ID>1</ID><Name>Pacote</Name><WBS>${pacote}</WBS><OutlineNumber>1</OutlineNumber><OutlineLevel>1</OutlineLevel><Start>2026-03-02T08:00:00</Start><Finish>2026-03-13T17:00:00</Finish><Duration>PT80H0M0S</Duration><Summary>1</Summary></Task>
+<Task><UID>2</UID><ID>2</ID><Name>Alvenaria</Name><WBS>${folha}</WBS><OutlineNumber>1.1</OutlineNumber><OutlineLevel>2</OutlineLevel><Start>2026-03-02T08:00:00</Start><Finish>2026-03-13T17:00:00</Finish><Duration>PT80H0M0S</Duration><Summary>0</Summary><Cost>1000.00</Cost>
+<Baseline><Number>0</Number><Start>2026-03-02T08:00:00</Start><Finish>2026-03-13T17:00:00</Finish><Duration>PT80H0M0S</Duration><Cost>1000.00</Cost></Baseline></Task>
+</Tasks></Project>`
+    const { adaptador, store } = await abrir()
+    store.importXml(xml)
+    expect(store.state.tasks.map((t) => t.wbs)).toEqual([pacote, folha]) // os controles entraram na obra
+    await fechar(store)
+    await store.salvarAgora()
+    const gravado = [...adaptador.fechamentos.values()][0] as CabecalhoFechamento
+    expect(gravado.porPacote.map((p) => p.wbs)).toEqual(['1 0']) // o WBS do pacote já limpo
+    expect(JSON.parse((adaptador.detalhes.get(gravado.id) as { json: string }).json).tarefas.map((t: unknown[]) => t[1])).toEqual(['1 0.1 2']) // e o da folha
+    const reaberta = await reabrir(adaptador)
+    expect(reaberta.fechamentosIlegiveis).toBe(0)
+    expect(reaberta.avisoFechamentos).toBe('')
+    expect(reaberta.fechamentos).toHaveLength(1)
+  })
+
   it('SEG-1 (rede de segurança): WBS acima do limite: o fechamento é RECUSADO em português, nada é gravado e o log e o estado ficam iguais', async () => {
     const { adaptador, store } = await abrir()
-    store.importXml(xmlComTabEWbsLongo('1.' + '9'.repeat(300)))
+    const avisosDoImport = store.importXml(xmlComTabEWbsLongo('1.' + '9'.repeat(300)))
+    // NB-2: o import já avisa que não será possível fechar enquanto houver WBS acima do limite
+    expect(avisosDoImport).toContain('1 tarefa(s) com código de EAP (WBS) acima de 200 caracteres: não será possível fechar a data de status desta obra até encurtar o WBS no MS Project e importar de novo.')
     const antes = JSON.stringify(store.state.log)
     const r = await store.fecharDataDeStatus()
     expect(r).toEqual({
       ok: false,
-      erro: 'Este fechamento não pode ser gravado: algum dado da obra (por exemplo, um código de EAP com mais de 200 caracteres) não passa na validação de leitura e o registro ficaria ilegível. Nada foi gravado.',
+      erro: `Este fechamento não pode ser gravado: o registro da tarefa UID 2 (EAP "1.${'9'.repeat(38)}…") não passa na validação de leitura (por exemplo, um código de EAP com mais de 200 caracteres) e o registro ficaria ilegível. Corrija o dado (por exemplo, encurte o WBS no MS Project e importe de novo) e tente de novo. Nada foi gravado.`,
     })
     expect(adaptador.fechamentos.size).toBe(0)
     expect(adaptador.detalhes.size).toBe(0)
@@ -865,14 +893,17 @@ describe('rodada 02: SEG-1, SEG-2, SEG-5, desvio 9, nota da LB e gravação pend
       .replace(/<Baseline>[\s\S]*?<\/Baseline>/g, '')
       .replace('<BaselineForEarnedValue>3</BaselineForEarnedValue>', '')
     const avisos = store.importXml(xml)
-    expect(avisos).toContain('A data de início do arquivo (01/12/2026) é posterior ao primeiro fechamento (23/10/2026): o CronoAI manteve a data de início atual (04/05/2026). Confira se o arquivo é da mesma obra; a exportação levará a data de início mantida.')
+    expect(avisos).toContain('A data de início do arquivo (01/12/2026) é posterior ao primeiro fechamento (23/10/2026): o CronoAI manteve a data de início atual (04/05/2026). Confira se o arquivo é da mesma obra; a exportação levará a data de início mantida. A linha de base 0 que o arquivo não trazia foi calculada a partir da data de início mantida (04/05/2026): o PV e o atraso dessas tarefas não refletem o arquivo.')
     expect(store.state.meta.startDate).toBe('2026-05-04') // mantida
     expect(store.state.meta.statusDate).toBe('2026-12-10') // a de status é posterior ao último fechamento: vale a do arquivo
     expect(entregaAntes).toBe('2027-06-23')
     expect(store.schedule.projectFinish).toBe(ENTREGA_DEPOIS_DO_IMPORT)
     // a LB0 que o arquivo não trazia foi calculada pelo CronoAI, com os metadados dela
     expect(store.state.linhasBase).toEqual([expect.objectContaining({ numero: 0, motivo: 'Calculada na importação: o arquivo não trazia a linha de base 0', origem: 'cronoai' })])
-    expect(store.state.tasks.filter((t) => !t.isSummary).every((t) => t.baselineStart !== undefined && t.baselineFinish !== undefined)).toBe(true)
+    // As datas da LB0 calculada saem da data de início MANTIDA (04/05/2026), e não das do arquivo (01/12/2026)
+    expect(store.state.tasks.filter((t) => !t.isSummary).map((t) => [t.uid, t.baselineStart, t.baselineFinish])).toEqual([[2, '2026-05-04', '2026-05-08'], [3, '2026-05-04', '2026-05-08']])
+    // O efeito no atraso: a LB0 de maio contra o previsto de dezembro (a entrega do teste é 17/12/2026)
+    expect(store.delay.delayDays).toBe(ATRASO_DEPOIS_DO_IMPORT)
     // a exportação leva a data de início mantida
     expect(store.exportXml().xml).toContain('<StartDate>2026-05-04T08:00:00</StartDate>')
     expect(store.fechamentos).toHaveLength(1) // o histórico não é tocado
@@ -886,6 +917,8 @@ describe('rodada 02: SEG-1, SEG-2, SEG-5, desvio 9, nota da LB e gravação pend
     store.importXml(fixtureLinhasBase)
     // as LBs importadas ganham a data da importação como data de gravação
     expect(store.state.linhasBase.every((i) => i.salvaEm === '2026-10-26T15:00:00.000Z' && i.origem === 'arquivo')).toBe(true)
+    // ... mas NÃO a data de status do import: ela não é a data em que a LB foi feita
+    expect(store.state.linhasBase.every((i) => i.dataStatus === undefined)).toBe(true)
     expect(store.notasDaCurva).toEqual(['Fechamento de 23/10/2026: fechado contra a LB0 de 27/04/2026; a LB0 atual é de 26/10/2026. O PV da curva é o da LB3.']) // o arquivo traz BaselineForEarnedValue 3
   })
 

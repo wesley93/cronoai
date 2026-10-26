@@ -431,10 +431,48 @@ export const avisoDeRepetidas = (repetidas: number): string =>
  */
 export function erroDeGravacaoDoRegistro(cabecalho: CabecalhoFechamento, detalhe: RegistroDetalheFechamento): string | undefined {
   const lido = validarCabecalhoFechamento(JSON.parse(JSON.stringify(cabecalho)), cabecalho.obraId)
-  if (!lido || !lerDetalheFechamento(detalhe, lido)) {
-    return `Este fechamento não pode ser gravado: algum dado da obra (por exemplo, um código de EAP com mais de ${LIMITES_FECHAMENTO.wbs} caracteres) não passa na validação de leitura e o registro ficaria ilegível. Nada foi gravado.`
+  if (lido && lerDetalheFechamento(detalhe, lido)) return undefined
+  // Diz QUAL tarefa causa a recusa (o UID e o início do WBS): o usuário precisa saber o que encurtar no MS Project
+  const culpada = tarefaQueNaoPassa(detalhe)
+  const onde = culpada ? `o registro da tarefa UID ${culpada.uid} (EAP "${culpada.wbs.slice(0, 40)}${culpada.wbs.length > 40 ? '…' : ''}") ` : 'algum dado da obra '
+  return `Este fechamento não pode ser gravado: ${onde}não passa na validação de leitura (por exemplo, um código de EAP com mais de ${LIMITES_FECHAMENTO.wbs} caracteres) e o registro ficaria ilegível. Corrija o dado (por exemplo, encurte o WBS no MS Project e importe de novo) e tente de novo. Nada foi gravado.`
+}
+
+/** A 1ª tarefa do detalhe cuja tupla não passa na validação de leitura (UID e WBS para a mensagem), se houver. */
+function tarefaQueNaoPassa(detalhe: RegistroDetalheFechamento): { uid: number; wbs: string } | undefined {
+  try {
+    const bruto: unknown = JSON.parse(detalhe.json)
+    const tarefas = eObjeto(bruto) && Array.isArray(bruto.tarefas) ? bruto.tarefas : []
+    for (const t of tarefas) {
+      if (tuplaValida(t)) continue
+      if (Array.isArray(t) && eInteiro(t[0]) && typeof t[1] === 'string') return { uid: t[0], wbs: t[1] }
+    }
+  } catch {
+    /* detalhe que nem é JSON: sem tarefa para apontar */
   }
   return undefined
+}
+
+/** Quantas tarefas têm código de EAP acima do limite do fechamento (aviso na importação: nenhum fechamento será gravado enquanto existirem). */
+export const tarefasComWbsLongo = (tasks: readonly { wbs: string }[]): number => tasks.filter((t) => t.wbs.length > LIMITES_FECHAMENTO.wbs).length
+
+/**
+ * Trecho da nota de um fechamento sobre a linha de base dele ("fechado contra a LB1 de 25/10/2026; ..."): a mesma frase na lista e nas notas da curva.
+ * `diferente` = a LB de hoje não é a do fechamento (sobrescrita, trocada por importação ou inexistente).
+ */
+export function trechoDaLinhaBaseDoFechamento(c: { linhaBase: number; linhaBaseSalvaEm?: string }, infos: readonly { numero: number; salvaEm?: string }[]): { texto: string; diferente: boolean } {
+  const atual = infos.find((i) => i.numero === c.linhaBase)
+  // Sobrescrita, trocada por importação (a LB atual sem data de gravação conta como diferente) ou que não existe mais: o PV de hoje não é o do fechamento
+  const diferente = c.linhaBaseSalvaEm !== undefined && atual?.salvaEm !== c.linhaBaseSalvaEm
+  const quando = c.linhaBaseSalvaEm ? ` de ${dataLocalDeIso(c.linhaBaseSalvaEm)}` : ''
+  const depois = !diferente
+    ? ''
+    : !atual
+      ? `; a LB${c.linhaBase} do fechamento não existe mais`
+      : atual.salvaEm
+        ? `; a LB${c.linhaBase} atual é de ${dataLocalDeIso(atual.salvaEm)}`
+        : `; a LB${c.linhaBase} atual não é mais a mesma (foi trocada)`
+  return { texto: `fechado contra a LB${c.linhaBase}${quando}${depois}`, diferente }
 }
 
 function tuplaValida(t: unknown): TarefaFechamento | undefined {
@@ -536,13 +574,9 @@ export function notasDaLinhaBaseDosFechamentos(
 ): string[] {
   const notas: string[] = []
   for (const c of efetivosDaObra) {
-    const atual = infos.find((i) => i.numero === c.linhaBase)
-    // Sobrescrita, ou trocada por importação (a LB atual sem data de gravação conta como diferente): o PV de hoje não é o do fechamento
-    const sobrescrita = c.linhaBaseSalvaEm !== undefined && atual?.salvaEm !== c.linhaBaseSalvaEm
-    if (c.linhaBase === linhaBaseAtiva && !sobrescrita) continue
-    const quando = c.linhaBaseSalvaEm ? ` de ${dataLocalDeIso(c.linhaBaseSalvaEm)}` : ''
-    const depois = sobrescrita ? (atual?.salvaEm ? `; a LB${c.linhaBase} atual é de ${dataLocalDeIso(atual.salvaEm)}` : `; a LB${c.linhaBase} atual não é mais a mesma (foi trocada)`) : ''
-    notas.push(`Fechamento de ${dmy(c.dataStatus)}: fechado contra a LB${c.linhaBase}${quando}${depois}.${c.linhaBase !== linhaBaseAtiva ? ` O PV da curva é o da LB${linhaBaseAtiva}.` : ''}`)
+    const { texto, diferente } = trechoDaLinhaBaseDoFechamento(c, infos)
+    if (c.linhaBase === linhaBaseAtiva && !diferente) continue
+    notas.push(`Fechamento de ${dmy(c.dataStatus)}: ${texto}.${c.linhaBase !== linhaBaseAtiva ? ` O PV da curva é o da LB${linhaBaseAtiva}.` : ''}`)
   }
   return notas
 }

@@ -24,6 +24,8 @@ import {
   notasDaLinhaBaseDosFechamentos,
   proximaSequencia,
   retificar,
+  tarefasComWbsLongo,
+  trechoDaLinhaBaseDoFechamento,
   serializarDetalhe,
   serieDosFechamentos,
   validarCabecalhoFechamento,
@@ -419,9 +421,11 @@ describe('rodada 02: SEG-1 (registro que não passa na leitura), SEG-2 (sequênc
   it('SEG-1 (rede de segurança): um código de EAP acima do limite (200) não passa na leitura: a verificação antes de gravar recusa, em português', () => {
     const { cabecalho, detalhe } = comWbs('02.01.' + '9'.repeat(300))
     expect(lerDetalheFechamento(serializarDetalhe(detalhe), cabecalho)).toBeUndefined()
+    // A mensagem diz QUAL tarefa causa a recusa: o UID (301) e os primeiros 40 caracteres do WBS
     expect(erroDeGravacaoDoRegistro(cabecalho, serializarDetalhe(detalhe))).toBe(
-      'Este fechamento não pode ser gravado: algum dado da obra (por exemplo, um código de EAP com mais de 200 caracteres) não passa na validação de leitura e o registro ficaria ilegível. Nada foi gravado.',
+      `Este fechamento não pode ser gravado: o registro da tarefa UID 301 (EAP "02.01.${'9'.repeat(34)}…") não passa na validação de leitura (por exemplo, um código de EAP com mais de 200 caracteres) e o registro ficaria ilegível. Corrija o dado (por exemplo, encurte o WBS no MS Project e importe de novo) e tente de novo. Nada foi gravado.`,
     )
+    expect(tarefasComWbsLongo([{ wbs: '1' }, { wbs: 'x'.repeat(201) }, { wbs: 'y'.repeat(200) }])).toBe(1)
     // um campo inválido qualquer do cabeçalho também é pego (aqui, um R$ fora da faixa)
     const ruim = { ...cabecalho, totais: { ...cabecalho.totais, ev: -1 } }
     expect(erroDeGravacaoDoRegistro(ruim, serializarDetalhe(fe1().detalhe))).toContain('Nada foi gravado.')
@@ -465,7 +469,10 @@ describe('rodada 02: SEG-1 (registro que não passa na leitura), SEG-2 (sequênc
     const c: CabecalhoFechamento = { ...fe1().cabecalho, linhaBaseSalvaEm: '2026-04-27T12:00:00.000Z' }
     expect(notasDaLinhaBaseDosFechamentos([c], 0, [{ numero: 0, salvaEm: '2026-04-27T12:00:00.000Z' }])).toEqual([]) // a mesma LB: sem nota
     expect(notasDaLinhaBaseDosFechamentos([c], 0, [{ numero: 0 }])).toEqual(['Fechamento de 23/10/2026: fechado contra a LB0 de 27/04/2026; a LB0 atual não é mais a mesma (foi trocada).'])
-    expect(notasDaLinhaBaseDosFechamentos([c], 0, [])).toEqual(['Fechamento de 23/10/2026: fechado contra a LB0 de 27/04/2026; a LB0 atual não é mais a mesma (foi trocada).'])
+    // A LB do fechamento deixou de existir (a importação trouxe outras): a nota diz isso, em vez de "foi trocada"
+    expect(notasDaLinhaBaseDosFechamentos([c], 0, [])).toEqual(['Fechamento de 23/10/2026: fechado contra a LB0 de 27/04/2026; a LB0 do fechamento não existe mais.'])
+    expect(trechoDaLinhaBaseDoFechamento(c, [])).toEqual({ texto: 'fechado contra a LB0 de 27/04/2026; a LB0 do fechamento não existe mais', diferente: true })
+    expect(trechoDaLinhaBaseDoFechamento(c, [{ numero: 0, salvaEm: '2026-04-27T12:00:00.000Z' }])).toEqual({ texto: 'fechado contra a LB0 de 27/04/2026', diferente: false })
     // fechamento de uma LB migrada (sem data de gravação): não há como comparar, sem nota
     expect(notasDaLinhaBaseDosFechamentos([{ ...c, linhaBaseSalvaEm: undefined }], 0, [{ numero: 0 }])).toEqual([])
   })

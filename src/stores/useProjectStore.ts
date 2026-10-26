@@ -65,7 +65,7 @@ import {
   semDiasExtras,
 } from '@/lib/calendarioTrabalho'
 import { computeSchedule, optsDaObra, withBaseline } from '@/lib/cpm'
-import { NUMERO_MAX_LINHA_BASE, normalizarQuebras, avisoTarefasSemLinhaBase, dataLocalDeIso, linhaBaseAtivaEfetiva, linhaBaseDoCronograma, projetarLinhaBase, rotuloLinhaBase, validarTextosLinhaBase } from '@/lib/linhasBase'
+import { NUMERO_MAX_LINHA_BASE, temDadoLb0, normalizarQuebras, avisoTarefasSemLinhaBase, dataLocalDeIso, linhaBaseAtivaEfetiva, linhaBaseDoCronograma, projetarLinhaBase, rotuloLinhaBase, validarTextosLinhaBase } from '@/lib/linhasBase'
 import { computeEvm, computePackageEvm, computeSCurve, eacVariants, forecastFinishBySpi, plannedFraction, type HistoricoCurva } from '@/lib/evm'
 import { compararFechamentos, type ResultadoComparacao } from '@/lib/comparacaoFechamentos'
 import { montarExportacaoHistorico } from '@/lib/exportacaoHistorico'
@@ -137,6 +137,7 @@ import {
   erroDeDataDeStatus,
   erroDeTextosFechamento,
   hojeLocalIso,
+  tarefasComWbsLongo,
   lerDetalheFechamento as lerDetalheDoRegistro,
   notasDaLinhaBaseDosFechamentos,
   proximaSequencia,
@@ -1364,7 +1365,7 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /** Alguma folha tem dado de LB0 (início ou término da linha de base). */
-  const temDadosLinhaBase0 = computed(() => state.tasks.some((t) => !t.isSummary && (t.baselineStart !== undefined || t.baselineFinish !== undefined)))
+  const temDadosLinhaBase0 = computed(() => temDadoLb0(state.tasks))
 
   /**
    * Obra com dado de LB0 e sem o metadado dela (obra em branco que ganhou tarefas por SINAPI ou planilha): cria o metadado pela mesma regra da migração
@@ -1716,7 +1717,7 @@ export const useProjectStore = defineStore('project', () => {
     if (calculo.value.erro) return { ok: false, erro: calculo.value.erro }
     const n = d.numero
     const existente = state.linhasBase.find((i) => i.numero === n)
-    const temDadosLb0 = n === 0 && state.tasks.some((t) => !t.isSummary && t.baselineStart !== undefined)
+    const temDadosLb0 = n === 0 && temDadoLb0(state.tasks)
     if ((existente || temDadosLb0) && !d.confirmarSobrescrita) {
       const quem = existente ? descreverLinhaBase(existente) : 'Linha de base 0'
       return { ok: false, precisaConfirmar: true, erro: `A linha de base ${n} já existe (${quem}). Confirme para substituí-la.` }
@@ -1819,7 +1820,9 @@ export const useProjectStore = defineStore('project', () => {
       meta.statusDate = state.meta.statusDate
     }
     const primeiroFechamento = efetivos(fechamentos.value)[0]
+    let avisoDoInicioMantido = -1
     if (primeiroFechamento && meta.startDate > primeiroFechamento.dataStatus) {
+      avisoDoInicioMantido = avisosDeFechamento.length
       avisosDeFechamento.push(`A data de início do arquivo (${dmy(meta.startDate)}) é posterior ao primeiro fechamento (${dmy(primeiroFechamento.dataStatus)}): o CronoAI manteve a data de início atual (${dmy(state.meta.startDate)}). Confira se o arquivo é da mesma obra; a exportação levará a data de início mantida.`)
       meta.startDate = state.meta.startDate
     }
@@ -1829,15 +1832,20 @@ export const useProjectStore = defineStore('project', () => {
     } catch (e) {
       throw new Error(`Arquivo não importado: ${mensagemDoCalculo(e)}`)
     }
+    // A LB0 que o arquivo não trazia é calculada a partir da data de início MANTIDA: o aviso diz que o PV e o atraso dessas tarefas não refletem o arquivo
+    if (avisoDoInicioMantido >= 0 && result.tasks.some((t) => !t.isSummary && t.baselineStart === undefined && t.baselineFinish === undefined)) {
+      avisosDeFechamento[avisoDoInicioMantido] += ` A linha de base 0 que o arquivo não trazia foi calculada a partir da data de início mantida (${dmy(meta.startDate)}): o PV e o atraso dessas tarefas não refletem o arquivo.`
+    }
     // O cálculo previsto (data de status), o EVM e a Curva S do estado novo também precisam caber no horizonte de 50 anos
     const erroHorizonte = verificarCalculo(tasks, meta, result.calendarios, result.calendarioPadraoUid, state.feriados)
     if (erroHorizonte) throw new Error(`Arquivo não importado: ${erroHorizonte}`)
     const uids = new Set(tasks.map((t) => t.uid))
     // Linhas de base do arquivo (0 a 10). A LB0 que o arquivo não trouxe e o CronoAI calculou (`baselineFor`, só nas que faltam) ganha os metadados dela
     const gravadaEm = agora()
-    const linhasBase = result.linhasBase.map((i) => ({ ...i, salvaEm: gravadaEm, dataStatus: meta.statusDate }))
+    // Sem `dataStatus`: a data de status do import não é a data em que a LB foi feita (a LB do arquivo não a traz)
+    const linhasBase = result.linhasBase.map((i) => ({ ...i, salvaEm: gravadaEm }))
     if (!linhasBase.some((i) => i.numero === 0) && tasks.some((t) => !t.isSummary && t.baselineStart !== undefined)) {
-      linhasBase.unshift({ numero: 0, nome: 'Linha de base 0', motivo: 'Calculada na importação: o arquivo não trazia a linha de base 0', salvaEm: agora(), dataStatus: meta.statusDate, origem: 'cronoai' })
+      linhasBase.unshift({ numero: 0, nome: 'Linha de base 0', motivo: 'Calculada na importação: o arquivo não trazia a linha de base 0', salvaEm: agora(), origem: 'cronoai' })
     }
     state.meta = meta
     state.tasks = tasks
@@ -1851,6 +1859,10 @@ export const useProjectStore = defineStore('project', () => {
     state.recoveryCosts = []
     state.undo = []
     log('importacao', 'Importado do MS Project (.xml)', `${tasks.length} tarefas carregadas de "${meta.name}".`)
+    const wbsLongos = tarefasComWbsLongo(tasks)
+    if (wbsLongos > 0) {
+      avisosDeFechamento.push(`${wbsLongos} tarefa(s) com código de EAP (WBS) acima de ${LIMITES_FECHAMENTO.wbs} caracteres: não será possível fechar a data de status desta obra até encurtar o WBS no MS Project e importar de novo.`)
+    }
     return [...result.warnings, ...avisosDeFechamento]
   }
 

@@ -6,7 +6,7 @@ import { UID_CALENDARIO_PADRAO, calendarioPadrao, diasParaMinutos, erroDoCalenda
 import type { CalendarioObra, ChavePremissa, VersaoPremissas } from '@/types/domain'
 import { configFeriadosPadrao, sanearConfigFeriados } from './feriadosObra'
 import { premissasPadrao, versoesValidas } from './premissas'
-import { linhaBaseAtivaEfetiva, sanearInfosLinhaBase, sanearLinhasBase } from './linhasBase'
+import { linhaBaseAtivaEfetiva, sanearInfosLinhaBase, sanearLinhasBase, temDadoLb0 } from './linhasBase'
 import { chaveRecorte, lerChaveRecorte } from './recorteSinapi'
 
 /**
@@ -194,7 +194,7 @@ function sanearCamposDoRecorte(estado: EstadoBruto): string[] {
 const INFO_LB0_MIGRADA = { numero: 0, nome: 'Linha de base 0', motivo: 'Linha de base salva antes do ciclo 00007 (migrada)', origem: 'migrada' } as const
 
 /** Alguma folha com início ou término de linha de base: a obra tem LB0. */
-const temLinhaBase0 = (tasks: unknown): boolean => Array.isArray(tasks) && tasks.some((t) => eObjeto(t) && !t.isSummary && (t.baselineStart !== undefined || t.baselineFinish !== undefined))
+const temLinhaBase0 = (tasks: unknown): boolean => Array.isArray(tasks) && temDadoLb0(tasks.filter(eObjeto))
 
 /** Passo 5 → 6: só acrescenta `linhasBase` (a LB0 migrada, se há linha de base salva). Tarefas, meta, undo e o resto não mudam: nenhum número muda. */
 function migrar5Para6(estado: EstadoBruto): EstadoBruto {
