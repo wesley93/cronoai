@@ -24,7 +24,7 @@ async function onFile(e: Event) {
 
 <template>
   <header class="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-zinc-200 bg-white/85 px-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85">
-    <button class="btn-ghost px-2 lg:hidden" aria-label="Abrir menu" @click="ui.sidebarOpen = !ui.sidebarOpen"><Menu class="h-4 w-4" /></button>
+    <button class="btn-ghost px-2 lg:hidden" aria-label="Abrir menu" :aria-expanded="ui.sidebarOpen" @click="ui.sidebarOpen = !ui.sidebarOpen"><Menu class="h-4 w-4" /></button>
 
     <div class="min-w-0 flex-1">
       <div class="truncate text-sm font-semibold tracking-tight">{{ project.state.meta.name }}</div>
