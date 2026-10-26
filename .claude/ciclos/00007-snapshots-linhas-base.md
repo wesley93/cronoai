@@ -35,7 +35,7 @@ inicio: 2026-10-25
   - abrir no MS Project real o `.xml` com LB1 a LB3 e `BaselineForEarnedValue` (M-4);
   - olhar na tela os textos que mudaram depois da verificação visual (feita em 6aeda18);
   - levar a **Planejamento/Controle**, **Orçamento/Controladoria**, **Jurídico** e **Infraestrutura** os itens da última seção.
-- **Estado:** validadores aprovados na rodada 03 (e99486a): `testes` (gates verdes com `--maxWorkers=2`; mutação (x) fechada; migração 5 → 6 idêntica byte a byte nas fixtures reais), `arquiteto` e `especialista-obra` APROVADOS; `seguranca` APROVADO na rodada 02 (031f156) e não acionado na 03 (só texto e teste). A rodada 04 (9a05047) mudou só 2 textos, sem revalidação; 2ab750b só alinha um comentário. **Estado: aguardando a auditoria independente**, que também reexecuta os gates no HEAD; falta o CI do PR.
+- **Estado:** validadores aprovados na rodada 03 (e99486a): `testes` (gates verdes com `--maxWorkers=2`; mutação (x) fechada; migração 5 → 6 idêntica byte a byte nas fixtures reais), `arquiteto` e `especialista-obra` APROVADOS; `seguranca` APROVADO na rodada 02 (031f156) e não acionado na 03 (só texto e teste). A rodada 04 (9a05047) mudou só 2 textos, sem revalidação; 2ab750b só alinha um comentário. Auditoria independente r01 (318a9f7): REPROVADO só pelo registro (corrigido) e pelo `npm run ci` sem prova de verde na máquina carregada; código e gates obrigatórios PASS. **Estado: aguardando a prova do `npm run ci` e a reauditoria**; falta o CI do PR.
 
 ## Pedido
 Ciclo 00007 do `docs/specs/PLANO-FASE-1.md` §3.7 (SPEC-04), conforme a §01 do plano. O pedido do usuário é o mesmo do ciclo 00006 ("Pode fazer todas as fases").
@@ -62,6 +62,8 @@ Ciclo 00007 do `docs/specs/PLANO-FASE-1.md` §3.7 (SPEC-04), conforme a §01 do 
 | e99486a | Rodada 03: LB0 do desvio 9, WBS com controle, mensagem da rede e notas da LB |
 | 9a05047 | Rodada 04: texto livre do arquivo fora da mensagem e notas do recorte por pacote |
 | 2ab750b | Comentário da mensagem da rede de segurança alinhado à rodada 04 (orquestrador; 1 linha de `fechamentos.ts`) |
+| 318a9f7 | Registro do ciclo (rodadas 01 a 04, matriz e ressalvas) |
+| (este commit) | Registro com a auditoria r01 e as correções que ela pediu |
 
 ## Rodadas
 | Rodada | testes | arquiteto | especialista-obra | seguranca |
@@ -73,7 +75,8 @@ Ciclo 00007 do `docs/specs/PLANO-FASE-1.md` §3.7 (SPEC-04), conforme a §01 do 
 
 A rodada 04 mudou só 2 textos (O-1 e O-2), por decisão do orquestrador, sem revalidação; os gates dela são declarados pelo `dev-frontend`. O commit 2ab750b, do orquestrador, só troca o comentário da mensagem da rede de segurança (1 linha).
 
-**Auditoria independente:** ainda não feita. Ela cobre o HEAD 2ab750b, inclusive a reexecução dos gates em 9a05047 e 2ab750b, que nenhum validador rodou. O resultado entra na linha AUD da matriz.
+**Auditoria independente** (`revisor`, MODO AUDITAR), fora das colunas dos validadores:
+- **r01 (318a9f7, código = 2ab750b):** REPROVADO, sem defeito de código. Gates obrigatórios no HEAD verdes (lint, tipos, cobertura com `--maxWorkers=2`, E2E 41, build, corpus 419, regras 0/0, classificar-diff faixa 3, desempenho mediana 1.443 ms). Achados: 1 Médio (`npm run ci` com todos os workers deu exit 1 na máquina carregada: `cpm.desempenho` 2.410 ms > 2.000, isolado 368 ms; o gate do PR fica sem prova de verde) e 3 Baixos de coerência do registro, corrigidos neste registro. Reauditoria: A PREENCHER.
 
 ### Testes, antes → depois
 | Ponto | Vitest | E2E | Fonte |
@@ -144,31 +147,31 @@ Depois da rede de segurança (031f156), que soma um `JSON.parse` do detalhe ao f
 | N-1 a N-3 | Entrega 2027-06-23, +16 d.u.; 75% no 104 → 2027-06-16; crashing 3 d.u., R$ 12.616,80, 2027-06-18 | `useProjectStore.test.ts` (inalterado) | sim | PASS | `testes` r01: arquivo fora do diff, linhas 70 (2027-06-16) e 73–79 (12.616,8 / 2027-06-18) verdes; r02 e r03: 62 testes de C-1, C-7 e N-1 a N-3 verdes, arquivos não tocados |
 | N-5 | FE-1, FE-3, LB-2 a LB-5, CS-1, CS-2, TE-1, DF-1 conferidos pelo `especialista-obra` | parecer da tarefa 0 + validação | sim | PASS | Tarefa 0: "confere" em FE-1, FE-3, LB-5, CS-1, CS-2, TE-1, DF-1; LB-2 "plausível". `especialista-obra` r01: todos recalculados à mão (`esp07\contas.mjs`), 144/144 testes focados; desvio 14 (folga do 302 = 26.534 min) recalculado sem o motor |
 | AC-1 | Sem fechamento e com a LB0, nenhum número muda | `evm.caracterizacao` (C-1, C-7), N-1 a N-3, hash, "Aurora abre com a LB0" | sim | PASS | `testes` r01: todos verdes; o teste da LB0 afirma [19113000, 7259250, 6448200, 6896900]; r02 e r03: caracterização fora do diff e verde |
-| AC-2 | Salvar LB 0 a 10; LB0 intacta; sobrescrita com confirmação; inclusão de escopo | LB-1, LB-6, S-1, D-35 | sim | PASS | `testes` r01: verdes |
-| AC-3 / R-6 | LB do valor agregado em PV, EV e BAC; atraso, cenários e DLP contra a LB0 | LB-2 a LB-5, R-6, teste 64; mutação (c) | sim | PASS | `testes` r01: a mutação (c), atraso pela LB do valor agregado, derruba R-6/LB-3 e P-11; `especialista-obra` r01: LB-3 +16 d.u. (01/06 → 23/06/2027), LB-4 BAC 18.993.000 e EAC 20.314.633,80, LB-5 EV 6.453.000 × 6.448.200 |
+| AC-2 | Salvar LB 0 a 10; LB0 intacta; sobrescrita com confirmação; inclusão de escopo | LB-1, LB-6, S-1, D-35 | sim | PASS | `testes` r01: verdes; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
+| AC-3 / R-6 | LB do valor agregado em PV, EV e BAC; atraso, cenários e DLP contra a LB0 | LB-2 a LB-5, R-6, teste 64; mutação (c) | sim | PASS | `testes` r01: a mutação (c), atraso pela LB do valor agregado, derruba R-6/LB-3 e P-11; `especialista-obra` r01: LB-3 +16 d.u. (01/06 → 23/06/2027), LB-4 BAC 18.993.000 e EAC 20.314.633,80, LB-5 EV 6.453.000 × 6.448.200; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
 | AC-4 / P-1 a P-4 | v1 a esquema 5 abrem no 6; esquema 7 recusado; adulterado saneado | `migracaoEstado.test.ts`, `useProjectStore.obras.test.ts` | sim | PASS | `testes` r01: verdes; P-1 afirma o objeto inteiro mais a LB0 migrada. `testes` r03 (e99486a): saída da migração igual em 031f156 e no HEAD para v1, v1 com 75%, v2, esquemas 4 e 5 e 6 variantes; única diferença nos dumps de 362.626 bytes são ids aleatórios de log |
 | P-1b | `undo` depois da migração | `useProjectStore.obras.test.ts` | sim | PASS | `testes` r01: entrega 2027-06-23 |
-| AC-5 / M-1 / M-2 / M-5 | MSPDI com LBs e `BaselineForEarnedValue`, `strictOrder`, ida e volta | MS-1 a MS-3, testes 23 a 25 | sim | PASS | `testes` r01: verdes; `errors = []` afirmado; `especialista-obra` r01: `<Baseline>` em ordem crescente, filhos no `SCHEMA_ORDER.Baseline` |
-| AC-7 | Fechamento imutável, numa transação, com limites | FE-1, FE-2, FE-4, FE-6, FE-7 | sim | PASS | `testes` r01: verdes; EAC 20.442.984,04 e SPI 0,888274 nos testes; `especialista-obra` r01: FE-1 recalculado à mão |
-| AC-8 | Retificação com avisos | FE-3, FE-9 | sim | PASS | `testes` r01: EV 6.507.000 e os avisos afirmados; `especialista-obra` r01: FE-3 EV 6.456.600, AC 6.899.900, EAC 20.425.268,52; original testado byte a byte |
+| AC-5 / M-1 / M-2 / M-5 | MSPDI com LBs e `BaselineForEarnedValue`, `strictOrder`, ida e volta | MS-1 a MS-3, testes 23 a 25 | sim | PASS | `testes` r01: verdes; `errors = []` afirmado; `especialista-obra` r01: `<Baseline>` em ordem crescente, filhos no `SCHEMA_ORDER.Baseline`; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
+| AC-7 | Fechamento imutável, numa transação, com limites | FE-1, FE-2, FE-4, FE-6, FE-7 | sim | PASS | `testes` r01: verdes; EAC 20.442.984,04 e SPI 0,888274 nos testes; `especialista-obra` r01: FE-1 recalculado à mão; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
+| AC-8 | Retificação com avisos | FE-3, FE-9 | sim | PASS | `testes` r01: EV 6.507.000 e os avisos afirmados; `especialista-obra` r01: FE-3 EV 6.456.600, AC 6.899.900, EAC 20.425.268,52; original testado byte a byte; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
 | AC-9 / P-6 | Registros adulterados ignorados sem regravar | S-2 (`it.each`), P-6 | sim | PASS | `testes` r01: verdes; desde a r02 a sequência repetida deixa de ser ilegível (S-2 do plano mudou, ver Desvios) |
-| AC-10 | Curva S de fechamentos, interpolação, *fallback*, pacote | CS-1 a CS-6 | sim | PASS | `testes` r01: CS-2 com exatamente 3 pontos; `especialista-obra` r01: CS-1 25k/50k/75k/100k; CS-2 EV 65.000 e AC 69.000 |
-| AC-11 | Tendência pelos fechamentos | TE-1 | sim | PASS | `testes` r01: 0,894737 e 0,937931 afirmados |
-| AC-12 | Comparação entre dois fechamentos | DF-1 | sim | PASS | `testes` r01: verde; `especialista-obra` r01: +3 d.u., ΔEV +15.000, BAC 170k → 180k |
-| AC-13 / S-5 | Histórico em JSON, só com dados da obra | EX-1 | sim | PASS | `testes` r01: verde; `seguranca` r01: nome do arquivo sem *path traversal* nem controle (`../../etc/passwd` → `etc_passwd_historico_…`), blob local, nada pela rede |
+| AC-10 | Curva S de fechamentos, interpolação, *fallback*, pacote | CS-1 a CS-6 | sim | PASS | `testes` r01: CS-2 com exatamente 3 pontos; `especialista-obra` r01: CS-1 25k/50k/75k/100k; CS-2 EV 65.000 e AC 69.000; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
+| AC-11 | Tendência pelos fechamentos | TE-1 | sim | PASS | `testes` r01: 0,894737 e 0,937931 afirmados; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
+| AC-12 | Comparação entre dois fechamentos | DF-1 | sim | PASS | `testes` r01: verde; `especialista-obra` r01: +3 d.u., ΔEV +15.000, BAC 170k → 180k; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
+| AC-13 / S-5 | Histórico em JSON, só com dados da obra | EX-1 | sim | PASS | `testes` r01: verde; `seguranca` r01: nome do arquivo sem *path traversal* nem controle (`../../etc/passwd` → `etc_passwd_historico_…`), blob local, nada pela rede; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
 | AC-14 / P-10 / P-11 / P-12 | Desempenho | testes 51 a 53; local com `CRONOAI_PERF=1` | sim | PASS | `testes` r01 (6aeda18): mediana de 5 fechamentos 1.480 ms (< 2.000); troca de LB 288 ms (identidade de objetos); 104 cabeçalhos 60 ms; detalhe 212.967 caracteres. No CI: 600 tarefas e teto de 30 s (desvio 6). Depois de 031f156 (NB-1): no HEAD 2ab750b (depois da rede de segurança da r02): mediana de 5 fechamentos 1.392 ms; trocas de LB mediana 474 ms; abertura 57 ms; 156 registros ≈ 33,3 milhões de caracteres. A ressalva do teto do CI (600 tarefas, 30 s) segue registrada |
-| AC-15 | Data de status não volta antes do último fechamento; import mantém a data | FE-5, D-13 | sim | PASS | `testes` r01: verdes |
+| AC-15 | Data de status não volta antes do último fechamento; import mantém a data | FE-5, D-13 | sim | PASS | `testes` r01: verdes; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
 | AC-16 | `CLAUDE.md`, regras e ADR 00002 | diff dd58ba9..HEAD | sim | PASS | `testes` r01: arquivos no diff; `arquiteto` r01: ADR com `fechamentos`/`fechamentoTarefas` e volume ≈ 33 milhões; R-3 (documentação) fechado na r02 (`arquiteto` r02) |
-| AC-17 | `persist()` no 1º fechamento | FE-8 | sim | PASS | `testes` r01: 3 testes verdes |
+| AC-17 | `persist()` no 1º fechamento | FE-8 | sim | PASS | `testes` r01: 3 testes verdes; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
 | M-4 | `.xml` com LB1 a LB3 e `BaselineForEarnedValue` no MS Project real | conferência manual | não | NOT_RUN | Esperado; G5, G6, `Interim`, *rollup* e SPI ≈ 1,00 depois de salvar a LB sem conferência |
-| P-5 | Estrutura 2 → 3: obra, índice e recorte intactos | E2E | sim | PASS | `testes` r01: `fechamentos.spec` P-5 verde |
-| P-7 | Excluir e trocar de obra com fechamentos | store | sim | PASS | `testes` r01: verde |
+| P-5 | Estrutura 2 → 3: obra, índice e recorte intactos | E2E | sim | PASS | `testes` r01: `fechamentos.spec` P-5 verde; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
+| P-7 | Excluir e trocar de obra com fechamentos | store | sim | PASS | `testes` r01: verde; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
 | P-8 | Rollback: o app do 00006 cai na memória sem gravar | argumento | não | NA | `testes` r01: não verificável por teste |
 | R-2 / S-3 | Nenhum `put` nas stores de fechamento | FE-4 + teste por texto; mutações | sim | PASS | `testes` r01: b1 (`put` no IndexedDB real) derruba o teste de R-2 por texto (o E2E passa com ela); b2 derruba o FE-4. O `ConstraintError` do IndexedDB real continua sem teste |
 | R-3 | Gravação com `state.tasks`, nunca a projeção | teste + mutação a1 | sim | PASS | r01: só por revisão (a1 sobrevivia); `testes` r02 (031f156): o teste novo "R-3 / nota 1 dos testes" cai com a a1 |
-| S-1 | Textos novos sem XSS e com limites | testes com `<script>`, `validar-regras` | sim | PASS | `seguranca` r01: sem `v-html`; limites 60/500/120/500/500; `testes` r01: verdes |
+| S-1 | Textos novos sem XSS e com limites | testes com `<script>`, `validar-regras` | sim | PASS | `seguranca` r01: sem `v-html`; limites 60/500/120/500/500; `testes` r01: verdes; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
 | S-2 | Matriz de recusas do cabeçalho e do detalhe | `fechamentos.test.ts` | sim | PASS | `testes` r01: `it.each` verdes; 8 MiB medidos antes do `JSON.parse`. Na r01 a escrita não respeitava a leitura (SEG-1); fechado na r02 |
-| S-4 | Parser endurecido; 50 `<Baseline>` | testes do parser | sim | PASS | `seguranca` r01: DOCTYPE/ENTITY recusados antes do `DOMParser`; só os 11 primeiros `<Baseline>` lidos; avisos só com números |
+| S-4 | Parser endurecido; 50 `<Baseline>` | testes do parser | sim | PASS | `seguranca` r01: DOCTYPE/ENTITY recusados antes do `DOMParser`; só os 11 primeiros `<Baseline>` lidos; avisos só com números; auditoria r01 no HEAD 318a9f7 (código = 2ab750b): passou na suíte com `--maxWorkers=2` (1.170 passaram, 56 pulados) e no E2E (41 passaram) |
 | S-6 | Dependências | `auditar-dependencias.mjs` | sim | PASS | `testes` r01: produção 0/0/0/0; `package.json` e lock fora do diff; dev com os 2 críticos e 5 moderados conhecidos (vitest e tailwind) |
 | SEG-1 | Fechamento só grava o que a leitura aceita | `useProjectStore.fechamentos.test.ts`, testes avulsos do `seguranca` | sim | PASS | `seguranca` r02 (031f156): TAB, aspas cp1252 e U+0085 → 2 legíveis, 0 ilegíveis; WBS + 300 → recusado, 0 gravados, obra continua fechável. `testes` r02: a3, a4 e (y) caem; `testes` r03 (e99486a): (x) cai com o teste de TAB e U+0085 no WBS |
 | SEG-2 | Sequência repetida não bloqueia a obra | store + lib | sim | PASS | `testes` r02: a5 derruba 2 testes; `seguranca` r02: só cabeçalhos válidos entram no desempate; um forjado não ganha nada novo |
@@ -190,7 +193,7 @@ Depois da rede de segurança (031f156), que soma um `JSON.parse` do detalhe ao f
 | V-4 | Tendência, entrega e comparação | idem | não | PASS | Orquestrador, 6aeda18: nº 1 → nº 2 EV +R$ 8.400,00, AC +R$ 3.000,00, 0 d.u.; "Avançaram (1)" 40% → 45%; linha "23/10/2026 retificação" com 23/06/2027, +16, 0,89 e 0,94 |
 | V-5 | JSON exportado | conteúdo capturado na página | não | PASS | Orquestrador, 6aeda18: `Edificio_Residencial_Aurora_12_Pavimentos_historico_2026-10-23.json`, 6.145 caracteres, `formato` "cronoai-historico", `versao` 1, 2 LBs e 2 fechamentos com 20 tarefas cada |
 | V-6 | Foco inicial do diálogo de retificar | script na página, orquestrador no HEAD 2ab750b | não | FAIL (Baixo, acessibilidade) | O `ModalBase` foca o 1º campo no `onMounted`; no `RetificarFechamentoDialog` as linhas de tarefa só aparecem depois da leitura do detalhe, e o foco cai no "Fechar". Pendência registrada (focar o 1º campo quando o detalhe termina de carregar) |
-| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | A PREENCHER | A PREENCHER |
+| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | A PREENCHER | r01 (318a9f7, 26/10/2026): REPROVADO (registro; código e gates PASS). HEAD 318a9f7 (código = 2ab750b): lint exit 0; vue-tsc exit 0; `test:coverage -- --maxWorkers=2` 53 arquivos passaram e 2 pulados, 1.170 passaram e 56 pulados, 98,46 / 93,93 / 99,39 / 98,46; com todos os workers, 1 falha só por teto de tempo em teste antigo (S-1 "101 calendários", 2.079 ms > 2.000; isolado 572–897 ms); `CI=1 npm run e2e` 41 passed (2.5m); build "✓ built in 19.14s"; corpus 419/419; validar-regras "55 arquivo(s) … 0 bloqueia, 0 alerta"; classificar-diff "Faixa exigida (mínima): 3 — T2, T3, T4"; `npm run ci` exit 1 (`cpm.desempenho` 2.410 ms > 2.000 com todos os workers; isolado 368 ms); `CRONOAI_PERF=1` mediana de 5 fechamentos 1.443 ms; 44 de 55 evidências conferidas (N-5, MUT-GUARDAS e MUT-R2 INCONCLUSIVE para a auditoria, porque dependem de scripts e contas fora do repositório). Achados: 1 Médio (CI) e 3 Baixos (registro), corrigidos neste registro. Reauditoria: A PREENCHER |
 
 ## Números que mudaram de propósito (antes → depois)
 Com a LB0 e sem fechamento, nada muda (AC-1). As mudanças abaixo valem para obra com fechamento, com outra LB do valor agregado, para arquivos importados, ou são só de texto e exibição.
@@ -267,7 +270,7 @@ Avaliação do `arquiteto` r01 para os desvios 1 a 15 do `dev-frontend`; os dema
 | `salvaEm` / `dataStatus` (r02, r03) | LBs importadas com `salvaEm` = hora da importação (r02) e sem `dataStatus` (r03; reverte um detalhe da r02) | Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR |
 | `temDadoLb0` (r03) | Regra única; o `salvarLinhaBase` passa a olhar início OU término | Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR; migração sem mudança (`testes` r03, `arquiteto` r03) |
 | Mensagem (r03, r04) | Na r03, UID e WBS cortado; na r04, só UID e tamanho (regra de `msproject-mspdi.md`: texto livre do arquivo fora de avisos e erros) | Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR. O `arquiteto` r03 aceitava o WBS na mensagem e o `especialista-obra` r03 apontou a regra; o `seguranca` não foi consultado |
-| Rodada 04 | 2 textos sem revalidação | Decisão do orquestrador; fica para a auditoria independente |
+| Rodada 04 | 2 textos sem revalidação | Decisão do orquestrador (decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR); a auditoria r01 reexecutou os gates no HEAD e conferiu as asserções da r04 (`fechamentos.test.ts:421-436`, `useProjectStore.fechamentos.test.ts:819`) |
 | Registro do ciclo | Escrito depois da rodada 04 | Desvio de processo registrado |
 
 ## Ressalvas dos validadores e destino
@@ -303,7 +306,7 @@ Avaliação do `arquiteto` r01 para os desvios 1 a 15 do `dev-frontend`; os dema
 | verificação visual VIS-2 | SV, CV, ETC e TCPI vivos ao lado de PV/EV/AC gravados | corrigido (031f156): rótulo, sem mudar número |
 | verificação visual VIS-3 (Info) | Tendência começa no EV vivo | registrado em `divida-conhecida.md` |
 | verificação visual VIS-4 (Info) | Tendência com 1 ponto | textos ajustados (031f156) |
-| verificação visual VIS-5 | Foco não volta ao fechar o diálogo | corrigido (031f156) = N-1; não conferido de novo na tela |
+| verificação visual VIS-5 | Foco não volta ao fechar o diálogo | corrigido (031f156) = N-1; conferido na tela pelo orquestrador em 2ab750b (V-1): foco inicial no 1º campo do diálogo de salvar LB e foco devolvido com Esc. O diálogo de retificar ficou com o foco inicial no "Fechar" (V-6, pendência) |
 | testes r02 nota 1 | Mutação (x) sobrevive | corrigido (e99486a); `testes` r03 confirma |
 | testes r02 nota 2 | S-2 do plano mudou | registrado (ver Desvios) |
 | testes r02 nota 3 | Retificar sem teste da rede; `ConstraintError` sem teste | registrado em `divida-conhecida.md` |
@@ -325,13 +328,13 @@ Avaliação do `arquiteto` r01 para os desvios 1 a 15 do `dev-frontend`; os dema
 
 ## Pendências registradas
 - **V-6 (acessibilidade, Baixo):** no diálogo de retificar, o foco inicial cai no "Fechar", porque as linhas de tarefa carregam depois da abertura. Correção: focar o 1º campo quando o detalhe termina de carregar.
-- **Auditoria independente:** pendente (linha AUD). Ela reexecuta os gates em 2ab750b, que nenhum validador rodou depois de e99486a.
-- **Desempenho depois da rede de segurança (NB-1):** não remedido. A última medida é a do `testes` r01 em 6aeda18 (mediana de 1.480 ms; a do dev, 1,87 s, perto do teto de 2 s).
+- **Auditoria independente:** r01 REPROVADO só por registro e pelo CI; reauditoria A PREENCHER. **O gate do PR (`npm run ci`, todos os workers) precisa de prova de verde:** o CI do GitHub do PR ou uma execução numa máquina livre. Na máquina carregada, testes antigos com teto interno de 2.000 ms (`cpm.desempenho`, S-1 "101 calendários") falham de forma intermitente; isolados levam 368 a 897 ms.
+- **Desempenho depois da rede de segurança (NB-1):** medido duas vezes no código final: pelo orquestrador em 2ab750b (mediana 1.392 ms) e pela auditoria r01 em 318a9f7 (mediana 1.443 ms), abaixo dos 2.000 ms do RNF-04.1. Resta só a guarda do CI, mais fraca que a do plano (600 tarefas, 30 s).
 - **Textos da r04 sem teste:** subtítulo e nota da tendência no recorte por pacote e o `{n}` da LB ativa.
 - **Rede de segurança no retificar** sem teste; **`ConstraintError` do IndexedDB real** sem teste (o E2E passa com a mutação b1).
 - **Teste de R-2 por texto** (nenhum `put`) contornável por variável intermediária.
 - **Gate de cobertura com todos os workers:** testes antigos com teto de 5 s falham com a máquina carregada; rodar de novo numa máquina livre.
-- **Verificação visual:** feita em 6aeda18. Os textos e o foco do diálogo mudaram em 031f156, e99486a e 9a05047 e não foram vistos na tela; o pontilhado entre dois fechamentos não foi observado; o `keysBaseline` sem LB0 também não.
+- **Verificação visual:** V-1 a V-5 feitos em 6aeda18 e conferidos de novo pelo orquestrador em 2ab750b nos pontos que mudaram (cartão "Pelo CPM" com o término da LB0, faixa da D-14, tendência da obra inteira, foco e Esc dos diálogos, erro da prévia da retificação). **Não vistos na tela:** os textos do recorte por pacote da r04 (O-2, também sem teste), o pontilhado entre dois fechamentos e o `keysBaseline` sem LB0.
 - **M-4:** `NOT_RUN`. G5, G6, `Interim`, *rollup*, sobrescrita e SPI ≈ 1,00 depois de salvar a LB.
 - **M-3, diff do orquestrador (tarefa 27):** sem evidência; só o teste de hash e o script do dev.
 - **Mudanças de regra sem emenda do plano:** S-2 (sequência repetida) e o limite de WBS de 200.
