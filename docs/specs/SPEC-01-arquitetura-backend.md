@@ -62,6 +62,8 @@ Fase 2 (ciclo 00011): solução em `server/` com `Api → Dados → Dominio`, sc
 |---|---|
 | `empresa` | id, nome (sem `cnpj` por ora: minimização de dados; decisão do ciclo 00012, ADR 00006 — volta com o Jurídico se um ciclo precisar) |
 | `obra` | **Ciclo 00013 (criada):** id, empresa_id, nome (único entre as não arquivadas), uf, municipio_ibge (7 dígitos, com dígito verificador), responsavel_id (membro da mesma empresa), data_status (nula permitida), sinapi_uf, sinapi_regime, sinapi_data_base (fonte única dos campos SINAPI: o 00015 não os duplica nas premissas), opcoes_cronograma (jsonb opaco, até 16 KB), versao (bigint, por gatilho), criada_em, atualizada_em, arquivada_em. **Ciclo 00015 (ainda não existem):** data_inicio, calendario_id, premissas (jsonb versionado) |
+| `membro_empresa` | **Ciclo 00014 (alterada):** empresa_id, usuario_id (PK composta), perfil (7 valores), escopo_obras (`todas`, `vinculadas`, `carteiras`; o par perfil × escopo é CHECK), removido_em (remoção lógica), criado_em, atualizado_em; versão = `xmin`. O papel da aplicação não insere (só o provisionamento e, no 00014c, o convite) |
+| `acesso_obra`, `frente`, `acesso_frente`, `carteira`, `carteira_obra`, `acesso_carteira` | **Ciclo 00014 (criadas, só o modelo de frente e carteira; API no 00014b):** vínculos membro × obra, frente da obra (nome único entre as não arquivadas, responsável membro OU texto livre, versão por gatilho), vínculo membro × frente, carteira (`regional`, `cliente`, `gestor`; versão por gatilho), obra na carteira (N:N) e carteira atribuída ao membro. FKs compostas por empresa, RLS forçado, vínculo só se insere ou apaga |
 | `uf_referencia` / `municipio_referencia` | **Ciclo 00013:** listas nacionais globais, sem RLS. UF: sigla, codigo_ibge, nome (27 linhas semeadas pela migração). Município: codigo_ibge, uf, nome (vazia até a carga oficial; sem FK da obra até lá) |
 | `tarefa` | id, obra_id, uid_msproject, wbs, nome, nivel, resumo, duracao_du, pct_concluido, inicio_real, termino_real, bac, custo_real, sinapi, lead_time, snet, versao |
 | `vinculo` | obra_id, pred_id, succ_id, tipo (FS/SS/FF/SF), lag_du |
@@ -71,7 +73,7 @@ Fase 2 (ciclo 00011): solução em `server/` com `Api → Dados → Dominio`, sc
 | `snapshot` | id, obra_id, data_status, criado_em, criado_por, pv, ev, ac, … (SPEC-04) |
 | `snapshot_tarefa` | snapshot_id, tarefa_id, pct, custo_real, inicio_prev, termino_prev, folga |
 | `relato` / `restricao` / `insumo` / `pedido` | conforme SPEC-08/09 |
-| `auditoria` | **Ciclo 00013 (criada):** id (identity), empresa_id, obra_id, usuario_id (pseudônimo), entidade, entidade_id (uuid), acao (criar, alterar, arquivar, restaurar), antes e depois (jsonb, só os campos alterados da lista branca), versao_depois, origem, motivo, correlacao_id, em. **Sem IP** (Q6; ver SPEC-02 RF-02.4). Append-only em três camadas (ADR 00009) |
+| `auditoria` | **Ciclo 00013 (criada):** id (identity), empresa_id, obra_id, usuario_id (pseudônimo), entidade, entidade_id (uuid), acao (criar, alterar, arquivar, restaurar, remover — o `remover` entrou no ciclo 00014), antes e depois (jsonb, só os campos alterados da lista branca), versao_depois, origem, motivo, correlacao_id, em. **Sem IP** (Q6; ver SPEC-02 RF-02.4). Append-only em três camadas (ADR 00009) |
 
 ## 6. Requisitos não funcionais
 - **RNF-01.1** p95 abaixo de 300 ms para leituras de obra com até 3.000 tarefas; recálculo de CPM abaixo de 1 s.

@@ -52,11 +52,28 @@ O CronoAI é multiempresa: um usuário da empresa A nunca acessa dado da empresa
 - **Padrão das políticas da trilha:** a ausência de política de UPDATE/DELETE é a camada 2 do append-only (as outras são o `REVOKE` e o gatilho de instrução). Os testes de política de escrita rodam **sem `WHERE` e sem `RETURNING`** (e, no UPDATE, sem ler coluna no `SET`): com eles o PostgreSQL aplica também a política de SELECT e ela mascararia um `USING`/`WITH CHECK` afrouxado.
 - **FK composta ignora o RLS:** `fk_obra_responsavel (empresa_id, responsavel_id) → membro_empresa` garante que o responsável é membro DA MESMA empresa; membro de outra empresa e usuário inexistente dão o mesmo 400.
 
+**Substituído e acrescentado no 00014** ([ADR 00010](00010-perfis-e-permissao-por-obra.md); predicados exatos no golden `Dados/predicados-esperados.txt`, copiado da saída real do `pg_policies`):
+
+| Tabela | Privilégios do `cronoai_app` | Políticas (todas `TO cronoai_app`; `ADMIN`, `GESTOR` e `TODAS` são `EXISTS` do vínculo ATIVO do usuário do contexto) |
+|---|---|---|
+| `empresa` | SELECT, INSERT | SELECT: `id = E` ou membro **ativo** (`removido_em IS NULL`) |
+| `membro_empresa` | SELECT e UPDATE só nas colunas `perfil`, `escopo_obras`, `removido_em`, `atualizado_em`; **sem INSERT** (escalada fechada) | SELECT inalterada; **política de INSERT removida**; UPDATE: `empresa_id = E` + gatilho `trg_membro_exige_administrador` (uma política de UPDATE que consultasse a própria tabela dispararia 42P17) |
+| `obra` | SELECT, INSERT, UPDATE | SELECT e UPDATE: `empresa_id = E` e (`TODAS` ou obra vinculada ou obra de carteira atribuída e não arquivada); INSERT: `empresa_id = E` e `TODAS` |
+| `acesso_obra`, `acesso_frente` | SELECT, INSERT, DELETE (sem UPDATE) | SELECT: próprio vínculo, `ADMIN` ou `GESTOR`; INSERT e DELETE: `ADMIN` ou gestor no alcance |
+| `frente` | SELECT, INSERT, UPDATE | os três: `empresa_id = E` e `obra_id IN (SELECT id FROM obra)` |
+| `carteira` | SELECT, INSERT, UPDATE | SELECT: `TODAS` ou carteira atribuída; escrita: `ADMIN` |
+| `carteira_obra`, `acesso_carteira` | SELECT, INSERT, DELETE (sem UPDATE) | SELECT pela carteira (nunca pela obra: ver a regra de recursão); escrita: `ADMIN` |
+| `auditoria` | SELECT, INSERT | SELECT: a da empresa (sem obra) só `ADMIN`; a da obra, pela visibilidade da obra; INSERT: `usuario_id = U` e obra visível |
+
+- **Regra de recursão (42P17):** a política de uma tabela citada pela política de `obra` nunca cita `obra`, e nenhuma política de `membro_empresa` cita `membro_empresa`. O teste `Sem_recursao_em_nenhuma_tabela_nem_contexto` lê todas as tabelas e roda escritas sem efeito em cada tabela com política de escrita, sob 11 contextos, e um controle com política autorreferente prova que o 42P17 é real.
+- **Mapeamento de erros:** obra sem vínculo → **404** (igual ao inexistente; diverge do 403 do critério da SPEC-02); ação fora da matriz → 403 `acao-nao-permitida`; a obra que deixa de ser visível entre o carregamento e a gravação faz a política da trilha recusar com 42501 (sem constraint nem tabela), e o serviço reconfere a visibilidade antes de responder 404.
+- **Testes de política de escrita** (reforço): negativos sem `WHERE`, sem `RETURNING` e com `SET` constante, e um irmão `*_mutacao` para cada um: numa transação do superusuário que nunca confirma a política é afrouxada (ou o gatilho, desligado) e o mesmo DML passa a afetar as linhas proibidas.
+
 ### `FORCE` mantido e migração de dados
 Com `FORCE` o dono (migrador) também se sujeita às políticas; como elas são `TO cronoai_app`, setar `app.*` **não** libera o migrador (teste `Dono_tambem_se_sujeita_ao_rls`). Logo, DML de migração em tabela com RLS afetaria **zero linhas sem erro**. Regra: toda migração de dados usa `ExecutarDmlComRls`, que alterna **na transação da migração** `NO FORCE` → DML (com filtro explícito por empresa) → `FORCE`; a DDL do PostgreSQL é transacional, então um erro desfaz também o `NO FORCE`. A regra R15 acusa DML em `Migrations/` fora do helper. Em produção o momento de aplicar (lock curto) é da Infraestrutura. DDL e checagens de FK e unicidade ignoram o RLS.
 
 ### `usuario` fora do RLS (aceito com condições)
-O upsert do login e a busca por (emissor, sujeito) acontecem antes de existir `usuario_id`. Condições: acesso a `DbSet<Usuario>` restrito por teste de arquitetura (`ConsultasIdentidade.cs`, a semente e a declaração no contexto); colunas mínimas (sem e-mail); `REVOKE DELETE` (pseudonimização, quando o Jurídico definir, é `UPDATE`, nunca `DELETE`); **reavaliar no 00014** (listagem de membros), com política "o próprio ou membro da empresa ativa". **Risco residual: o `cronoai_app` lê o nome de exibição e o par emissor + `sub` de usuários de todas as empresas; só o código protege essa tabela** (dado pessoal pseudonimizado; retenção e descarte com o Jurídico).
+O upsert do login e a busca por (emissor, sujeito) acontecem antes de existir `usuario_id`. Condições: acesso a `DbSet<Usuario>` restrito por teste de arquitetura (`ConsultasIdentidade.cs`, a semente e a declaração no contexto); colunas mínimas (sem e-mail); `REVOKE DELETE` (pseudonimização, quando o Jurídico definir, é `UPDATE`, nunca `DELETE`); **reavaliado no 00014: o RLS de `usuario` foi adiado ao 00014c** (junto do convite e das variáveis de login, depois do parecer da Segurança sobre a exposição do par emissor + sujeito dos colegas, Q6). A listagem de membros (00014) lê o nome de exibição por `ConsultasIdentidade.ListarMembrosAsync`, com filtro explícito por membro da empresa ativa. **Risco residual: o `cronoai_app` lê o nome de exibição e o par emissor + `sub` de usuários de todas as empresas; só o código protege essa tabela** (dado pessoal pseudonimizado; retenção e descarte com o Jurídico).
 
 ### Sequência dos fluxos de identidade (cada passo com o seu `DbContext`)
 1. upsert do usuário (sem contexto); 2. limpeza das sessões do próprio usuário (`usuario_id`); 3. criar `sessao` (`usuario_id`); 4. "minhas empresas" e empresa ativa automática (`usuario_id`); 5. gravar `empresa_ativa_id` (`usuario_id`; a FK composta confere o vínculo e ignora o RLS); 6. validação por requisição (`usuario_id` do cookie, sem empresa); 7. endpoint de dado (`usuario_id` + `empresa_ativa_id` fixados no `ContextoSessao`).
@@ -68,8 +85,8 @@ O upsert do login e a busca por (emissor, sujeito) acontecem antes de existir `u
 - **Regra para o 00013**: um `UPDATE` de recurso de outra empresa afeta zero linhas sob RLS e o EF lança `DbUpdateConcurrencyException`, que viraria **409** (errado). **Carregue a entidade pelo caminho filtrado antes** (404 se ausente) e só então atualize.
 
 ### Notas para os próximos ciclos
-- **00014, `responsavel_id` e auditoria de membro**: a FK `fk_obra_responsavel` é `RESTRICT`, então **remover um membro que é responsável de obra exige reatribuir a obra antes** (ou o 00014 decide outra regra). `MembroEmpresa`, `Sessao` e `Empresa` hoje estão na lista de exceções do teste "entidade de empresa é auditável ou exceção declarada"; o 00014 as torna auditáveis e esvazia a lista.
-- **00014, remoção de membro**: a política de `sessao` por usuário impede o administrador de encerrar ou anular a sessão de **outro** usuário, e a FK composta é `RESTRICT`. Vai precisar de política (ex.: UPDATE de `sessao` com `empresa_ativa_id = E`) ou de `ON DELETE SET NULL (empresa_ativa_id)` (PostgreSQL 15+; conferir se o EF exprime).
+- **00014, `responsavel_id` e auditoria de membro (cumprido):** remover um membro que é responsável de obra (ou frente) ativa responde 409 `membro-responsavel` com os ids, até a responsabilidade ser reatribuída. `MembroEmpresa` e as 6 tabelas novas são auditáveis; a lista de exceções do teste "entidade de empresa é auditável ou exceção declarada" ficou só com `Sessao` e `Empresa`.
+- **00014, remoção de membro (cumprido, por outro caminho):** a remoção é **lógica** (`removido_em`), então a FK de `sessao` não é tocada e o administrador não mexe na sessão de ninguém: a validação por requisição passa a exigir `removido_em IS NULL` e a sessão do removido cai na próxima requisição. **Índice parcial de `sessao` (pendência herdada): avaliado e mantido o completo** (`ix_sessao_empresa_ativa_id_usuario_id` só serve à checagem da FK pelo lado referenciador e a aplicação nunca apaga membro; o parcial `WHERE empresa_ativa_id IS NOT NULL` fica para o 00023 se uma consulta real o pedir).
 - **00023**: limpeza de `sessao` em lote com papel ou política próprios (nunca `BYPASSRLS`) e índice `(expira_em)`; o `pg_dump` de backup local precisa do papel de bootstrap ou de `--enable-row-security`.
 - Toda rota com `{id}` ganha um cenário `ComIdDeOutraEmpresa` no catálogo (`Isolamento/CatalogoRotas.cs`) **e declara o recurso real** (`RecursoAlheio`): o teste coloca no `{id}` um recurso EXISTENTE da empresa B, e um meta-teste confere que ele existe e é de B. Com um id aleatório o 404 viria por "não existir" e o teste passaria sem provar o isolamento (lacuna do 00012, fechada no 00013).
 
@@ -81,9 +98,9 @@ O upsert do login e a busca por (emissor, sujeito) acontecem antes de existir `u
 | Pular o `set_config` com contexto vazio | O vazamento dependeria do reset do pool |
 | `set_config(..., true)` por transação | Exigiria transação em toda leitura |
 | Tirar o `FORCE` ou criar política para o migrador | Passaria a "funcionar" a API apontada para o migrador, sem RLS |
-| RLS em `usuario` agora | Complexidade sem endpoint que a justifique; reavaliar no 00014 |
+| RLS em `usuario` agora | Complexidade sem endpoint que a justifique; adiado ao 00014c (variáveis de login e de convite, parecer da Segurança) |
 
 ## Consequências
 **Positivas:** o banco nega a linha mesmo com o filtro esquecido; rota nova sem cenário reprova o build; vazamento pelo pool provado por testes (controle negativo incluído).
-**Negativas / trade-offs:** uma consulta a mais por requisição; migração de dados exige o helper; `usuario` legível entre empresas pelo papel da aplicação até o 00014.
+**Negativas / trade-offs:** uma consulta a mais por requisição; migração de dados exige o helper; `usuario` legível entre empresas pelo papel da aplicação até o 00014c.
 **Pendências:** PgBouncer, papel de backup e papel de limpeza em produção (Infraestrutura); retenção, pseudonimização e termos multiempresa (Jurídico).

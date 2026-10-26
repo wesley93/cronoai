@@ -168,7 +168,17 @@
 | Critério da SPEC-02 | "Usuário sem vínculo com a obra recebe 403 na API (testado também sem passar pela UI)". O critério "encarregado não aprova o próprio relato" entra no 00018, com os relatos |
 | Validação obrigatória | `arquiteto`, `dba`, `seguranca`, `testes`, auditoria |
 | Outras áreas | **RH + Jurídico** (perfil Encarregado = trabalhador; dados mínimos) |
-| Estimativa (opinião) | **M** |
+| Estimativa (opinião) | **M** (o escopo acima passa de M/G: ver a divisão abaixo) |
+
+**Divisão do ciclo (gate do orquestrador de 25/10/2026, opção C, sujeita à revisão do usuário no PR).** O escopo pedido era cerca de 3× o do 00013 e passava do limite de 4 entregáveis. Três ciclos empilhados:
+
+| Ciclo | Branch (sobre a anterior) | Entra |
+|---|---|---|
+| **00014** | `feat/00014-perfis-permissoes` (sobre `feat/00013-obras-auditoria`) | Banco completo menos o convite e o `usuario` sob RLS (perfil, escopo e remoção lógica em `membro_empresa`; `acesso_obra`, `frente`, `acesso_frente`, `carteira`, `carteira_obra`, `acesso_carteira`); RLS por obra; trilha por visibilidade; escalada de privilégio fechada; matriz perfil × ação nas 8 rotas existentes; `/eu` com perfil; 7 rotas novas (gestão de membros e acessos de obra). ADR 00010 |
+| **00014b** | `feat/00014b-frentes-carteiras` | API de frentes, acessos de frente, carteiras, obras da carteira e acessos de carteira, sobre o banco já pronto (sem migração prevista). Ações novas na matriz (`frentes.*`, `carteiras.*`, `acessos_frente.gerir`) |
+| **00014c** | `feat/00014c-convite-usuario-rls` | Convite por token (hash no banco, expiração, consumo concorrente), `usuario` sob RLS com variáveis de login e de convite, `GRANT INSERT` em `membro_empresa` com a política do convite, limite de taxa por usuário no convite e no aceite. **Só começa depois do parecer da Segurança sobre a Q6** (convite por token × e-mail verificado; exposição de `emissor` + `sujeito` dos colegas) |
+
+O E4 original (convite por e-mail que vira vínculo no 1º login) fica no 00014c; o 00014 entrega remoção lógica, troca de perfil e reativação. O primeiro administrador de uma empresa real não tem origem na API (Q8): comando administrativo com credencial dedicada, pendência da Infraestrutura.
 
 ### 5.5 Ciclo 00015 — Modelo do cronograma no servidor
 

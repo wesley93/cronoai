@@ -1,15 +1,15 @@
 # CronoAI — backend (.NET 10 + PostgreSQL 17)
 
-Esqueleto (ciclo 00011), identidade, empresas e isolamento (ciclo 00012) e obras, trilha de auditoria e concorrência otimista (ciclo 00013); ainda sem tarefas, perfis nem cálculo. Só ambiente
+Esqueleto (ciclo 00011), identidade, empresas e isolamento (ciclo 00012), obras, trilha de auditoria e concorrência otimista (ciclo 00013) e perfis e permissão por obra (ciclo 00014); ainda sem tarefas nem cálculo. Só ambiente
 **local**; hospedagem e deploy são da equipe de Infraestrutura. Decisões e convenções:
 `.claude/adrs/00004-estrutura-convencoes-backend.md` (estrutura), `00005-autenticacao-oidc-bff-sessao.md` (login e sessão) e
-`00006-isolamento-entre-empresas-rls.md` (empresas, RLS e teste de rotas) e `00009-trilha-de-auditoria-append-only-e-concorrencia-da-obra.md` (obras, trilha e versão).
+`00006-isolamento-entre-empresas-rls.md` (empresas, RLS e teste de rotas), `00009-trilha-de-auditoria-append-only-e-concorrencia-da-obra.md` (obras, trilha e versão) e `00010-perfis-e-permissao-por-obra.md` (perfis, RLS por obra e matriz).
 
 ```
 server/
   CronoAI.slnx                  solução
   src/CronoAI.Api               host (minimal APIs, autenticação, health, OpenAPI, erros, headers)
-  src/CronoAI.Dominio           entidades (Empresa, Usuario, MembroEmpresa, Sessao, Obra, RegistroAuditoria, UF e município de referência), sem nenhum pacote
+  src/CronoAI.Dominio           entidades (Empresa, Usuario, MembroEmpresa, Sessao, Obra, Frente, Carteira, vínculos, RegistroAuditoria, UF e município de referência) e a matriz perfil × ação, sem nenhum pacote
   src/CronoAI.Dados             DbContext, RLS, interceptor da trilha de auditoria e migrações (EF Core + Npgsql)
   tests/CronoAI.Api.Testes      xUnit v3 + Testcontainers
   db/bootstrap/                 provisionamento local de papéis e schema (usado pelo compose e pelos testes)
@@ -77,8 +77,11 @@ A API só entende quem chama pelo **cookie de sessão** (`__Host-cronoai-sessao`
 `localhost`. Rotas: `GET /api/v1/eu`, `GET`/`PUT /api/v1/empresas/atual`, `GET /api/v1/autenticacao/entrar`, `POST
 /api/v1/autenticacao/sair` e `GET /api/v1/autenticacao/antiforgery` (as escritas exigem o cabeçalho `X-XSRF-TOKEN`).
 
-**Semente de desenvolvimento**: exige só o ambiente `Development` (o `launchSettings.json` já define), recusa em qualquer outro e
-conecta como `cronoai_app`. Cria dev-a, dev-b e 3 empresas fictícias (ids fixos; idempotente).
+**Semente de desenvolvimento**: exige o ambiente `Development` (o `launchSettings.json` já define), recusa em qualquer outro e cria
+os usuários como `cronoai_app`. **Desde o ciclo 00014 as empresas e os membros são criados com a string do MIGRADOR**
+(`ConnectionStrings:CronoaiMigracao`, a mesma das migrações), porque o papel da aplicação não insere `membro_empresa`: sem ela a
+semente falha. A string é lida só dentro do comando. Cria dev-a (administrador), dev-b e 3 empresas fictícias (ids fixos;
+idempotente); na empresa compartilhada o dev-b é engenheiro de obra vinculado a UMA obra fictícia (os dois logins mostram a diferença).
 
 **Login do usuário de desenvolvimento** (só local, nunca em produção). A rota só existe com DOIS interruptores: ambiente
 `Development` **e** a flag abaixo, que **não** fica em nenhum `appsettings*.json`:
@@ -128,6 +131,27 @@ Rotas (todas exigem sessão e **empresa ativa**; as escritas exigem o cabeçalho
 - **Auditoria:** toda escrita grava, na mesma transação, quem, o quê (só os campos alterados da lista branca), quando, a origem (`ui`), a correlação com o log e o `motivo` opcional (texto livre: **não digite dado pessoal**). A trilha é append-only no banco (nem o dono altera ou apaga com `UPDATE`/`DELETE`/`TRUNCATE`). **Não há IP** (pendência do Jurídico) nem nome de usuário (só o `usuarioId`).
 - **CSV:** UTF-8 com BOM, separador `;`, `CRLF`, todo campo entre aspas; células que começam com `=`, `+`, `-`, `@`, TAB ou CR saem com o prefixo `'`. **O arquivo termina numa linha de controle `#fim;<n>`** (n = número de registros): **sem essa linha o CSV está cortado** (a conexão ou o servidor falhou no meio) e não deve ser usado. A conferência (n igual ao número de registros) deve ser feita com um **parser RFC 4180**, que lê campos entre aspas com quebra de linha dentro, e não linha a linha: um `motivo` com CR ou LF no meio de um campo faz uma contagem de linhas divergir da de registros. Datas de 2000-01-01 até hoje + 1 ano (400 fora disso); o limite de taxa da exportação é por usuário, não por IP.
 - **Municípios:** a lista oficial ainda não foi carregada (`municipio_referencia` vazia): o código é validado por formato, prefixo da UF e dígito verificador, então um código inexistente com dígito coincidente passa até a carga. Os **27 códigos de UF** semeados pela migração precisam ser conferidos contra a fonte oficial do IBGE antes do merge.
+
+## Perfis, permissões, membros e acessos de obra (ciclo 00014)
+
+Os 7 perfis (`administrador`, `engenheiro_planejamento`, `engenheiro_obra`, `suprimentos`, `encarregado`, `gestor_portfolio`, `diretoria`) e a
+matriz perfil × ação estão em `CronoAI.Dominio/MatrizPermissoes.cs` (tabela do plano 00014, seção 3.5, revisável no PR). O banco decide **quais
+obras** o membro vê (escopo `todas`, `vinculadas` por `acesso_obra` ou `carteiras`) e a API decide **o que** ele faz. **Obra sem vínculo → 404**
+(igual ao inexistente); **ação fora da matriz → 403** `acao-nao-permitida`. O escopo `carteiras` enxerga **zero obras** até o ciclo 00014b trazer a API de
+carteiras. `GET /api/v1/eu` devolve `perfil` e `escopoObras` da empresa ativa. O perfil `encarregado` ainda não pode ser atribuído (400 `perfil-indisponivel`).
+
+| Rota (todas exigem sessão e empresa ativa; escritas exigem `X-XSRF-TOKEN`, corpo até 8 KB) | Ação da matriz | Quem |
+|---|---|---|
+| `GET /api/v1/membros?incluirRemovidos=` | `membros.ler` (+ `membros.gerir` com `incluirRemovidos=true`) | administrador, gestor de portfólio |
+| `PUT /api/v1/membros/{usuarioId}` | `membros.gerir` | administrador |
+| `POST /api/v1/membros/{usuarioId}/remover` e `/reativar` | `membros.gerir` | administrador |
+| `GET /api/v1/obras/{id}/acessos` | `acessos_obra.ler` | administrador, gestor de portfólio (no alcance) |
+| `POST /api/v1/obras/{id}/acessos` e `/{usuarioId}/revogar` | `acessos_obra.gerir` | administrador, gestor de portfólio (no alcance) |
+
+- **Membros:** `versao` (o `xmin` do vínculo, só igualdade) no corpo do `PUT`, `remover` e `reativar`; versão velha → 409 `conflito-de-versao` com `estadoAtual`. Outros 409: `ultimo-administrador` (nenhuma empresa fica sem administrador; confere no `COMMIT`, com a trilha desfeita junto), `membro-responsavel` (extensões `obras` e `frentes` só com ids), `membro-removido` e `membro-nao-removido`. Remover é **lógico**: a sessão do removido cai na próxima requisição.
+- **Acessos de obra:** o destino inválido (membro de outra empresa, inexistente, removido, ou de escopo diferente de `vinculadas`) recebe sempre o mesmo 400 em `usuarioId`; vínculo repetido → 409 `acesso-existente`; revogar apaga antes os acessos de frente do usuário na obra, no mesmo salvamento (uma linha de trilha `remover` por vínculo) e é um `POST` (corpo em `DELETE` não tem semântica definida).
+- **Primeiro administrador:** nenhuma rota cria empresa nem administrador. Em desenvolvimento, pela semente; fora dele o comando administrativo (credencial dedicada) é pendência da Infraestrutura. O papel da aplicação **não** insere `membro_empresa`; o convite é do ciclo 00014c.
+- **Banco local criado antes do ciclo 00014:** a migração `PerfisPermissoes` faz o backfill (todo membro existente vira `administrador` de escopo `todas`: confira `SELECT empresa_id, count(*) FROM cronoai.membro_empresa GROUP BY 1` antes de aplicar fora do local). O `Down` só vale em banco sem trilha `remover`.
 
 ## Comandos
 

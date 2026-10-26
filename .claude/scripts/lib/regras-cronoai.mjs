@@ -412,12 +412,24 @@ const DML = /\b(INSERT\s+INTO|UPDATE\s+[\w."]+\s+SET|DELETE\s+FROM)\b/i
 const CONEXAO_CRUA = /\bNpgsql(Connection|DataSource)\b/
 // R18: escrita em massa do EF e SQL de escrita nas entidades auditadas (ADR 00009)
 const EXECUTE_EM_MASSA = /\bExecute(Update|Delete)(Async)?\s*\(/
-// Escrita em obra/auditoria: acusa a PRÓPRIA linha do SQL (a chamada pode estar na linha de cima ou num bloco $"""), com
-// schema, aspas (inclusive escapadas em string C#: \"x\" e ""x"") e ONLY opcionais, também MERGE INTO; sem schema vale porque o search_path do papel da aplicação é cronoai.
-const ESCRITA_EM_AUDITADA = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)(\s+ONLY)?\s+((?:\\"|""|")?cronoai(?:\\"|""|")?\s*\.\s*)?(?:\\"|""|")?(obra|auditoria)\b/i
+// Escrita nas tabelas auditadas (ciclo 00014: obra, auditoria, membro_empresa e as 6 de perfis e vínculos): acusa a PRÓPRIA linha do SQL (a
+// chamada pode estar na linha de cima ou num bloco $"""), com schema, aspas (inclusive escapadas em string C#: \"x\" e ""x"") e ONLY
+// opcionais, também MERGE INTO; sem schema vale porque o search_path do papel da aplicação é cronoai. O \b depois do nome impede
+// "obra_arquivada" e "carteira_arquivada", e a ordem da alternância não importa por causa dele ("carteira" x "carteira_obra").
+const TABELAS_AUDITADAS = 'obra|auditoria|membro_empresa|acesso_obra|frente|acesso_frente|carteira|carteira_obra|acesso_carteira'
+const ESCRITA_EM_AUDITADA = new RegExp(
+  String.raw`\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)(\s+ONLY)?\s+((?:\\"|""|")?cronoai(?:\\"|""|")?\s*\.\s*)?(?:\\"|""|")?(${TABELAS_AUDITADAS})\b`,
+  'i',
+)
+// Único arquivo de server/src que escreve nelas por SQL: o provisionamento de desenvolvimento (cria empresa e membros como o migrador, sem
+// trilha; o papel da aplicação não tem INSERT em membro_empresa). Exceção declarada, de UM arquivo.
+const ESCRITA_PERMITIDA = '/CronoAI.Dados/Rls/ProvisionamentoEmpresa.cs'
 // Único arquivo que usa ExecuteUpdate/ExecuteDelete: só sobre sessao, que não é auditada.
 const EXECUTE_PERMITIDO = '/CronoAI.Dados/Identidade/ConsultasIdentidade.cs'
 // R19: migração que desliga ou afrouxa as garantias da trilha (alerta; revisão humana decide)
+// Helpers de política (Rls/MigrationBuilderRlsExtensoes) citando a trilha: o helper esconde o SQL, então a regra por texto não o vê.
+// Criar, substituir ou remover política da "auditoria" por helper é revisão humana obrigatória (o helper já RECUSA UPDATE/DELETE).
+const HELPER_DA_TRILHA = /\b(?:Substituir)?Politica(?:Select|Insert|Update|Delete)\s*\(\s*"auditoria"|\bRemoverPolitica\s*\(\s*"auditoria"/
 const AFROUXA_TRILHA = /\b(DISABLE\s+TRIGGER|DROP\s+TRIGGER|DROP\s+POLICY|ALTER\s+POLICY|CREATE\s+POLICY|DISABLE\s+ROW\s+LEVEL\s+SECURITY|ENABLE\s+(REPLICA\s+)?TRIGGER|CASCADE|CREATE\s+OR\s+REPLACE\s+FUNCTION|OWNER\s+TO|GRANT|NO\s+FORCE)\b/i
 
 /**
@@ -455,12 +467,12 @@ export function regrasBackend(arquivo, texto) {
     achados.push({ id: 'R18', regra: 'escrita fora do SaveChanges', mensagem: 'ExecuteUpdate/ExecuteDelete fora de CronoAI.Dados/Identidade/ConsultasIdentidade.cs: não passam pelo interceptor de auditoria; use o contexto e SalvarAuditadoAsync (ADR 00009).' })
   }
   // R18 (SQL): INSERT/UPDATE/DELETE em obra ou auditoria (com ou sem schema) fora de migração, em qualquer linha do SQL
-  if (!emMigracao && ESCRITA_EM_AUDITADA.test(texto)) {
-    achados.push({ id: 'R18', regra: 'escrita fora do SaveChanges', mensagem: 'SQL de escrita em cronoai.obra ou cronoai.auditoria: a trilha só é gravada pelo SaveChanges auditado; a trilha é append-only (ADR 00009).' })
+  if (!emMigracao && !arquivo.endsWith(ESCRITA_PERMITIDA) && ESCRITA_EM_AUDITADA.test(texto)) {
+    achados.push({ id: 'R18', regra: 'escrita fora do SaveChanges', mensagem: 'SQL de escrita em tabela auditada (obra, auditoria, membro_empresa, acesso_obra, frente, acesso_frente, carteira, carteira_obra, acesso_carteira): a trilha só é gravada pelo SaveChanges auditado, a trilha é append-only e o papel da aplicação não insere membro (ADR 00009 e 00010). Única exceção: Rls/ProvisionamentoEmpresa.cs.' })
   }
   // R19: alerta (e não bloqueio) porque o Down() legítimo remove a tabela; a revisão humana decide
-  if (emMigracao && /auditoria/i.test(texto) && AFROUXA_TRILHA.test(texto)) {
-    achados.push({ id: 'R19', severidade: 'alerta', regra: 'migração mexe nas garantias da trilha', mensagem: 'Migração que cita auditoria com DISABLE/DROP TRIGGER, ENABLE TRIGGER sem ALWAYS, DISABLE ROW LEVEL SECURITY, CREATE/DROP/ALTER POLICY, CASCADE, CREATE OR REPLACE FUNCTION, OWNER TO, GRANT ou NO FORCE: confirme que o append-only continua valendo em três camadas (REVOKE, RLS só com SELECT e INSERT, gatilho de instrução com ENABLE ALWAYS) (ADR 00009).' })
+  if (emMigracao && (HELPER_DA_TRILHA.test(texto) || (/auditoria/i.test(texto) && AFROUXA_TRILHA.test(texto)))) {
+    achados.push({ id: 'R19', severidade: 'alerta', regra: 'migração mexe nas garantias da trilha', mensagem: 'Migração que cita auditoria (inclusive pelos helpers Politica*/SubstituirPolitica*/RemoverPolitica) com DISABLE/DROP TRIGGER, ENABLE TRIGGER sem ALWAYS, DISABLE ROW LEVEL SECURITY, CREATE/DROP/ALTER POLICY, CASCADE, CREATE OR REPLACE FUNCTION, OWNER TO, GRANT ou NO FORCE: confirme que o append-only continua valendo em três camadas (REVOKE, RLS só com SELECT e INSERT, gatilho de instrução com ENABLE ALWAYS) (ADR 00009).' })
   }
   return achados
 }

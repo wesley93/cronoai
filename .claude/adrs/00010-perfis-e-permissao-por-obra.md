@@ -1,0 +1,78 @@
+# 00010 - Perfis e permissão por obra: visibilidade no banco, ação na aplicação
+
+**Data**: 2026-10-25
+**Status**: Proposto (aceite do usuário pendente; as decisões Q1 a Q11 do gate, a divergência **404 × 403** da SPEC-02, a Q3 e as células de opinião da matriz são do orquestrador com autorização do usuário e seguem sujeitas à revisão dele no PR; gatilho como controle de autorização, uso do migrador na semente de desenvolvimento e o comando de produção da Q8 dependem da Segurança da Informação e da Infraestrutura; perfil Encarregado, texto livre do responsável de frente e retenção dependem de RH e Jurídico)
+**Spec/decisão relacionada**: SPEC-02 (RF-02.2, RF-02.3, RF-02.3a), SPEC-01 (RF-01.1c), SPEC-14 (RF-14.8), SPEC-12 (RF-12.9), ASVS 5.0.0 V2, V4, V7, V8, V14 e V16, plano do ciclo 00014, parecer do `dba` (`00014-tarefa0-dba.md`), `PLANO-FASE-2.md` §5.4, [ADR 00006](00006-isolamento-entre-empresas-rls.md) e [ADR 00009](00009-trilha-de-auditoria-append-only-e-concorrencia-da-obra.md)
+
+Classificação: o que é **opinião da equipe** vem marcado; o resto é prática documentada (com link) ou consequência de teste. Nada aqui é exigência regulatória. Esta decisão tem impacto de segurança e de dados pessoais: **não vale como aceita** sem a validação das áreas listadas no fim.
+
+## Contexto
+Até o ciclo 00013 todo membro da empresa via tudo e fazia tudo, e a política de `INSERT` de `membro_empresa` (`empresa_id = E`) deixava o papel da aplicação criar vínculo para **qualquer** usuário. Com perfis isso é escalada de privilégio. O 00014 dá a cada membro um perfil (os 7 da SPEC-02 §3) e um escopo de obras, e responde a duas perguntas distintas: **quais obras** o membro enxerga e **o que** ele pode fazer nelas.
+
+## Decisão
+
+### 1. Divisão: banco decide a visibilidade, aplicação decide a ação
+- **Banco (RLS) = visibilidade.** "Este usuário enxerga esta obra" e "só o administrador, ou o gestor dentro do alcance, concede acesso". É a rede contra filtro esquecido, **inclusive dentro da mesma empresa**, onde o filtro de empresa e o RLS de empresa não ajudam ([OWASP IDOR Prevention](https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html)). Opinião do `dba`, adotada.
+- **Aplicação = ação.** A matriz perfil × ação mora em código puro (`MatrizPermissoes`, no `Dominio`) e é aplicada por **uma política de autorização por ação** (`RequisitoPermissao` + tratador scoped), somada à política de empresa ativa, declarada na própria rota ([policies](https://learn.microsoft.com/aspnet/core/security/authorization/policies)). O banco **não** replica a matriz: ele só cita `administrador` e `gestor_portfolio` pelo nome (escrita de vínculos); os demais perfis aparecem apenas pelo **escopo** (`todas`, `vinculadas`, `carteiras`), que o par `perfil × escopo` do CHECK ata ao perfil.
+- **Limite honesto:** a variável de sessão não é segredo. O RLS por obra protege contra erro de código, não contra quem executa SQL livre com a credencial de `cronoai_app`. Job sem usuário no contexto vê **zero obras** (falha fechada): os ciclos 00022 e 00023 decidem o caminho do job (nunca `BYPASSRLS`).
+
+### 2. Modelo
+- **Um perfil por membro e empresa** (`membro_empresa.perfil`, `escopo_obras`, `removido_em`, `atualizado_em`), texto + CHECK com as constantes do código (o teste de banco confere que o CHECK as repete). Perfil por obra fica para migração futura se a obra real exigir (Q1).
+- **Remoção lógica** (`removido_em`): a FK de `sessao`, `obra` e da trilha aponta para o vínculo. A sessão do removido cai na **próxima** requisição (a validação por requisição, em UMA consulta, exige `removido_em IS NULL` e devolve o perfil e o escopo), e toda política e consulta de identidade filtra o membro ativo.
+- Tabelas: `acesso_obra`, `frente`, `acesso_frente`, `carteira`, `carteira_obra` (N:N, Q4) e `acesso_carteira`, todas com RLS forçado, FKs compostas por empresa e só `INSERT`/`DELETE` nos 4 vínculos (o vínculo é imutável: `REVOKE UPDATE`). Carteira arquivada **não** concede acesso. **Neste ciclo a frente só tem o modelo e o vínculo: nenhum dado é filtrado por frente ainda** (tarefa é 00015, relato é 00018), então "encarregado só vê as suas frentes" **não está cumprido**.
+- **`IAuditavel.EntidadeId`**: o membro audita com `entidade_id = usuario_id` (único dentro da empresa da linha de trilha); `IDadoDeObra` leva a `obra_id` para a trilha da obra; só os 4 vínculos (`IVinculoRemovivel`) admitem `DELETE` físico, gravado como ação **`remover`**; o texto livre `frente.responsavel_texto` (nome de trabalhador, Q2) fica **fora** da lista branca e dos logs.
+
+### 3. Políticas de RLS por obra
+Fragmentos únicos em `Rls/ExpressoesPermissao.cs` (nunca copiados à mão): `ADMIN`, `GESTOR`, `TODAS`, obras vinculadas, carteiras minhas e obras das carteiras (arquivada não conta). `obra` é visível a quem tem escopo `todas`, vínculo (escopo `vinculadas`) ou carteira atribuída (escopo `carteiras`); `INSERT` de obra só com escopo `todas` (o `INSERT ... RETURNING` aplica a política de SELECT à linha nova). O gestor de portfólio concede acesso só no próprio alcance (Q3, decisão do arquiteto apoiada na SPEC-02 §3: **revisar no PR**). A trilha é lida pela visibilidade da obra (a da empresa, sem obra, só o administrador) e o `INSERT` exige `usuario_id = U` (fecha a lacuna do 00013, em que dava para gravar trilha em nome de outro). Predicados exatos ficam no golden `Dados/predicados-esperados.txt`, **copiado da saída real do `pg_policies`**, nunca escrito à mão.
+
+**Regras de recursão (42P17), confirmadas por teste no checkpoint do ciclo:** o PostgreSQL recusa a expansão de uma política que volta à tabela em expansão ([doc](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)).
+1. **Nenhuma política de `membro_empresa` cita `membro_empresa`.** A checagem "só administrador altera membro" que o parecer propunha como política de UPDATE cairia em 42P17; virou o **gatilho** `trg_membro_exige_administrador` (`BEFORE UPDATE`, `ENABLE ALWAYS`, `42501` se `app.usuario_id` não é administrador ATIVO da empresa da linha), e a política de UPDATE fica `empresa_id = E`. O teste `Politica_que_cita_a_propria_tabela_dispara_42P17_controle_do_detector` prova que a recursão é real e que o teste a enxerga.
+2. **A política de uma tabela citada pela política de `obra`** (`membro_empresa`, `acesso_obra`, `carteira_obra`, `carteira`, `acesso_carteira`) **nunca cita `obra`**: por isso `carteira_obra` filtra pela carteira, e o alcance do gestor repete o caminho das carteiras.
+3. `frente` e `auditoria` podem citar `obra` (padrão para as tabelas filhas do 00015): `obra_id IN (SELECT id FROM cronoai.obra)`, **subconsulta não correlacionada**, nunca `EXISTS` correlacionado. Medido (T36, 6.000 linhas, **informativo**): ~2,6 ms contra ~9 s no `EXISTS` correlacionado, e o plano vira `hashed SubPlan` executado uma vez. O 00015 mede de novo com 3.000 tarefas. Para "encarregado só vê as suas frentes", o 00018 decide a coluna de restrição por frente (ex.: `membro_empresa.restringe_por_frente`) para o banco não citar o perfil.
+
+### 4. Escalada de privilégio e último administrador
+- **Fechada neste ciclo, em duas camadas independentes:** `REVOKE INSERT ON membro_empresa FROM cronoai_app` (42501) **e** a política de INSERT removida, sem substituta. O 00014c devolve o `GRANT` junto com a política do convite. Coluna por coluna: `UPDATE` só em `perfil`, `escopo_obras`, `removido_em` e `atualizado_em`.
+- **Último administrador:** gatilho de restrição `trg_membro_garante_administrador`, `DEFERRABLE INITIALLY DEFERRED`, `ENABLE ALWAYS`, com `pg_advisory_xact_lock` por empresa (em READ COMMITTED dois rebaixamentos simultâneos passariam sem o lock) e `RAISE ... CONSTRAINT = 'ck_empresa_tem_administrador'`, que a API mapeia para 409 `ultimo-administrador`. Ele roda no `COMMIT` e a exceção chega ao cliente como `PostgresException` direta; a trilha, já inserida no lote, é desfeita junto. É diferido para aceitar "promover B e rebaixar A" na mesma transação.
+- **Primeiro administrador (Q8):** nenhum caminho da API cria empresa nem administrador. `ProvisionamentoEmpresa` (`Rls/`) cria empresa e membros como o **migrador**, numa transação (`NO FORCE` → `INSERT` → `SET CONSTRAINTS ... IMMEDIATE` → `FORCE`), **sem trilha**; só a semente de desenvolvimento o usa, com a string do migrador lida dentro do comando e só em `Development`. O comando de produção (credencial dedicada, fora da API, nunca auto-reivindicação) é pendência da Infraestrutura e do produto.
+
+### 5. Respostas
+- **Obra sem vínculo → 404**, idêntico ao de inexistente (o 403 revelaria que existe). **Diverge do critério da SPEC-02** ("recebe 403"); nota na SPEC e decisão do usuário no PR. **Ação fora da matriz → 403 `acao-nao-permitida`**, decidida **antes** de carregar o recurso (o mesmo 403 para qualquer `{id}`). O 403 `campo-nao-permitido` (nomes dos campos, nunca valores) vale para quem edita a obra mas não o cadastro (nome, UF, município, responsável, SINAPI): só quem vê todas as obras renomeia, o que fecha o oráculo de existência do 409 `obra-nome-duplicado`. Ordem: 404 → 409 de versão → 409 de arquivada → 403 de campo.
+- **Destino inválido ao conceder acesso** (membro de outra empresa, inexistente, removido ou de escopo diferente de `vinculadas`): sempre o **mesmo 400** em `usuarioId`. Responsável de obra precisa ser membro ativo (mesmo 400 para removido, alheio e inexistente).
+- A obra que **deixa de ser visível entre o carregamento e a gravação** (vínculo do gestor revogado no meio) faz a política da trilha recusar com 42501, sem nome de constraint nem de tabela; o serviço reconfere a visibilidade e responde 404 se a obra sumiu (senão a exceção sobe: 500 genérico).
+- Escrita de membro leva `versao` (o `xmin`, só igualdade) no corpo; limite de corpo de 8 KB nas escritas novas; revogar acesso de obra apaga antes os acessos de frente do usuário na obra, no mesmo salvamento, com uma linha de trilha `remover` por vínculo.
+
+### 6. Trilha e atomicidade (achado do ciclo)
+No lote do EF o `DELETE` sai **antes** do `INSERT` da trilha, e o `UPDATE` **depois**. Logo, provar "rollback com a trilha já inserida" exige uma falha **depois** da trilha: no `UPDATE` (CHECK do par perfil × escopo) e no `COMMIT` (gatilho diferido do último administrador). A revogação de vínculo recusada por FK só prova que nada fica; o teste fixa a ordem observada e avisa se o EF a mudar.
+
+## Justificativa
+- **RLS por obra agora**, e não só na aplicação: cada consulta futura (tarefa, relato, EVM, portfólio) teria de lembrar o filtro, e um esquecimento vazaria obra de colega na mesma empresa. Hoje só `obra` e `auditoria` existem: o custo de fazer certo é baixo e o padrão nasce antes do 00015. **Opinião.**
+- **Gatilho no lugar de política autorreferente:** única forma de expressar "só administrador" sobre a própria tabela sem 42P17. A decisão é de autorização no banco: **validar com a Segurança**.
+- **Matriz em código:** testável sem banco nem ASP.NET, visível na rota, comparada por teste a uma tabela literal. Mudar uma célula exige mudar o teste de propósito.
+
+## Alternativas descartadas
+| Alternativa | Motivo |
+|---|---|
+| Só autorização na aplicação | Esquecimento de filtro vaza obra dentro da empresa |
+| Política de UPDATE de `membro_empresa` com `EXISTS` na própria tabela (parecer) | 42P17 |
+| Política de INSERT "convite válido" já neste ciclo | O convite é o 00014c, depois do parecer da Segurança (Q6) |
+| `SECURITY DEFINER` para login e convite | Com `FORCE` e políticas `TO cronoai_app` o dono vê zero linhas; só variáveis de sessão próprias funcionam |
+| Matriz duplicada nas políticas | Divergiria do código |
+| `DELETE` do membro | A FK de `sessao`, `obra` e da trilha impede; remoção lógica |
+| 403 para obra sem vínculo (texto da SPEC-02) | Revela existência (ADR 00006); decisão do usuário no PR |
+
+## Consequências
+**Positivas:** o banco nega a obra alheia mesmo com o filtro esquecido; a escalada por `INSERT` em `membro_empresa` está fechada em duas camadas e provada por teste; toda escrita nova grava exatamente a trilha esperada; 7 rotas novas e 8 alteradas com contrato conferido por teste.
+**Negativas / trade-offs:** o escopo `carteiras` enxerga **zero obras** até o 00014b trazer a API de carteiras (falha fechada); predicados longos no `pg_policies` (golden regerado de propósito a cada mudança); o gatilho é controle de autorização que o superusuário e o dono contornam; `usuario` continua sem RLS até o 00014c (risco residual do ADR 00006); o `Down` da migração só vale em banco sem trilha `remover`.
+**Divisão do ciclo:** 00014 (este), 00014b (API de frentes, acessos de frente e carteiras) e 00014c (convite e `usuario` sob RLS, depois do parecer da Segurança sobre a Q6).
+
+## Validações com outras áreas
+| Tema | Área | Antes de quê |
+|---|---|---|
+| Gatilho como controle de autorização em `membro_empresa`; uso da credencial do migrador na semente de desenvolvimento e o comando da Q8; aceite dos itens ASVS V2, V4, V7, V8, V14 e V16; convite por token e exposição de `emissor` + `sujeito` (Q6, bloqueia o 00014c) | **Segurança da Informação** | Uso em produção |
+| Perfil Encarregado (trabalhador) e `responsavel_texto` (nome de trabalhador em texto livre, Q2); nomes de frente e de carteira na trilha append-only | **RH + Jurídico** | Cadastro de encarregado ou frente real |
+| `removido_em` basta para o desligamento, ou o titular pode pedir pseudonimização? Retenção do convite; minimização do `motivo` (Q11) | **Jurídico** | Dados reais / piloto |
+| Como nasce a empresa e o primeiro administrador fora do desenvolvimento (Q8); contagem de membros por empresa antes de aplicar a migração fora do local (Q10); `NOT VALID`/`VALIDATE` e locks | **Infraestrutura** | Primeiro ambiente fora do local |
+| 404 × 403 (emenda da SPEC-02), Q3 (gestor atribui obra e frente), células de opinião da matriz, divisão do ciclo | **Usuário** | Merge |
+
+## Revisão
+Revisar se: a obra real exigir perfil por obra (`acesso_obra.perfil`); o 00015 medir custo de leitura acima de RNF-01.1 com o padrão por obra; o 00018 decidir a restrição por frente; a Segurança preferir política (e não gatilho) para a checagem de administrador; o 00014c devolver o `INSERT` em `membro_empresa` com a política do convite.

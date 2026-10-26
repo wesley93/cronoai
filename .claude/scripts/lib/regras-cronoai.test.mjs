@@ -255,15 +255,18 @@ test('backend R19: no validar-regras é alerta, não bloqueio', () => {
   assert.equal(achados[0].severidade, 'alerta')
 })
 
-test('backend R18 e R19: a migração real do ciclo 00013 não aciona nenhuma das duas (arquivo versionado)', async () => {
-  // Guarda de regressão da própria regra: o texto verdadeiro da migração, linha a linha.
+test('backend R18 e R19: a migração real do ciclo 00013 não aciona a R18 e só alerta nas 2 criações de política da trilha pelo helper (arquivo versionado)', async () => {
+  // Guarda de regressão da própria regra: o texto verdadeiro da migração, linha a linha. Desde o ciclo 00014 a R19 também enxerga o
+  // helper: criar a política de SELECT e a de INSERT da trilha (a criação LEGÍTIMA do 00013) é alerta para revisão humana, e só isso.
   const { readFileSync } = await import('node:fs')
   const { raizRepo } = await import('./regras-cronoai.mjs')
   const texto = readFileSync(`${raizRepo()}/${MIGRACAO_OBRAS}`, 'utf8').split('\n')
 
   const achados = texto.flatMap((linha) => regrasBackend(MIGRACAO_OBRAS, linha)).filter((x) => x.id === 'R18' || x.id === 'R19')
 
-  assert.deepEqual(achados, [])
+  assert.equal(achados.filter((x) => x.id === 'R18').length, 0)
+  assert.equal(achados.length, 2)
+  assert.ok(achados.every((x) => x.id === 'R19' && x.severidade === 'alerta'))
 })
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -325,6 +328,114 @@ test('backend R19 por instrução: a migração real do ciclo 00013 não aciona 
   const { raizRepo } = await import('./regras-cronoai.mjs')
   const linhas = readFileSync(`${raizRepo()}/${MIGRACAO_OBRAS}`, 'utf8').split('\n').map((texto, i) => ({ n: i + 1, texto }))
 
+  // Por instrução: nada. Por linha: só as 2 criações de política da trilha pelo helper (R19 ampliada no ciclo 00014).
   assert.deepEqual(r19PorInstrucao(MIGRACAO_OBRAS, linhas), [])
-  assert.deepEqual(linhas.flatMap((l) => regrasBackend(MIGRACAO_OBRAS, l.texto)).filter((x) => x.id === 'R19'), [])
+  assert.equal(linhas.flatMap((l) => regrasBackend(MIGRACAO_OBRAS, l.texto)).filter((x) => x.id === 'R19').length, 2)
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// R18 ampliada (ciclo 00014, T78): as tabelas de perfis e vínculos também são auditadas e o app não escreve nelas por SQL.
+// ---------------------------------------------------------------------------------------------------------------
+const MEMBROS_API = 'server/src/CronoAI.Api/Membros/ServicoMembros.cs'
+const PROVISIONAMENTO = 'server/src/CronoAI.Dados/Rls/ProvisionamentoEmpresa.cs'
+const MIGRACAO_PERFIS = 'server/src/CronoAI.Dados/Migrations/20261025233436_PerfisPermissoes.cs'
+
+const R18_NOVAS_ACUSA = [
+  ['INSERT INTO cronoai.membro_empresa', MEMBROS_API, '    INSERT INTO cronoai.membro_empresa (empresa_id, usuario_id) VALUES ({e}, {u})'],
+  ['UPDATE entre aspas em acesso_obra', MEMBROS_API, '    $"UPDATE "acesso_obra" SET obra_id = {o}"'],
+  ['DELETE FROM ONLY cronoai.frente', MEMBROS_API, '    DELETE FROM ONLY cronoai.frente WHERE id = {id}'],
+  ['MERGE INTO carteira_obra', MEMBROS_API, '    MERGE INTO carteira_obra c USING origem x ON c.id = x.id'],
+  ['aspas escapadas em acesso_carteira', MEMBROS_API, '    $"DELETE FROM \\"cronoai\\".\\"acesso_carteira\\""'],
+  ['SQL na linha seguinte à chamada', MEMBROS_API, '    $"UPDATE cronoai.acesso_frente SET frente_id = {f}");'],
+  ['UPDATE cronoai.carteira sem schema nas aspas', MEMBROS_API, '    update carteira set nome = {n}'],
+]
+
+const R18_NOVAS_NAO_ACUSA = [
+  ['o provisionamento de desenvolvimento (única exceção)', PROVISIONAMENTO, '    INSERT INTO cronoai.membro_empresa (empresa_id, usuario_id) VALUES ({e}, {u})'],
+  ['migração', MIGRACAO_PERFIS, 'migrationBuilder.Sql("UPDATE cronoai.membro_empresa SET perfil = \'administrador\' WHERE perfil IS NULL");'],
+  ['SELECT em membro_empresa', MEMBROS_API, '    SELECT 1 FROM cronoai.membro_empresa m WHERE m.usuario_id = {u}'],
+  ['comentário', MEMBROS_API, '// INSERT INTO cronoai.membro_empresa só pelo provisionamento'],
+  ['teste fica de fora', 'server/tests/CronoAI.Api.Testes/Dados/MembroTestes.cs', 'INSERT INTO cronoai.membro_empresa (empresa_id) VALUES (1)'],
+  ['nome parecido: carteira_arquivada', MEMBROS_API, '    UPDATE carteira_arquivada SET x = 1'],
+  ['nome parecido: frentes', MEMBROS_API, '    DELETE FROM frentes'],
+]
+
+for (const [nome, arquivo, linha] of R18_NOVAS_ACUSA) {
+  test(`backend R18 ampliada acusa: ${nome}`, () => {
+    const achados = regrasBackend(arquivo, linha)
+    assert.ok(achados.some((x) => x.id === 'R18'), `esperava R18 em: ${linha}`)
+  })
+}
+
+for (const [nome, arquivo, linha] of R18_NOVAS_NAO_ACUSA) {
+  test(`backend R18 ampliada não acusa: ${nome}`, () => {
+    assert.deepEqual(regrasBackend(arquivo, linha).filter((x) => x.id === 'R18'), [])
+  })
+}
+
+test('backend R18 ampliada: só o provisionamento é perdoado (outro arquivo de Rls/ com a mesma linha é acusado)', () => {
+  const linha = '    INSERT INTO cronoai.membro_empresa (empresa_id) VALUES ({e})'
+
+  assert.deepEqual(regrasBackend('server/src/CronoAI.Dados/Rls/Outro.cs', linha).filter((x) => x.id === 'R18').length, 1)
+  assert.deepEqual(regrasBackend(PROVISIONAMENTO, linha).filter((x) => x.id === 'R18'), [])
+})
+
+test('backend R18 ampliada: o provisionamento real do ciclo 00014 não aciona a R18 (arquivo versionado)', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { raizRepo } = await import('./regras-cronoai.mjs')
+  const texto = readFileSync(`${raizRepo()}/${PROVISIONAMENTO}`, 'utf8').split('\n')
+
+  assert.deepEqual(texto.flatMap((linha) => regrasBackend(PROVISIONAMENTO, linha)).filter((x) => x.id === 'R18'), [])
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// R19 ampliada (ciclo 00014, T79): os helpers de política escondem o SQL; citar a trilha neles em migração é alerta.
+// ---------------------------------------------------------------------------------------------------------------
+const R19_HELPER_ACUSA = [
+  ['PoliticaUpdate da trilha', 'migrationBuilder.PoliticaUpdate("auditoria", "pol_x", "true", "true");'],
+  ['PoliticaDelete da trilha', 'migrationBuilder.PoliticaDelete("auditoria", "pol_x", "true");'],
+  ['SubstituirPoliticaSelect da trilha', 'migrationBuilder.SubstituirPoliticaSelect("auditoria", "pol_auditoria_select", usando);'],
+  ['SubstituirPoliticaInsert da trilha', 'migrationBuilder.SubstituirPoliticaInsert("auditoria", "pol_auditoria_insert", comCheck);'],
+  ['RemoverPolitica da trilha', 'migrationBuilder.RemoverPolitica("auditoria", "pol_auditoria_select");'],
+  ['com espaço antes da aspa', 'migrationBuilder.SubstituirPoliticaSelect( "auditoria", "pol_auditoria_select", usando);'],
+  ['PoliticaSelect da trilha (criação)', 'migrationBuilder.PoliticaSelect("auditoria", "pol_auditoria_select", $"empresa_id = {e}");'],
+]
+
+const R19_HELPER_NAO_ACUSA = [
+  ['PoliticaSelect de obra', 'migrationBuilder.PoliticaSelect("obra", "pol_obra_select", usando);'],
+  ['SubstituirPoliticaUpdate de obra', 'migrationBuilder.SubstituirPoliticaUpdate("obra", "pol_obra_update", usando, comCheck);'],
+  ['RemoverPolitica de membro_empresa', 'migrationBuilder.RemoverPolitica("membro_empresa", "pol_membro_empresa_insert");'],
+  ['comentário', '// SubstituirPoliticaSelect("auditoria", ...) só com revisão'],
+]
+
+for (const [nome, linha] of R19_HELPER_ACUSA) {
+  test(`backend R19 ampliada acusa (alerta): ${nome}`, () => {
+    const achados = regrasBackend(MIGRACAO_PERFIS, linha).filter((x) => x.id === 'R19')
+    assert.equal(achados.length, 1, `esperava R19 em: ${linha}`)
+    assert.equal(achados[0].severidade, 'alerta')
+  })
+}
+
+for (const [nome, linha] of R19_HELPER_NAO_ACUSA) {
+  test(`backend R19 ampliada não acusa: ${nome}`, () => {
+    assert.deepEqual(regrasBackend(MIGRACAO_PERFIS, linha).filter((x) => x.id === 'R19'), [])
+  })
+}
+
+test('backend R19 ampliada: a mesma linha fora de Migrations/ não é R19', () => {
+  const linha = 'migrationBuilder.SubstituirPoliticaSelect("auditoria", "pol_auditoria_select", usando);'
+
+  assert.deepEqual(regrasBackend('server/src/CronoAI.Dados/Rls/Exemplo.cs', linha).filter((x) => x.id === 'R19'), [])
+})
+
+test('backend R19 ampliada: a migração PerfisPermissoes real alerta (conferido: três camadas intactas) e a R18 não a acusa', async () => {
+  // Esperado e conferido por humano no ciclo 00014: a migração substitui as políticas de SELECT e INSERT da trilha. Quem prova que
+  // as três camadas do append-only seguem de pé é o teste de banco (Auditoria_por_visibilidade e o bloco de conferência da migração).
+  const { readFileSync } = await import('node:fs')
+  const { raizRepo } = await import('./regras-cronoai.mjs')
+  const linhas = readFileSync(`${raizRepo()}/${MIGRACAO_PERFIS}`, 'utf8').split('\n')
+  const achados = linhas.flatMap((linha) => regrasBackend(MIGRACAO_PERFIS, linha))
+
+  assert.ok(achados.filter((x) => x.id === 'R19').length >= 2)
+  assert.deepEqual(achados.filter((x) => x.id === 'R18'), [])
 })

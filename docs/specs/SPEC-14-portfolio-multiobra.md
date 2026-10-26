@@ -31,7 +31,7 @@ Cada usuário trabalha com várias obras, troca a obra ativa em um clique, e o g
 
 **Fase 2 — backend**
 - **RF-14.7** Portfólio por empresa (SPEC-01 RF-01.1a), respeitando permissões: o engenheiro vê as suas obras e o gestor, a carteira (SPEC-02 RF-02.3).
-- **RF-14.8** Carteiras (agrupamentos de obras por regional, cliente ou gestor) e atribuição de obra/frente a engenheiros.
+- **RF-14.8** Carteiras (agrupamentos de obras por regional, cliente ou gestor) e atribuição de obra/frente a engenheiros. **Nota (ciclo 00014):** o MODELO de carteira (N:N com a obra; carteira arquivada não concede acesso) e a atribuição de OBRA a engenheiros pela API (administrador, ou gestor de portfólio dentro do próprio alcance) entram no 00014; criar carteiras e atribuir frentes pela API é do 00014b.
 - **RF-14.9** Histórico do portfólio a partir dos snapshots (SPEC-04): evolução semanal de SPI/CPI consolidado e por obra.
 - **RF-14.10** Exportação do relatório de portfólio (SPEC-11).
 
