@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto'
+import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it } from 'vitest'
 import type { CalendarioObra, ConfigFeriadosObra, ProjectMeta, Task } from '@/types/domain'
-import { buildSeedState } from '@/stores/useProjectStore'
+import { buildSeedState, useProjectStore } from '@/stores/useProjectStore'
 import fixtureCalendarios from './__fixtures__/mspdi-calendarios-restricoes.xml?raw'
 import { addCalendarDays } from './calendar'
 import { calendarioPadrao, compilarCalendarios, copiarCalendario, diasParaMinutos } from './calendarioTrabalho'
@@ -1028,5 +1030,20 @@ describe('MSPDI de ida e volta com calendários do ciclo 00005 (M-2)', () => {
     // municipal), 22 (sábado de hora extra) e 24/08; sem o feriado terminaria em 22/08
     expect(schedule.byUid.get(1)!.finish).toBe('2026-08-17')
     expect(schedule.byUid.get(2)!.finish).toBe('2026-08-24')
+  })
+})
+
+describe('exportação do seed igual à da base 00006 (ciclo 00007, C-4 e M-3)', () => {
+  // Medido na base 00006 (dd58ba9) antes de qualquer mudança do ciclo 00007, com CreationDate e LastSaved normalizados.
+  // O E2 do ciclo grava <Baseline> 1 a 10 e BaselineForEarnedValue só quando existem: o seed (só a LB0) sai idêntico.
+  it('o XML do seed tem o mesmo comprimento e o mesmo SHA-256 da base, e passa em validateMspdi com strictOrder', () => {
+    globalThis.localStorage?.clear?.()
+    setActivePinia(createPinia())
+    const exp = useProjectStore().exportXml()
+    expect(exp.validation.errors).toEqual([])
+    expect(exp.avisos).toEqual([])
+    const xml = exp.xml.replace(/<(CreationDate|LastSaved)>[^<]*<\/\1>/g, '<$1>X</$1>')
+    expect(xml.length).toBe(79670)
+    expect(createHash('sha256').update(xml).digest('hex')).toBe('a401d3a80ff304e097d8f7e1bc44312464c1055f91d95f45b0100c342c09e18e')
   })
 })

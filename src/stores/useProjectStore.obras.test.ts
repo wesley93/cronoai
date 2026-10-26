@@ -5,6 +5,10 @@ import aurora from '@/lib/__fixtures__/estado-v1-aurora.json?raw'
 import aurora75 from '@/lib/__fixtures__/estado-v1-aurora-75.json?raw'
 import auroraCenarios from '@/lib/__fixtures__/estado-v2-aurora-cenarios.json?raw'
 import fixtureEsquema4 from '@/lib/__fixtures__/registro-esquema4-aurora-cenarios.json?raw'
+import fixtureEsquema5 from '@/lib/__fixtures__/registro-esquema5-aurora-cenarios.json?raw'
+import amostraRecorte from '../../e2e/arquivos/recorte-sinapi-sp-2026-09-amostra.json?raw'
+import { montarRegistroDeRecorte } from '@/lib/recorteSinapi'
+import type { RecorteSinapi } from '@/types/sinapi'
 import { createHash } from 'node:crypto'
 import type { RegistroObra } from '@/types/obra'
 import fixtureCalendarios from '@/lib/__fixtures__/mspdi-calendarios-restricoes.xml?raw'
@@ -1031,5 +1035,71 @@ describe('useProjectStore · obra salva no esquema 4 abre no 5 igual (ciclo 0000
     expect(store.obraAtivaId).not.toBe('o-futuro')
     expect(await store.salvarAgora()).toBe(true)
     expect(adaptador.obras.get('o-futuro')).toEqual(futuro)
+  })
+})
+
+describe('useProjectStore · registro REAL do esquema 5 (gerado na base 00006, dd58ba9; ciclo 00007, C-5)', () => {
+  beforeEach(() => {
+    globalThis.localStorage?.clear?.() // Node 26 pode expor localStorage indefinido
+    usarArmazenamento(undefined)
+    setActivePinia(createPinia())
+  })
+  afterEach(() => usarArmazenamento(undefined))
+
+  interface Esperado5 {
+    entrega: string
+    atrasoDias: number
+    spi: number
+    cpi: number
+    bac: number
+    ac: number
+    pv: number
+    ev: number
+    undo: number
+    cenariosAplicados: number
+    calendarios: string[]
+    premissas: number
+    tarefas: number
+    sha256Exportacao: string
+    comprimentoExportacao: number
+    recorte: string
+    aposDesfazer: { entrega: string; spi: number; cpi: number; undo: number; calendarios: string[] }
+  }
+
+  it('abre com os números gravados (cenários aplicados, recorte vinculado), o undo funciona e a exportação sai igual à da base', async () => {
+    const fx = JSON.parse(fixtureEsquema5) as { registro: RegistroObra; esperado: Esperado5 }
+    const adaptador = criarArmazenamentoMemoria()
+    adaptador.obras.set('o-esquema5', structuredClone(fx.registro))
+    const recorte = montarRegistroDeRecorte(JSON.parse(amostraRecorte) as RecorteSinapi, '2026-10-26T00:46:51.119Z')
+    adaptador.recortes.set(recorte.chave, recorte)
+    adaptador.indice = { versaoIndice: 1, obraAtivaId: 'o-esquema5', obras: [{ id: 'o-esquema5', nome: 'Aurora (esquema 5)', atualizadoEm: fx.registro.atualizadoEm, recorteSinapi: recorte.chave }] }
+    const store = await recarregar(adaptador)
+    const e = fx.esperado
+    expect(store.obraAtivaId).toBe('o-esquema5')
+    expect(store.avisosCarga).toEqual([])
+    expect(store.schedule.projectFinish).toBe(e.entrega) // 2027-06-16
+    expect(store.delay.delayDays).toBe(e.atrasoDias) // 11
+    expect([store.evm.bac, store.evm.pv, store.evm.ev, store.evm.ac]).toEqual([e.bac, e.pv, e.ev, e.ac])
+    expect(store.evm.spi).toBe(e.spi)
+    expect(store.evm.cpi).toBe(e.cpi)
+    expect(store.state.undo).toHaveLength(e.undo)
+    expect(store.state.appliedScenarios).toHaveLength(e.cenariosAplicados)
+    expect(store.state.calendarios.map((c) => c.nome)).toEqual(e.calendarios)
+    expect(store.state.premissas).toHaveLength(e.premissas)
+    expect(store.state.tasks).toHaveLength(e.tarefas)
+    expect(store.state.meta.recorteSinapi?.chave).toBe(e.recorte)
+    expect(store.recorteAtual?.fonte).toBe('SINAPI SP 09/2026 não desonerado') // o recorte continua vinculado
+    // A exportação sai igual à da base (normalizando CreationDate e LastSaved)
+    const xml = store.exportXml().xml.replace(/<(CreationDate|LastSaved)>[^<]*<\/\1>/g, '<$1>X</$1>')
+    expect(xml.length).toBe(e.comprimentoExportacao)
+    expect(createHash('sha256').update(xml).digest('hex')).toBe(e.sha256Exportacao)
+    // O undo funciona: hora extra e crashing voltam à entrega de antes
+    expect(store.undoScenario('overtime')).toEqual({ ok: true })
+    expect(store.undoScenario('crashing')).toEqual({ ok: true })
+    expect(store.schedule.projectFinish).toBe(e.aposDesfazer.entrega) // 2027-06-23
+    expect(store.evm.spi).toBe(e.aposDesfazer.spi)
+    expect(store.evm.cpi).toBe(e.aposDesfazer.cpi)
+    expect(store.state.undo).toHaveLength(e.aposDesfazer.undo)
+    expect(store.state.calendarios.map((c) => c.nome)).toEqual(e.aposDesfazer.calendarios)
   })
 })
