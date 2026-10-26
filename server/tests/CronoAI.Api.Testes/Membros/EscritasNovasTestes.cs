@@ -159,6 +159,53 @@ public sealed class EscritasNovasTestes
         }
     }
 
+    [Theory]
+    [InlineData("PUT /membros/{usuarioId}")]
+    [InlineData("POST /membros/{usuarioId}/remover")]
+    [InlineData("POST /membros/{usuarioId}/reativar")]
+    [InlineData("POST /obras/{id}/acessos")]
+    [InlineData("POST /obras/{id}/acessos/{usuarioId}/revogar")]
+    public async Task Corpo_acima_do_limite_de_8_KB_responde_413_e_nao_grava(string rota)
+    {
+        // S-6 (auditoria): as 5 escritas novas declaram o limite de corpo (8 KB). Corpo de 9 KB: 413 e NADA gravado (nem estado, nem
+        // trilha). Sem o LimiteDeCorpoMetadata da rota o corpo passaria à validação e o caso cairia (controle por mutação).
+        await using var api = await AmbienteApi.CriarAsync(_banco, _dados);
+        var obra = await api.CriarObraAsync();
+        var alvo = await _dados.CriarUsuarioAsync();
+        await _dados.VincularAsync(api.EmpresaId, alvo, Perfis.EngenheiroObra);
+        if (rota.EndsWith("/reativar", StringComparison.Ordinal))
+        {
+            await _dados.RemoverMembroAsync(api.EmpresaId, alvo);
+        }
+
+        if (rota.EndsWith("/revogar", StringComparison.Ordinal))
+        {
+            await _dados.CriarAcessoObraAsync(api.EmpresaId, obra.Id, alvo);
+        }
+
+        var trilhaAntes = await UltimoIdDaTrilhaAsync(api.EmpresaId);
+        var versao = await VersaoAsync(alvo);
+        var motivoGrande = new string('x', 9 * 1024);
+        var (metodo, url, corpo) = rota switch
+        {
+            "PUT /membros/{usuarioId}" => (HttpMethod.Put, $"{Raiz}/membros/{alvo}", (object)new { perfil = "suprimentos", versao, motivo = motivoGrande }),
+            "POST /membros/{usuarioId}/remover" => (HttpMethod.Post, $"{Raiz}/membros/{alvo}/remover", new { versao, motivo = motivoGrande }),
+            "POST /membros/{usuarioId}/reativar" => (HttpMethod.Post, $"{Raiz}/membros/{alvo}/reativar", new { versao, motivo = motivoGrande }),
+            "POST /obras/{id}/acessos" => (HttpMethod.Post, $"{Raiz}/obras/{obra.Id}/acessos", new { usuarioId = alvo, motivo = motivoGrande }),
+            _ => (HttpMethod.Post, $"{Raiz}/obras/{obra.Id}/acessos/{alvo}/revogar", new { motivo = motivoGrande }),
+        };
+
+        var resposta = await api.EscreverAsync(metodo, url, corpo);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, resposta.Status);
+        Assert.Equal(trilhaAntes, await UltimoIdDaTrilhaAsync(api.EmpresaId));
+        Assert.Equal("engenheiro_obra", await _banco.ConsultarComoSuperusuarioAsync($"SELECT perfil FROM cronoai.membro_empresa WHERE usuario_id = '{alvo}'"));
+        var removidoEsperado = rota.EndsWith("/reativar", StringComparison.Ordinal);
+        Assert.Equal(removidoEsperado ? "1" : "0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.membro_empresa WHERE usuario_id = '{alvo}' AND removido_em IS NOT NULL"));
+        var vinculoEsperado = rota.EndsWith("/revogar", StringComparison.Ordinal) ? "1" : "0";
+        Assert.Equal(vinculoEsperado, await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.acesso_obra WHERE obra_id = '{obra.Id}' AND usuario_id = '{alvo}'"));
+    }
+
     #endregion
 
     #region Métodos privados
