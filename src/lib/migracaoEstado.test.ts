@@ -3,6 +3,7 @@ import aurora from './__fixtures__/estado-v1-aurora.json?raw'
 import aurora75 from './__fixtures__/estado-v1-aurora-75.json?raw'
 import auroraCenarios from './__fixtures__/estado-v2-aurora-cenarios.json?raw'
 import fixtureEsquema4 from './__fixtures__/registro-esquema4-aurora-cenarios.json?raw'
+import fixtureEsquema5 from './__fixtures__/registro-esquema5-aurora-cenarios.json?raw'
 import {
   ESQUEMA_ATUAL,
   MIGRACOES,
@@ -196,7 +197,7 @@ describe('migrarRegistro', () => {
   it('o registro criado volta igual ao estado gravado', () => {
     const estado = estadoV1()
     const reg = criarRegistro('o1', estado, '2026-10-25T10:00:00.000Z')
-    expect(reg.versaoEsquema).toBe(5)
+    expect(reg.versaoEsquema).toBe(6)
     expect(migrarRegistro(reg)).toEqual({ tipo: 'ok', estado: JSON.parse(JSON.stringify(estado)), avisos: [] })
   })
 
@@ -240,7 +241,7 @@ describe('migrarRegistro', () => {
   })
 
   it('a cadeia cobre todos os esquemas até o atual, sem buracos', () => {
-    expect(MIGRACOES.map((p) => [p.de, p.para])).toEqual([[1, 2], [2, 3], [3, 4], [4, 5]])
+    expect(MIGRACOES.map((p) => [p.de, p.para])).toEqual([[1, 2], [2, 3], [3, 4], [4, 5], [5, 6]])
     expect(MIGRACOES.at(-1)?.para).toBe(ESQUEMA_ATUAL)
   })
 
@@ -249,9 +250,9 @@ describe('migrarRegistro', () => {
       tipo: 'erro',
       mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 99).',
     })
-    expect(migrarRegistro(registro(aurora, 6))).toEqual({
+    expect(migrarRegistro(registro(aurora, 7))).toEqual({
       tipo: 'erro',
-      mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 6).',
+      mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 7).',
     })
   })
 
@@ -483,8 +484,8 @@ describe('esquema 3 → 4: premissas versionadas e feriados da obra (ciclo 00005
     expect(longo.estado.premissas[0].motivo).toBe('Premissas padrão (o estado salvo não tinha premissas válidas)')
   })
 
-  it('P-4: esquema 6 é recusado (e nunca sobrescrito)', () => {
-    expect(migrarRegistro(registro(JSON.stringify(esquema3()), 6))).toEqual({ tipo: 'erro', mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 6).' })
+  it('P-4: esquema 7 é recusado (e nunca sobrescrito)', () => {
+    expect(migrarRegistro(registro(JSON.stringify(esquema3()), 7))).toEqual({ tipo: 'erro', mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 7).' })
   })
 
   it('P-5: esquema 4 sem premissas ou feriados (ou inválidos) volta ao padrão, com aviso', () => {
@@ -536,8 +537,7 @@ describe('esquema 4 → 5: referência ao recorte SINAPI e equipe por função (
   }
   const AVISO_REF = 'A referência ao recorte SINAPI do estado salvo estava inválida e foi removida: a obra usa o catálogo ilustrativo.'
 
-  it('o passo 4 → 5 existe e a cadeia termina no esquema 5', () => {
-    expect(ESQUEMA_ATUAL).toBe(5)
+  it('o passo 4 → 5 existe (a cadeia segue até o esquema 6, ciclo 00007)', () => {
     expect(MIGRACOES.find((p) => p.de === 4)?.para).toBe(5)
   })
 
@@ -548,14 +548,15 @@ describe('esquema 4 → 5: referência ao recorte SINAPI e equipe por função (
     if (r.tipo !== 'ok') throw new Error(r.mensagem)
     expect(r.avisos).toEqual([])
     // O resto igual: nenhum campo muda, nenhum campo novo aparece
-    expect(r.estado).toEqual(JSON.parse(fx.registro.json))
+    // Ciclo 00007: o esquema 6 só acrescenta `linhasBase` (a LB0 migrada, porque o Aurora tem linha de base salva)
+    expect(r.estado).toEqual({ ...JSON.parse(fx.registro.json), linhasBase: [{ numero: 0, nome: 'Linha de base 0', motivo: 'Linha de base salva antes do ciclo 00007 (migrada)', origem: 'migrada' }] })
     expect(r.estado.tasks).toHaveLength(fx.esperado.tarefas)
     expect(r.estado.premissas).toHaveLength(fx.esperado.premissas)
     expect(r.estado.undo).toHaveLength(fx.esperado.undo)
     expect(r.estado.calendarios.map((c) => c.nome)).toEqual(fx.esperado.calendarios)
     expect(r.estado.meta.recorteSinapi).toBeUndefined()
-    // A próxima gravação já é no esquema 5
-    expect(criarRegistro('o1', r.estado, fx.registro.atualizadoEm).versaoEsquema).toBe(5)
+    // A próxima gravação já é no esquema atual (6)
+    expect(criarRegistro('o1', r.estado, fx.registro.atualizadoEm).versaoEsquema).toBe(6)
   })
 
   it('esquema 5 com referência e equipe válidas passa intacto (a referência é reconstruída só com os 3 campos)', () => {
@@ -635,7 +636,105 @@ describe('esquema 4 → 5: referência ao recorte SINAPI e equipe por função (
     expect(r.avisos).toContain(AVISO_REF)
   })
 
-  it('P-4: o esquema 6 é recusado e nunca sobrescrito', () => {
-    expect(migrarRegistro(registro(JSON.stringify(esquema5()), 6))).toEqual({ tipo: 'erro', mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 6).' })
+  it('P-4: o esquema 7 é recusado e nunca sobrescrito', () => {
+    expect(migrarRegistro(registro(JSON.stringify(esquema5()), 7))).toEqual({ tipo: 'erro', mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 7).' })
+  })
+})
+
+describe('esquema 5 → 6: linhas de base LB0 a LB10 (ciclo 00007, AC-4, P-1 a P-4)', () => {
+  const registro = (json: string, versaoEsquema: number): RegistroObra => ({ id: 'o1', versaoEsquema, json, atualizadoEm: '2026-10-25T10:00:00.000Z' })
+  const LB0_MIGRADA = { numero: 0, nome: 'Linha de base 0', motivo: 'Linha de base salva antes do ciclo 00007 (migrada)', origem: 'migrada' }
+  const ok = (r: ReturnType<typeof migrarRegistro>) => {
+    if (r.tipo !== 'ok') throw new Error(r.mensagem)
+    return r
+  }
+  /** Aurora no esquema 6 (para adulterar). */
+  const esquema6 = () => JSON.parse(JSON.stringify(buildSeedState())) as Record<string, unknown> & { meta: Record<string, unknown>; tasks: Record<string, unknown>[]; linhasBase: unknown }
+
+  it('o passo 5 → 6 existe e a cadeia termina no esquema 6', () => {
+    expect(ESQUEMA_ATUAL).toBe(6)
+    expect(MIGRACOES.find((p) => p.de === 5)?.para).toBe(6)
+    expect(MIGRACOES.at(-1)?.para).toBe(ESQUEMA_ATUAL)
+  })
+
+  it('P-1: o registro REAL do esquema 5 (gerado na base 00006: cenários, undo e recorte vinculado) migra para o 6 com o resto igual e a LB0 migrada', () => {
+    const fx = JSON.parse(fixtureEsquema5) as { registro: RegistroObra; esperado: { tarefas: number; premissas: number; undo: number; calendarios: string[]; recorte: string } }
+    expect(fx.registro.versaoEsquema).toBe(5)
+    const r = ok(migrarRegistro(fx.registro))
+    expect(r.avisos).toEqual([])
+    // Nenhum campo muda; só `linhasBase` aparece (nenhum número muda: tarefas, meta, undo, calendários, premissas e recorte iguais)
+    expect(r.estado).toEqual({ ...JSON.parse(fx.registro.json), linhasBase: [LB0_MIGRADA] })
+    expect(r.estado.tasks).toHaveLength(fx.esperado.tarefas)
+    expect(r.estado.premissas).toHaveLength(fx.esperado.premissas)
+    expect(r.estado.undo).toHaveLength(fx.esperado.undo)
+    expect(r.estado.calendarios.map((c) => c.nome)).toEqual(fx.esperado.calendarios)
+    expect(r.estado.meta.recorteSinapi?.chave).toBe(fx.esperado.recorte)
+    expect(r.estado.meta.linhaBaseAtiva).toBeUndefined()
+    expect(criarRegistro('o1', r.estado, fx.registro.atualizadoEm).versaoEsquema).toBe(6)
+  })
+
+  it('obra sem nenhuma linha de base salva migra com a lista vazia; só folha conta (resumo com data de linha de base não cria a LB0)', () => {
+    const e = esquema6()
+    e.tasks = e.tasks.map((t) => ({ ...t, baselineStart: undefined, baselineFinish: undefined, baselineDuracaoMin: undefined }))
+    delete (e as { linhasBase?: unknown }).linhasBase
+    expect(ok(migrarRegistro(registro(JSON.stringify(e), 5))).estado.linhasBase).toEqual([])
+    const resumo = e.tasks.map((t) => (t.isSummary ? { ...t, baselineStart: '2026-05-04' } : t))
+    expect(ok(migrarRegistro(registro(JSON.stringify({ ...e, tasks: resumo }), 5))).estado.linhasBase).toEqual([])
+  })
+
+  it('P-2: a v1 vai ao esquema 6 pela cadeia com os mesmos números, e a LB0 migrada', () => {
+    const m = ok(migrarRegistro(registro(aurora, 1)))
+    expect(m.estado.linhasBase).toEqual([LB0_MIGRADA])
+    expect(m.estado.meta.linhaBaseAtiva).toBeUndefined()
+  })
+
+  it('P-3: o esquema 7 é recusado e nunca sobrescrito', () => {
+    expect(migrarRegistro(registro(JSON.stringify(esquema6()), 7))).toEqual({ tipo: 'erro', mensagem: 'Obra salva por uma versão mais nova do CronoAI (esquema 7).' })
+  })
+
+  it('esquema 6 íntegro, com a LB1 e a LB do valor agregado, passa intacto e sem aviso', () => {
+    const e = esquema6()
+    const lb1 = { numero: 1, nome: 'Replanejamento', motivo: 'Chuvas', autor: 'Eng.', salvaEm: '2026-10-25T15:00:00.000Z', dataStatus: '2026-10-23', origem: 'cronoai' }
+    e.linhasBase = [...(e.linhasBase as unknown[]), lb1]
+    e.meta.linhaBaseAtiva = 1
+    e.tasks = e.tasks.map((t) => (t.isSummary ? t : { ...t, linhasBase: { '1': { inicio: '2026-11-02', termino: '2026-11-06', duracaoMin: 2400, custo: 5 } } }))
+    const r = ok(migrarRegistro(registro(JSON.stringify(e), 6)))
+    expect(r.avisos).toEqual([])
+    expect(r.estado).toEqual(e)
+  })
+
+  it('P-4: esquema 6 adulterado é saneado, com um aviso por problema (lista inválida, LBn malformada, LB do valor agregado inexistente)', () => {
+    const e = esquema6()
+    e.linhasBase = 'lixo'
+    e.meta.linhaBaseAtiva = 11
+    e.tasks = e.tasks.map((t, i) => (i === 1 ? { ...t, linhasBase: { '11': { custo: 1 }, '2': { custo: -4 } } } : t))
+    const r = ok(migrarRegistro(registro(JSON.stringify(e), 6)))
+    expect(r.avisos).toEqual([
+      'A lista de linhas de base do estado salvo estava ausente ou inválida e foi refeita.',
+      '2 linha(s) de base inválida(s) descartada(s) do estado salvo.',
+      'A linha de base do valor agregado do estado salvo estava inválida e foi removida: vale a linha de base 0.',
+    ])
+    expect(r.estado.linhasBase).toEqual([LB0_MIGRADA])
+    expect(r.estado.meta.linhaBaseAtiva).toBeUndefined()
+    expect(r.estado.tasks[1].linhasBase).toBeUndefined()
+  })
+
+  it('P-4: LB do valor agregado que aponta para uma LB sem metadados é removida; dado de LB sem metadados é descartado', () => {
+    const e = esquema6()
+    e.meta.linhaBaseAtiva = 3
+    e.tasks = e.tasks.map((t, i) => (i === 2 ? { ...t, linhasBase: { '3': { custo: 7 } } } : t))
+    const r = ok(migrarRegistro(registro(JSON.stringify(e), 6)))
+    expect(r.estado.meta.linhaBaseAtiva).toBeUndefined()
+    expect(r.estado.tasks[2].linhasBase).toBeUndefined()
+    expect(r.avisos).toHaveLength(2)
+  })
+
+  it('P-4: metadado inválido, repetido ou com chave extra: reconstruído só com os campos conhecidos (`__proto__` não passa)', () => {
+    const e = esquema6()
+    e.linhasBase = JSON.parse('[{"numero":0,"nome":"A","motivo":"m","origem":"cronoai","__proto__":{"admin":true},"extra":1},{"numero":0,"nome":"repetida","motivo":"m","origem":"cronoai"},{"numero":1,"nome":"","motivo":"m","origem":"cronoai"}]')
+    const r = ok(migrarRegistro(registro(JSON.stringify(e), 6)))
+    expect(r.estado.linhasBase).toEqual([{ numero: 0, nome: 'A', motivo: 'm', origem: 'cronoai' }])
+    expect(r.avisos).toEqual(['2 linha(s) de base inválida(s) descartada(s) do estado salvo.'])
+    expect(({} as Record<string, unknown>).admin).toBeUndefined()
   })
 })

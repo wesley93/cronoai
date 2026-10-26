@@ -138,6 +138,7 @@ export function estadoObraVazia(d: DadosObra): PersistedState {
     calendarioPadraoUid: UID_CALENDARIO_PADRAO,
     premissas: [{ versao: 1, vigencia: d.dataInicio, motivo: 'Premissas iniciais da obra (ilustrativas)', valores: premissasPadrao() }],
     feriados: configFeriadosPadrao(),
+    linhasBase: [],
     reports: [],
     restrictions: [],
     materials: [],

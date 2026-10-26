@@ -85,8 +85,8 @@ describe('useProjectStore · multiobra', () => {
       expect(store.migracaoV1?.resultado).toBe('migrado')
       expect(store.avisosCarga).toEqual([])
       expect(store.estadoGravacao).toBe('salvo')
-      // gravada no esquema 5 (ciclo 00006: 1 → 5) e com a v1 intocada
-      expect(adaptador.obras.get(store.obraAtivaId)?.versaoEsquema).toBe(5)
+      // gravada no esquema 6 (ciclo 00007: 1 → 6) e com a v1 intocada
+      expect(adaptador.obras.get(store.obraAtivaId)?.versaoEsquema).toBe(6)
       expect(JSON.parse(adaptador.obras.get(store.obraAtivaId)!.json)).toEqual(JSON.parse(JSON.stringify(migrado.estado)))
       expect(adaptador.v1).toBe(aurora)
       expect(adaptador.indice?.migracaoV1?.resultado).toBe('migrado')
@@ -108,9 +108,9 @@ describe('useProjectStore · multiobra', () => {
       expect(store.state.calendarios[0].excecoes.filter((x) => x.intervalos.length > 0)).toEqual([]) // sem 24/10 e 31/10
       expect(store.schedule.projectFinish).toBe('2027-06-23')
       expect(store.state.undo).toEqual([])
-      // A próxima gravação já é no esquema 5
+      // A próxima gravação já é no esquema 6
       expect(await store.salvarAgora()).toBe(true)
-      expect(adaptador.obras.get('o2')?.versaoEsquema).toBe(5)
+      expect(adaptador.obras.get('o2')?.versaoEsquema).toBe(6)
     })
 
     it('hora extra aplicada e desfeita deixa o calendário padrão exatamente como estava', async () => {
@@ -124,7 +124,7 @@ describe('useProjectStore · multiobra', () => {
       expect(JSON.parse(JSON.stringify(store.state.calendarios))).toEqual(antes)
     })
 
-    it('P-6: hora extra aplicada no esquema 3 (ciclo 00004) abre no esquema 5 e é desfeita com a entrega de 2027-06-23', async () => {
+    it('P-6: hora extra aplicada no esquema 3 (ciclo 00004) abre no esquema 6 e é desfeita com a entrega de 2027-06-23', async () => {
       const { store: origem } = await carregarCom(aurora)
       origem.applyScenario(origem.scenarios.overtime)
       expect(origem.schedule.projectFinish).toBe('2027-06-21')
@@ -147,7 +147,7 @@ describe('useProjectStore · multiobra', () => {
       expect(store.schedule.projectFinish).toBe('2027-06-23')
       expect(store.state.calendarios[0].excecoes.filter((x) => x.intervalos.length > 0)).toEqual([])
       expect(await store.salvarAgora()).toBe(true)
-      expect(adaptador.obras.get('o3')?.versaoEsquema).toBe(5)
+      expect(adaptador.obras.get('o3')?.versaoEsquema).toBe(6)
     })
 
     /** Registro REAL do esquema 3 (formato do ciclo 00004): fixture do esquema 2 com os 3 cenários aplicados, passada pelo passo 2 → 3. */
@@ -987,7 +987,7 @@ describe('useProjectStore · obra salva no esquema 4 abre no 5 igual (ciclo 0000
     aposDesfazer: { entrega: string; spi: number; cpi: number; undo: number; calendarios: string[] }
   }
 
-  it('registro REAL do esquema 4 (gerado na base 281a99a): mesmos números (N-1), mesma exportação MSPDI e o undo funciona; a próxima gravação é no esquema 5', async () => {
+  it('registro REAL do esquema 4 (gerado na base 281a99a): mesmos números (N-1), mesma exportação MSPDI e o undo funciona; a próxima gravação é no esquema 6', async () => {
     const fx = JSON.parse(fixtureEsquema4) as { registro: RegistroObra; esperado: Esperado }
     const adaptador = criarArmazenamentoMemoria()
     adaptador.obras.set('o-esquema4', structuredClone(fx.registro))
@@ -1007,10 +1007,11 @@ describe('useProjectStore · obra salva no esquema 4 abre no 5 igual (ciclo 0000
     expect(store.state.calendarios.map((c) => c.nome)).toEqual(e.calendarios)
     expect(store.state.premissas).toHaveLength(e.premissas)
     expect(store.state.tasks).toHaveLength(e.tarefas)
-    // A obra é gravada no esquema 5, com o conteúdo igual (antes de exportar: a exportação registra uma linha no log)
+    // A obra é gravada no esquema 6, com o conteúdo igual (antes de exportar: a exportação registra uma linha no log)
     expect(await store.salvarAgora()).toBe(true)
-    expect(adaptador.obras.get('o-esquema4')?.versaoEsquema).toBe(5)
-    expect(JSON.parse(adaptador.obras.get('o-esquema4')!.json)).toEqual(JSON.parse(fx.registro.json))
+    expect(adaptador.obras.get('o-esquema4')?.versaoEsquema).toBe(6)
+    // o esquema 6 só acrescenta `linhasBase` (a LB0 migrada); o resto fica igual
+    expect(JSON.parse(adaptador.obras.get('o-esquema4')!.json)).toEqual({ ...JSON.parse(fx.registro.json), linhasBase: [{ numero: 0, nome: 'Linha de base 0', motivo: 'Linha de base salva antes do ciclo 00007 (migrada)', origem: 'migrada' }] })
     // A exportação sai igual à da base (normalizando CreationDate e LastSaved)
     const xml = store.exportXml().xml.replace(/<(CreationDate|LastSaved)>[^<]*<\/\1>/g, '<$1>X</$1>')
     expect(createHash('sha256').update(xml).digest('hex')).toBe(e.sha256Exportacao)
@@ -1024,10 +1025,10 @@ describe('useProjectStore · obra salva no esquema 4 abre no 5 igual (ciclo 0000
     expect(store.state.calendarios.map((c) => c.nome)).toEqual(e.aposDesfazer.calendarios)
   })
 
-  it('obra no esquema 6 (de uma versão mais nova) é recusada e o registro nunca é sobrescrito', async () => {
+  it('obra no esquema 7 (de uma versão mais nova) é recusada e o registro nunca é sobrescrito', async () => {
     const fx = JSON.parse(fixtureEsquema4) as { registro: RegistroObra }
     const adaptador = criarArmazenamentoMemoria()
-    const futuro = { ...structuredClone(fx.registro), versaoEsquema: 6 }
+    const futuro = { ...structuredClone(fx.registro), versaoEsquema: 7 }
     adaptador.obras.set('o-futuro', futuro)
     adaptador.indice = { versaoIndice: 1, obraAtivaId: 'o-futuro', obras: [{ id: 'o-futuro', nome: 'Do futuro', atualizadoEm: fx.registro.atualizadoEm }] }
     const store = await recarregar(adaptador)
@@ -1089,6 +1090,10 @@ describe('useProjectStore · registro REAL do esquema 5 (gerado na base 00006, d
     expect(store.state.tasks).toHaveLength(e.tarefas)
     expect(store.state.meta.recorteSinapi?.chave).toBe(e.recorte)
     expect(store.recorteAtual?.fonte).toBe('SINAPI SP 09/2026 não desonerado') // o recorte continua vinculado
+    // A obra é gravada no esquema 6 (ciclo 00007), só com `linhasBase` a mais: a LB0 migrada
+    expect(await store.salvarAgora()).toBe(true)
+    expect(adaptador.obras.get('o-esquema5')?.versaoEsquema).toBe(6)
+    expect(JSON.parse(adaptador.obras.get('o-esquema5')!.json)).toEqual({ ...JSON.parse(fx.registro.json), linhasBase: [{ numero: 0, nome: 'Linha de base 0', motivo: 'Linha de base salva antes do ciclo 00007 (migrada)', origem: 'migrada' }] })
     // A exportação sai igual à da base (normalizando CreationDate e LastSaved)
     const xml = store.exportXml().xml.replace(/<(CreationDate|LastSaved)>[^<]*<\/\1>/g, '<$1>X</$1>')
     expect(xml.length).toBe(e.comprimentoExportacao)
@@ -1101,5 +1106,28 @@ describe('useProjectStore · registro REAL do esquema 5 (gerado na base 00006, d
     expect(store.evm.cpi).toBe(e.aposDesfazer.cpi)
     expect(store.state.undo).toHaveLength(e.aposDesfazer.undo)
     expect(store.state.calendarios.map((c) => c.nome)).toEqual(e.aposDesfazer.calendarios)
+  })
+})
+
+describe('useProjectStore · duplicar a obra com linhas de base (ciclo 00007, D-9)', () => {
+  beforeEach(() => {
+    globalThis.localStorage?.clear?.() // Node 26 pode expor localStorage indefinido
+    usarArmazenamento(undefined)
+    setActivePinia(createPinia())
+  })
+  afterEach(() => usarArmazenamento(undefined))
+
+  it('a cópia leva as linhas de base (metadados, dados das tarefas e LB do valor agregado)', async () => {
+    const { store } = await carregarCom(null)
+    expect(store.salvarLinhaBase({ numero: 1, nome: 'Replanejamento', motivo: 'Chuvas' })).toEqual({ ok: true })
+    store.definirLinhaBaseAtiva(1)
+    expect(await store.salvarAgora()).toBe(true)
+    const copia = await store.duplicarObra(store.obraAtivaId)
+    if (!copia.ok) throw new Error(copia.erro)
+    expect((await store.trocarObra(copia.id)).ok).toBe(true)
+    expect(store.state.linhasBase.map((i) => [i.numero, i.nome])).toEqual([[0, 'Linha de base 0'], [1, 'Replanejamento']])
+    expect(store.state.meta.linhaBaseAtiva).toBe(1)
+    expect(store.taskByUid.get(104)!.linhasBase?.['1']).toEqual({ inicio: '2026-10-05', termino: '2026-11-05', duracaoMin: 10176, custo: 168000 })
+    expect(store.evm.pv).toBeCloseTo(6496233.415233416, 2)
   })
 })

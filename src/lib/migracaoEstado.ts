@@ -6,6 +6,7 @@ import { UID_CALENDARIO_PADRAO, calendarioPadrao, diasParaMinutos, erroDoCalenda
 import type { CalendarioObra, ChavePremissa, VersaoPremissas } from '@/types/domain'
 import { configFeriadosPadrao, sanearConfigFeriados } from './feriadosObra'
 import { premissasPadrao, versoesValidas } from './premissas'
+import { linhaBaseAtivaEfetiva, sanearInfosLinhaBase, sanearLinhasBase } from './linhasBase'
 import { chaveRecorte, lerChaveRecorte } from './recorteSinapi'
 
 /**
@@ -13,9 +14,10 @@ import { chaveRecorte, lerChaveRecorte } from './recorteSinapi'
  * esquema 3 = tempo em minutos inteiros e calendários por intervalo (ciclo 00004, ADR 00003);
  * esquema 4 = premissas versionadas e feriados da obra (ciclo 00005);
  * esquema 5 = referência ao recorte SINAPI da obra e equipe por função nas linhas da planilha (ciclo 00006): sem conversão de dado,
- * só o saneamento dos campos novos lidos do armazenamento.
+ * só o saneamento dos campos novos lidos do armazenamento;
+ * esquema 6 = linhas de base LB0 a LB10 (ciclo 00007): `linhasBase` obrigatória no estado, `Task.linhasBase?` e `meta.linhaBaseAtiva?`.
  */
-export const ESQUEMA_ATUAL = 5
+export const ESQUEMA_ATUAL = 6
 
 /** Estado como foi lido do armazenamento, ainda sem forma garantida. */
 export type EstadoBruto = Record<string, unknown>
@@ -188,6 +190,17 @@ function sanearCamposDoRecorte(estado: EstadoBruto): string[] {
   return avisos
 }
 
+/** Metadados da LB0 de uma obra que já tinha linha de base salva antes do ciclo 00007. */
+const INFO_LB0_MIGRADA = { numero: 0, nome: 'Linha de base 0', motivo: 'Linha de base salva antes do ciclo 00007 (migrada)', origem: 'migrada' } as const
+
+/** Alguma folha com início ou término de linha de base: a obra tem LB0. */
+const temLinhaBase0 = (tasks: unknown): boolean => Array.isArray(tasks) && tasks.some((t) => eObjeto(t) && !t.isSummary && (t.baselineStart !== undefined || t.baselineFinish !== undefined))
+
+/** Passo 5 → 6: só acrescenta `linhasBase` (a LB0 migrada, se há linha de base salva). Tarefas, meta, undo e o resto não mudam: nenhum número muda. */
+function migrar5Para6(estado: EstadoBruto): EstadoBruto {
+  return { ...estado, linhasBase: temLinhaBase0(estado.tasks) ? [{ ...INFO_LB0_MIGRADA }] : [] }
+}
+
 export const MIGRACOES: PassoMigracao[] = [
   // v1 → v2: só embrulha o estado num registro por obra; o conteúdo não muda.
   { de: 1, para: 2, aplicar: (estado) => estado },
@@ -195,6 +208,8 @@ export const MIGRACOES: PassoMigracao[] = [
   { de: 3, para: 4, aplicar: migrar3Para4 },
   // 4 → 5: o conteúdo não muda (nenhum número muda); os campos novos são saneados em `levarAoAtual`
   { de: 4, para: 5, aplicar: (estado) => estado },
+  // 5 → 6: a LB0 vira a primeira linha de base com metadados; as LB1 a LB10 nascem vazias
+  { de: 5, para: 6, aplicar: migrar5Para6 },
 ]
 
 export type LeituraV1 =
@@ -232,6 +247,7 @@ function eEstado(v: Record<string, unknown>): v is Record<string, unknown> & Per
     Array.isArray(v.calendarios) &&
     v.calendarios.every(eObjeto) &&
     Array.isArray(v.premissas) &&
+    Array.isArray(v.linhasBase) &&
     eObjeto(v.feriados) &&
     eNumero(v.calendarioPadraoUid) &&
     CHAVES_LISTA.every((c) => Array.isArray(v[c]))
@@ -343,6 +359,37 @@ function descartarCalendariosInvalidos(estado: EstadoBruto, anoPadrao: number): 
   ]
 }
 
+/**
+ * Saneamento das linhas de base do estado lido do armazenamento (esquema 6; dado externo): a lista de metadados ausente ou inválida é refeita
+ * (a LB0 migrada, se houver linha de base), a entrada inválida de uma tarefa é descartada e a `linhaBaseAtiva` inválida é removida (vale a LB0).
+ * Roda em todo registro que chega ao esquema atual.
+ */
+function sanearLinhasBaseDoEstado(estado: EstadoBruto): string[] {
+  const avisos: string[] = []
+  if (!Array.isArray(estado.linhasBase)) {
+    estado.linhasBase = temLinhaBase0(estado.tasks) ? [{ ...INFO_LB0_MIGRADA }] : []
+    avisos.push('A lista de linhas de base do estado salvo estava ausente ou inválida e foi refeita.')
+  }
+  const { infos, descartadas: infosDescartadas } = sanearInfosLinhaBase(estado.linhasBase)
+  estado.linhasBase = infos
+  const numeros = new Set(infos.map((i) => i.numero))
+  let descartadas = infosDescartadas
+  if (Array.isArray(estado.tasks)) {
+    const r = sanearLinhasBase(estado.tasks as { linhasBase?: unknown }[], numeros)
+    estado.tasks = r.tasks
+    descartadas += r.descartadas
+  }
+  if (descartadas > 0) avisos.push(`${descartadas} linha(s) de base inválida(s) descartada(s) do estado salvo.`)
+  if (eObjeto(estado.meta) && 'linhaBaseAtiva' in estado.meta) {
+    const ativa = estado.meta.linhaBaseAtiva
+    if (typeof ativa !== 'number' || linhaBaseAtivaEfetiva(ativa, infos) !== ativa) {
+      estado.meta = Object.fromEntries(Object.entries(estado.meta).filter(([k]) => k !== 'linhaBaseAtiva'))
+      avisos.push('A linha de base do valor agregado do estado salvo estava inválida e foi removida: vale a linha de base 0.')
+    }
+  }
+  return avisos
+}
+
 /** Cada tarefa precisa de duração em minutos: não se inventa duração para registro sem ela. */
 const tarefasCompletas = (tasks: unknown[]): boolean => tasks.every((t) => eObjeto(t) && eNumero(t.duracaoMin))
 
@@ -365,10 +412,11 @@ function levarAoAtual(bruto: EstadoBruto, de: number, anoPadrao: number): Result
   }
   const descartes = descartarCalendariosInvalidos(estado, anoPadrao)
   const avisosRecorte = sanearCamposDoRecorte(estado)
+  const avisosLinhasBase = sanearLinhasBaseDoEstado(estado)
   if (!eEstado(estado) || !tarefasCompletas(estado.tasks)) {
     return { tipo: 'erro', mensagem: 'Os dados desta obra estão ilegíveis.' }
   }
-  return { tipo: 'ok', estado, avisos: [...avisoDePreenchidas(preenchidas), ...avisosChaves, ...avisosPremissas, ...descartes, ...avisosRecorte] }
+  return { tipo: 'ok', estado, avisos: [...avisoDePreenchidas(preenchidas), ...avisosChaves, ...avisosPremissas, ...descartes, ...avisosRecorte, ...avisosLinhasBase] }
 }
 
 /** Lê o texto gravado em `cronoai-state-v1`. */

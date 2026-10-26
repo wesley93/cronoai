@@ -8,6 +8,7 @@ import { useMsProject } from '@/lib/useMsProject'
 import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import ProgressBar from '@/components/common/ProgressBar.vue'
+import SalvarLinhaBaseDialog from '@/modules/wbs/SalvarLinhaBaseDialog.vue'
 import { fmtBRL, fmtDate, fmtFolga } from '@/lib/format'
 import { diasParaMinutos, minutosParaDias } from '@/lib/calendarioTrabalho'
 import { formatPredecessors } from '@/lib/wbs'
@@ -91,12 +92,8 @@ const calendariosAlternativos = computed(() => project.state.calendarios.filter(
 const calendarioDeHoraExtra = (t: Task) => project.state.calendarios.find((c) => c.uid === t.calendarioUid && c.origem === 'hora-extra')
 const nomeCalendarioPadrao = computed(() => project.state.calendarios.find((c) => c.uid === project.state.calendarioPadraoUid)?.nome ?? '')
 
-function saveBaseline() {
-  if (window.confirm('Substituir a linha de base pelo cronograma reprogramado atual? A variação passará a ser medida a partir dele.')) {
-    project.saveBaseline()
-    ui.notify('success', 'Linha de base atualizada', 'Variações e PV recalculados a partir da nova linha de base.')
-  }
-}
+// Salvar linha de base (LB0 a LB10): diálogo com número, nome, motivo, autor e confirmação de sobrescrita (ciclo 00007)
+const salvandoLinhaBase = ref(false)
 
 function applyStatusDate() {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(statusDate.value)) return
@@ -147,7 +144,8 @@ const ac = (t: Task) => (t.isSummary ? (project.rollups.get(t.uid)?.actualCost ?
           <button class="btn-secondary" @click="applyStatusDate">Reprogramar</button>
         </div>
       </div>
-      <button class="btn-secondary" @click="saveBaseline"><Save class="h-3.5 w-3.5" /> Salvar linha de base</button>
+      <button class="btn-secondary" @click="salvandoLinhaBase = true"><Save class="h-3.5 w-3.5" /> Salvar linha de base</button>
+      <SalvarLinhaBaseDialog v-if="salvandoLinhaBase" @fechar="salvandoLinhaBase = false" />
     </div>
 
     <div class="card flex flex-wrap items-end gap-4 p-4" data-testid="atribuicao-lote">

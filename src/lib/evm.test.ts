@@ -3,6 +3,7 @@ import type { CalendarioObra, Task } from '@/types/domain'
 import { brazilianHolidays } from './calendar'
 import { calendarioPadrao, comDiasExtras, compilarCalendarios } from './calendarioTrabalho'
 import { computeEvm, plannedFraction } from './evm'
+import { projetarLinhaBase } from './linhasBase'
 
 // CR-2d: o PV usa os minutos úteis do calendário da TAREFA (PMBOK: PV = BAC × fração planejada).
 const padrao = calendarioPadrao(brazilianHolidays(2026))
@@ -54,5 +55,28 @@ describe('PV no calendário da tarefa (CR-2d)', () => {
     expect(e.ac).toBeCloseTo(3500, 2)
     expect(e.spi).toBeCloseTo(0.6, 4)
     expect(e.cpi).toBeCloseTo(0.8571, 4)
+  })
+})
+
+describe('computeEvm com a LB do valor agregado projetada (ciclo 00007, G5 = b e G6 = a)', () => {
+  // Calendário padrão seg–sex, sem feriados. LB0: 03/08 a 14/08 (10 d.u.), BAC 1.000; LB2: 10/08 a 21/08 (10 d.u.), custo congelado de 800
+  const cal = compilarCalendarios('2026-08-03', [calendarioPadrao([])], 1)
+  const t: Task = {
+    uid: 1, wbs: '1', name: 'Alvenaria', outlineLevel: 1, isSummary: false, duracaoMin: 4800, predecessors: [], percentComplete: 50, bac: 1000, actualCost: 600, resources: [],
+    baselineStart: '2026-08-03', baselineFinish: '2026-08-14', baselineDuracaoMin: 4800,
+    linhasBase: { '2': { inicio: '2026-08-10', termino: '2026-08-21', duracaoMin: 4800, custo: 800 } },
+  }
+
+  it('status em 07/08: LB0 PV 500,00 e EV 500,00; LB2 PV 0,00 (a LB2 começa em 10/08) e EV 400,00 (50% do custo congelado)', () => {
+    const lb0 = computeEvm(projetarLinhaBase([t], 0), cal, '2026-08-07')
+    expect([lb0.bac, lb0.pv, lb0.ev, lb0.ac]).toEqual([1000, 500, 500, 600])
+    const lb2 = computeEvm(projetarLinhaBase([t], 2), cal, '2026-08-07')
+    expect([lb2.bac, lb2.pv, lb2.ev, lb2.ac]).toEqual([800, 0, 400, 600])
+    expect(lb2.cpi).toBeCloseTo(0.666667, 6)
+  })
+
+  it('status em 14/08: LB0 PV 1.000,00; LB2 PV 400,00 (5 de 10 d.u. de R$ 800,00)', () => {
+    expect(computeEvm(projetarLinhaBase([t], 0), cal, '2026-08-14').pv).toBe(1000)
+    expect(computeEvm(projetarLinhaBase([t], 2), cal, '2026-08-14').pv).toBe(400)
   })
 })

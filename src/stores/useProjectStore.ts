@@ -4,6 +4,7 @@ import { computed, markRaw, nextTick, reactive, ref, shallowRef, toRaw, watch } 
 import type {
   CalendarioObra,
   ConfigFeriadosObra,
+  DadosLinhaBase,
   DecisionLogEntry,
   ExcecaoCalendario,
   FeriadoManual,
@@ -11,6 +12,7 @@ import type {
   OpcoesCronograma,
   DetectedRestriction,
   FieldReport,
+  LinhaBaseInfo,
   LinkType,
   MaterialItem,
   PhotoKind,
@@ -62,6 +64,7 @@ import {
   semDiasExtras,
 } from '@/lib/calendarioTrabalho'
 import { computeSchedule, optsDaObra, withBaseline } from '@/lib/cpm'
+import { NUMERO_MAX_LINHA_BASE, avisoTarefasSemLinhaBase, dataLocalDeIso, linhaBaseAtivaEfetiva, linhaBaseDoCronograma, projetarLinhaBase, rotuloLinhaBase, validarTextosLinhaBase } from '@/lib/linhasBase'
 import { computeEvm, computePackageEvm, computeSCurve, eacVariants, forecastFinishBySpi, plannedFraction } from '@/lib/evm'
 import { interpretReport } from '@/lib/fieldAi'
 import { MAX_CALENDAR_DAYS, buildMspdiXml, buildTaskXml, lagParaMspdi, parseMspdiXml, validateMspdi, type MspdiValidation } from '@/lib/msProjectXmlParser'
@@ -198,6 +201,8 @@ export function buildSeedState(): PersistedState {
     calendarioPadraoUid: UID_CALENDARIO_PADRAO,
     premissas: clone(SEED_PREMISSAS),
     feriados,
+    // LB0 do exemplo: aprovada em 27/04/2026 (a mesma data do registro no log); data fixa para o exemplo ser determinístico
+    linhasBase: [{ numero: 0, nome: 'Linha de base 0', motivo: 'Linha de base inicial do exemplo', salvaEm: '2026-04-27T12:00:00.000Z', origem: 'cronoai' }],
     reports: clone(SEED_REPORTS),
     restrictions: [],
     materials,
@@ -230,6 +235,8 @@ function mensagemDeFalha(err: unknown): string {
     ? 'O armazenamento do navegador está cheio.'
     : 'Não foi possível gravar no armazenamento do navegador.'
 }
+
+export type ResultadoLinhaBase = { ok: true } | { ok: false; erro: string; precisaConfirmar?: boolean }
 
 export interface SinapiInsert {
   name: string
@@ -651,11 +658,15 @@ export const useProjectStore = defineStore('project', () => {
    * Se estourar o teto de 50 anos (estado salvo ou importado com datas absurdas) ou o calendário for inválido, a tela não quebra:
    * devolve um cronograma vazio e `erro` em português (a tela mostra o aviso; o usuário troca de obra, exporta e corrige a data).
    */
+  // Tarefas e meta da AGENDA como texto, sem as linhas de base 1 a 10 e sem a LB do valor agregado: um computed de texto só dispara quem
+  // depende dele se o texto MUDAR. Assim, trocar a LB do valor agregado ou salvar uma LB não refaz o cronograma (CPM, ~0,8 a 1,5 s com 3.000 tarefas) nem o atraso.
+  const tarefasDaAgenda = computed(() => JSON.stringify(state.tasks, (k, v) => (k === 'linhasBase' ? undefined : v)))
+  const metaDaAgenda = computed(() => JSON.stringify(state.meta, (k, v) => (k === 'linhaBaseAtiva' ? undefined : v)))
   const calculo = computed(() => {
     try {
       // Cópia simples do estado: ler 3.000 tarefas pelo proxy reativo do Vue custa ~4x mais que ler objetos comuns, e a cópia (JSON) também
       // registra a dependência de todos os campos que o cálculo usa
-      return { ...calcularObra(clone(state.tasks), clone(state.meta), clone(state.calendarios), state.calendarioPadraoUid, { feriados: clone(state.feriados) }), erro: undefined as string | undefined }
+      return { ...calcularObra(JSON.parse(tarefasDaAgenda.value) as Task[], JSON.parse(metaDaAgenda.value) as ProjectState['meta'], clone(state.calendarios), state.calendarioPadraoUid, { feriados: clone(state.feriados) }), erro: undefined as string | undefined }
     } catch (e) {
       const seguros = calendariosSeguros()
       const sch = computeSchedule([], seguros, optsDaObra(state.meta, 'forecast', state.meta.statusDate))
@@ -701,9 +712,31 @@ export const useProjectStore = defineStore('project', () => {
   const tasksByWbs = computed(() => sortByWbs(state.tasks))
   const leaves = computed(() => tasksByWbs.value.filter((t) => !t.isSummary))
   const taskByUid = computed(() => new Map(state.tasks.map((t) => [t.uid, t])))
-  const evm = computed(() => calculo.value.evm)
-  const packageEvm = computed(() => tentar(() => computePackageEvm(state.tasks, calendariosPv.value, state.meta.statusDate), () => []))
-  const sCurve = computed(() => (calculo.value.erro ? [] : tentar(() => computeSCurve(clone(state.tasks), calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth), () => [])))
+  /** Linha de base do valor agregado em vigor (0 a 10): a escolhida em `meta.linhaBaseAtiva`, se a LB existe; senão a LB0. */
+  const linhaBaseAtiva = computed(() => linhaBaseAtivaEfetiva(state.meta.linhaBaseAtiva, state.linhasBase))
+  /**
+   * Tarefas do VALOR AGREGADO (ciclo 00007, G5 = b): com a LB0, a cópia simples das tarefas; com outra, a projeção da LB escolhida (datas, duração e
+   * custo dela; sem a LB, BAC 0). Vão só ao PV, EV, BAC, índices, Curva S, EVM por pacote e previsão pelo SPI. Atraso, variações, cenários, DLP, Gantt, EAP,
+   * ações, exportação e gravação usam `state.tasks` (LB0), nunca esta lista (R-3, R-6).
+   */
+  // Dados da LB do valor agregado de cada tarefa (na ordem de `state.tasks`), como texto pequeno: só a entrada ativa é lida, então editar outras
+  // linhas de base ou outros campos não refaz a projeção, e a projeção não clona as 11 linhas de base de cada tarefa.
+  const dadosDaLinhaBaseAtiva = computed(() => {
+    const n = linhaBaseAtiva.value
+    return n === 0 ? '[]' : JSON.stringify(state.tasks.map((t) => t.linhasBase?.[String(n)] ?? null))
+  })
+  const tarefasDoValorAgregado = computed<Task[]>(() => {
+    const tarefas = JSON.parse(tarefasDaAgenda.value) as Task[]
+    const n = linhaBaseAtiva.value
+    if (n === 0) return tarefas
+    const dados = JSON.parse(dadosDaLinhaBaseAtiva.value) as (DadosLinhaBase | null)[]
+    return projetarLinhaBase(tarefas.map((t, i) => (dados[i] ? { ...t, linhasBase: { [String(n)]: dados[i] } } : t)), n)
+  })
+  const evm = computed(() => (linhaBaseAtiva.value === 0 || calculo.value.erro ? calculo.value.evm : tentar(() => computeEvm(tarefasDoValorAgregado.value, calendariosPv.value, state.meta.statusDate), () => calculo.value.evm)))
+  /** Aviso da D-8: folhas sem custo na LB do valor agregado (BAC, PV e EV zerados; o custo real continua contando). */
+  const avisoSemLinhaBase = computed(() => avisoTarefasSemLinhaBase(state.tasks, linhaBaseAtiva.value))
+  const packageEvm = computed(() => tentar(() => computePackageEvm(tarefasDoValorAgregado.value, calendariosPv.value, state.meta.statusDate), () => []))
+  const sCurve = computed(() => (calculo.value.erro ? [] : tentar(() => computeSCurve(tarefasDoValorAgregado.value, calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth), () => [])))
   const delay = computed(() => calculo.value.atraso)
   /**
    * Obra com "não mover o restante" e tarefa iniciada cujo restante termina ANTES da data de status: o cálculo é a política do
@@ -730,7 +763,7 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Tarefas de um pacote de 1º nível (ou a obra inteira quando `wbs` é vazio). */
   function tasksOf(wbs?: string): Task[] {
-    return wbs ? state.tasks.filter((t) => t.wbs === wbs || t.wbs.startsWith(wbs + '.')) : state.tasks
+    return wbs ? tarefasDoValorAgregado.value.filter((t) => t.wbs === wbs || t.wbs.startsWith(wbs + '.')) : tarefasDoValorAgregado.value
   }
   function sCurveFor(wbs?: string) {
     return wbs ? tentar(() => computeSCurve(tasksOf(wbs), calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth), () => []) : sCurve.value
@@ -740,7 +773,7 @@ export const useProjectStore = defineStore('project', () => {
   }
   /** EAC por três premissas + término previsto pelo SPI comparado ao CPM. */
   const evmForecast = computed(() => {
-    const leavesWithBaseline = state.tasks.filter((t) => !t.isSummary && t.baselineStart && t.baselineFinish)
+    const leavesWithBaseline = tarefasDoValorAgregado.value.filter((t) => !t.isSummary && t.baselineStart && t.baselineFinish)
     const bStart = leavesWithBaseline.map((t) => t.baselineStart!).sort()[0] ?? state.meta.startDate
     const bFinish = leavesWithBaseline.map((t) => t.baselineFinish!).sort().at(-1) ?? schedule.value.projectFinish
     return {
@@ -828,7 +861,9 @@ export const useProjectStore = defineStore('project', () => {
   /** Tarefas no formato MS Project (folhas + resumos), sempre coerentes com o CPM e o EVM atuais. */
   const msProjectTasks = computed<MSProjectTask[]>(() => {
     const status = state.meta.statusDate
-    const pvOf = (t: Task) => tentar(() => t.bac * plannedFraction(t, calendariosPv.value, status), () => 0)
+    const va = new Map(tarefasDoValorAgregado.value.map((t) => [t.uid, t]))
+    const daLb = (t: Task) => va.get(t.uid) ?? t
+    const pvOf = (t: Task) => tentar(() => daLb(t).bac * plannedFraction(daLb(t), calendariosPv.value, status), () => 0)
     return tasksByWbs.value.map((t): MSProjectTask => {
       if (t.isSummary) {
         const r = rollups.value.get(t.uid)
@@ -848,9 +883,9 @@ export const useProjectStore = defineStore('project', () => {
           Predecessors: t.predecessors.map(predecessorMs),
           IsCritical: !!r?.critical,
           TotalSlack: null,
-          BudgetAtCompletion: r?.bac ?? 0,
+          BudgetAtCompletion: linhaBaseAtiva.value === 0 ? (r?.bac ?? 0) : kids.reduce((a, k) => a + daLb(k).bac, 0),
           PlannedValue: kids.reduce((a, k) => a + pvOf(k), 0),
-          EarnedValue: kids.reduce((a, k) => a + (k.bac * k.percentComplete) / 100, 0),
+          EarnedValue: kids.reduce((a, k) => a + (daLb(k).bac * k.percentComplete) / 100, 0),
           ActualCost: r?.actualCost ?? 0,
           Resources: [],
           MaterialLeadTime: null,
@@ -874,9 +909,9 @@ export const useProjectStore = defineStore('project', () => {
         Predecessors: t.predecessors.map(predecessorMs),
         IsCritical: !!s?.critical,
         TotalSlack: done || !s ? null : s.totalFloat,
-        BudgetAtCompletion: t.bac,
+        BudgetAtCompletion: daLb(t).bac,
         PlannedValue: pvOf(t),
-        EarnedValue: (t.bac * t.percentComplete) / 100,
+        EarnedValue: (daLb(t).bac * t.percentComplete) / 100,
         ActualCost: t.actualCost,
         Resources: t.resources.map((r) => ({ Name: r.resource, Units: r.units })),
         MaterialLeadTime: t.leadTimeDays ?? null,
@@ -1233,9 +1268,27 @@ export const useProjectStore = defineStore('project', () => {
     state.tasks.push(task)
     // Linha de base da inclusão de escopo = datas calculadas no momento da inclusão
     const s = schedule.value.byUid.get(task.uid)
-    if (s) patchTask(task.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin })
+    if (s) {
+      patchTask(task.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin })
+      incluirNaLinhaBaseAtiva([task.uid])
+    }
     log('sinapi', `Pacote incluído na EAP: [UID ${task.uid}] ${task.wbs}`, `${input.name} — ${input.durationDays} dias úteis, BAC ${fmtBRLCents(task.bac)}.`)
     return { ok: true, task }
+  }
+
+  /**
+   * Inclusão de escopo com a LB do valor agregado ≠ 0 (D-35): a tarefa nova ganha também a LB n, com as mesmas datas e duração da LB0 dela e custo = BAC.
+   * Sem isso, ela ficaria sem BAC, PV e EV na LB do valor agregado.
+   */
+  function incluirNaLinhaBaseAtiva(uids: number[]) {
+    const n = linhaBaseAtiva.value
+    if (n === 0 || !uids.length) return
+    for (const uid of uids) {
+      const t = state.tasks.find((x) => x.uid === uid)
+      if (!t || t.baselineStart === undefined) continue
+      patchTask(uid, { linhasBase: { ...t.linhasBase, [String(n)]: { inicio: t.baselineStart, termino: t.baselineFinish, duracaoMin: t.baselineDuracaoMin, custo: t.bac } } })
+    }
+    log('sistema', `Tarefa nova incluída também na LB ${n}`, `${uids.length} tarefa(s) ganharam a linha de base ${n} com as datas da linha de base 0 e o custo (BAC) do momento.`)
   }
 
   function buildSinapiTask(input: SinapiInsert, tasks: Task[]): { task: Task; parentWbs: string; group?: Task } {
@@ -1514,6 +1567,7 @@ export const useProjectStore = defineStore('project', () => {
       const s = schedule.value.byUid.get(t.uid)
       if (s) patchTask(t.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin })
     }
+    incluirNaLinhaBaseAtiva(created.map((t) => t.uid))
     const bac = created.reduce((a, t) => a + t.bac, 0)
     log('sinapi', `Cronograma gerado da planilha SINAPI (${created.length} pacotes)`, `Vínculos ${opts.mode === 'SS' ? `SS com defasagem de ${opts.overlapPct}%` : 'FS em série'} · BAC +${fmtBRLCents(bac)}.`)
     state.budget = []
@@ -1543,12 +1597,54 @@ export const useProjectStore = defineStore('project', () => {
     return { ok: true }
   }
 
-  function saveBaseline() {
-    state.tasks = state.tasks.map((t) => {
-      const s = schedule.value.byUid.get(t.uid)
-      return s ? { ...t, baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin } : t
-    })
-    log('sistema', 'Nova linha de base salva', `Linha de base substituída pelo cronograma reprogramado em ${state.meta.statusDate.split('-').reverse().join('/')}.`)
+  const ddmmaaaa = (iso: string) => iso.split('-').reverse().join('/')
+
+  /** Texto "Nome, 25/10/2026" de uma linha de base já existente, para a mensagem de sobrescrita e para o log. */
+  function descreverLinhaBase(info: LinhaBaseInfo): string {
+    return `${info.nome}${info.salvaEm ? `, ${dataLocalDeIso(info.salvaEm)}` : ''}`
+  }
+
+  /**
+   * Salva a linha de base `numero` (0 a 10) a partir do cronograma previsto atual: início, término e duração de cada tarefa e, nas LB1 a LB10,
+   * o custo (= BAC do momento, D-2). A LB0 faz o mesmo que o antigo "Salvar linha de base". Substituir uma existente exige `confirmarSobrescrita`
+   * e fica no log. Salvar uma LB não altera as outras nem o histórico de fechamentos.
+   */
+  function salvarLinhaBase(d: { numero: number; nome: string; motivo: string; autor?: string; confirmarSobrescrita?: boolean }): ResultadoLinhaBase {
+    if (!Number.isInteger(d.numero) || d.numero < 0 || d.numero > NUMERO_MAX_LINHA_BASE) return { ok: false, erro: 'Escolha uma linha de base de 0 a 10.' }
+    const erros = validarTextosLinhaBase(d)
+    if (erros.length) return { ok: false, erro: erros[0] }
+    if (calculo.value.erro) return { ok: false, erro: calculo.value.erro }
+    const n = d.numero
+    const existente = state.linhasBase.find((i) => i.numero === n)
+    const temDadosLb0 = n === 0 && state.tasks.some((t) => !t.isSummary && t.baselineStart !== undefined)
+    if ((existente || temDadosLb0) && !d.confirmarSobrescrita) {
+      const quem = existente ? descreverLinhaBase(existente) : 'Linha de base 0'
+      return { ok: false, precisaConfirmar: true, erro: `A linha de base ${n} já existe (${quem}). Confirme para substituí-la.` }
+    }
+    const info: LinhaBaseInfo = { numero: n, nome: d.nome.trim(), motivo: d.motivo.trim(), salvaEm: agora(), dataStatus: state.meta.statusDate, origem: 'cronoai' }
+    const autor = (d.autor ?? '').trim()
+    if (autor) info.autor = autor
+    state.tasks = linhaBaseDoCronograma(state.tasks, schedule.value, n)
+    state.linhasBase = [...state.linhasBase.filter((i) => i.numero !== n), info].sort((a, b) => a.numero - b.numero)
+    const anterior = existente ? ` Substitui "${descreverLinhaBase(existente)}".` : ''
+    log(
+      'sistema',
+      n === 0 ? 'Nova linha de base salva' : `Linha de base ${n} salva`,
+      `${rotuloLinhaBase(info)}: cronograma reprogramado em ${ddmmaaaa(state.meta.statusDate)}. Motivo: ${info.motivo}.${anterior}`,
+    )
+    return { ok: true }
+  }
+
+  /** Escolhe a linha de base do valor agregado (0 = a LB0): PV, EV, BAC, índices, Curva S e previsão pelo SPI. O atraso segue a LB0 (G5 = b). */
+  function definirLinhaBaseAtiva(numero: number): ResultadoAcao {
+    if (!Number.isInteger(numero) || numero < 0 || numero > NUMERO_MAX_LINHA_BASE) return { ok: false, erro: 'Escolha uma linha de base de 0 a 10.' }
+    const info = state.linhasBase.find((i) => i.numero === numero)
+    if (numero !== 0 && !info) return { ok: false, erro: `A linha de base ${numero} ainda não foi salva nesta obra.` }
+    if (numero === linhaBaseAtiva.value) return { ok: true }
+    if (numero === 0) delete state.meta.linhaBaseAtiva
+    else state.meta.linhaBaseAtiva = numero
+    log('sistema', 'Linha de base do valor agregado alterada', `PV, EV e BAC passam a ser medidos contra a linha de base ${numero}${info ? ` (${descreverLinhaBase(info)})` : ''}. O atraso continua contra a LB0.`)
+    return { ok: true }
   }
 
   /** Muda a data de status; recusa data inválida, a mais de 45 anos do início ou que estoure o horizonte de cálculo. */
@@ -2355,7 +2451,11 @@ export const useProjectStore = defineStore('project', () => {
     previewSinapiTask,
     removeTask,
     updateTask,
-    saveBaseline,
+    salvarLinhaBase,
+    definirLinhaBaseAtiva,
+    linhaBaseAtiva,
+    tarefasDoValorAgregado,
+    avisoSemLinhaBase,
     setStatusDate,
     exportXml,
     importXml,

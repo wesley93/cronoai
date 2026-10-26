@@ -114,6 +114,36 @@ export interface ResourceAssignment {
   units: number
 }
 
+/** Dados de uma linha de base de uma tarefa. LB incompleta (só custo, só início…) é preservada como veio do arquivo. */
+export interface DadosLinhaBase {
+  inicio?: string
+  termino?: string
+  /** Vão em minutos úteis entre o início e o término da linha de base. */
+  duracaoMin?: number
+  /** Custo (R$) congelado na linha de base. */
+  custo?: number
+}
+
+/** Linhas de base 1 a 10 de uma tarefa, pelo número em texto ('1' a '10'). */
+export type LinhasBaseDaTarefa = Partial<Record<string, DadosLinhaBase>>
+
+export const ORIGENS_LINHA_BASE = ['cronoai', 'arquivo', 'migrada'] as const
+export type OrigemLinhaBase = (typeof ORIGENS_LINHA_BASE)[number]
+
+/** Metadados de uma linha de base da obra (a LB0 também tem). Autor é texto declarado, sem identidade (SPEC-02). */
+export interface LinhaBaseInfo {
+  /** 0 a 10. */
+  numero: number
+  nome: string
+  motivo: string
+  autor?: string
+  /** Data e hora ISO da gravação. */
+  salvaEm?: string
+  /** Data de status da obra quando a linha de base foi salva. */
+  dataStatus?: string
+  origem: OrigemLinhaBase
+}
+
 export interface Task {
   uid: number
   wbs: string
@@ -139,6 +169,8 @@ export interface Task {
   baselineStart?: string
   baselineFinish?: string
   baselineDuracaoMin?: number
+  /** Linhas de base 1 a 10 desta tarefa (chave = número, '1' a '10'), só com os campos presentes. A LB0 fica nos campos `baseline*` e no `bac` (ciclo 00007, D-1). */
+  linhasBase?: LinhasBaseDaTarefa
   /** Restrição de data (ausente = ASAP, o mais cedo possível). */
   restricao?: Restricao
   /** Prazo final (`yyyy-mm-dd` = fim do expediente, ou `yyyy-mm-ddThh:mm`): não move a tarefa, entra na folga e no indicador. */
@@ -175,6 +207,8 @@ export interface ProjectMeta {
   dataBaseSinapi?: string
   /** Recorte SINAPI importado nesta obra (o recorte em si fica numa store própria do IndexedDB, ciclo 00006). Ausente = catálogo ilustrativo. */
   recorteSinapi?: RefRecorteObra
+  /** Linha de base do valor agregado (1 a 10; ausente = 0): vale para PV, EV, BAC, índices, Curva S e previsão pelo SPI. Atraso e variações seguem a LB0, como no MS Project (ciclo 00007, G5 = b). */
+  linhaBaseAtiva?: number
   /** Minutos de trabalho por dia, só para exibir dias (ausente = 480). */
   minutosPorDia?: number
   /** Opções de cronograma (ausente = lógica retida e mover o restante para depois da data de status). */
@@ -429,6 +463,8 @@ export interface ProjectState {
   premissas: VersaoPremissas[]
   /** Feriados da obra (padrão: nacionais, Carnaval e Corpus Christi ligados, sem feriados manuais). */
   feriados: ConfigFeriadosObra
+  /** Metadados das linhas de base da obra (LB0 a LB10), por número crescente (esquema 6). */
+  linhasBase: LinhaBaseInfo[]
   reports: FieldReport[]
   restrictions: SiteRestriction[]
   materials: MaterialItem[]

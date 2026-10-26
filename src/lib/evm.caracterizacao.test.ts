@@ -103,7 +103,7 @@ describe('Aurora na base 00006 (caracterização, ciclo 00007)', () => {
 
   it('C-2 e C-3: saveBaseline() seguido de evm.pv = PV da LB1 pelo cronograma previsto (SPI 0,992606) e atraso 0', () => {
     const s = useProjectStore()
-    s.saveBaseline()
+    s.salvarLinhaBase({ numero: 0, nome: 'Linha de base 0', motivo: 'Teste', confirmarSobrescrita: true })
     // Antes → depois: PV 7.259.250,00 → 6.496.233,42 (o previsto do 302 e do 104 termina em 05/11, e a LB nasce com o vão da interrupção)
     expect(s.evm.pv).toBeCloseTo(6496233.415233416, 2)
     expect(s.evm.spi).toBeCloseTo(0.992606, 6)

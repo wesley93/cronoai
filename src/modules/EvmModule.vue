@@ -9,6 +9,7 @@ import ModuleHeader from '@/components/common/ModuleHeader.vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import KpiTile, { type KpiTone } from '@/components/common/KpiTile.vue'
 import ProgressBar from '@/components/common/ProgressBar.vue'
+import SeletorLinhaBase from '@/components/common/SeletorLinhaBase.vue'
 import SCurveChart from '@/components/charts/SCurveChart.vue'
 import { buildDiagnosis } from '@/lib/diagnosis'
 import { fmtBRL, fmtBRLCompact, fmtDate, fmtIndex, fmtPct } from '@/lib/format'
@@ -97,6 +98,8 @@ async function copyReport() {
       <span :class="statusStyle.chip">{{ statusStyle.label }}</span>
       <span class="chip-neutral" title="Versão das premissas da obra vigente na data de status (não altera PV, EV nem AC)">{{ rotuloVersao(project.versaoPremissasVigente) }}</span>
     </ModuleHeader>
+
+    <div class="card p-3"><SeletorLinhaBase /></div>
 
     <div class="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
       <KpiTile label="BAC" :value="fmtBRLCompact(e.bac)" sub="Orçamento total" :icon="Wallet" hint="Budget at Completion" />
