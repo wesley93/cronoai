@@ -47,7 +47,7 @@ Ciclo 00007 do `docs/specs/PLANO-FASE-1.md` §3.7 (SPEC-04), conforme a §01 do 
 - **T4:** esquema 5 → 6 (`ProjectState.linhasBase`, `Task.linhasBase?`, `meta.linhaBaseAtiva?`); IndexedDB estrutura 2 → 3 (stores de fechamento, mantendo `recortesSinapi`).
 - **T5:** não. Nenhum arquivo externo novo; os textos novos são digitados pelo usuário e aparecem só por interpolação. Dependência nova: nenhuma.
 - **T6 a T8:** não.
-- **Faixa 3 (T3).** `seguranca` e `especialista-obra` obrigatórios. A saída do `classificar-diff` não aparece em nenhum relatório deste ciclo (ver G-CLASSIF).
+- **Faixa 3 (T3).** `seguranca` e `especialista-obra` obrigatórios. O `classificar-diff` (orquestrador e auditoria, no código final) confirma: faixa exigida 3 — T2, T3, T4 (ver G-CLASSIF).
 
 ## Commits
 | SHA | Conteúdo |
@@ -133,7 +133,7 @@ Nenhuma asserção de número do Inviolável 1 mudou (entrega, d.u., SPI/CPI, cr
 
 Depois da rede de segurança (031f156), que soma um `JSON.parse` do detalhe ao fechamento, o orquestrador no HEAD 2ab750b mediu de novo com `CRONOAI_PERF=1 npx vitest run src/lib/fechamentos.desempenho.test.ts` (5 de 5 passaram): fechamento de ponta a ponta com 3.000 tarefas 1366, 1119, 1392, 1518 e 1779 ms, **mediana 1.392 ms** (< 2.000); trocas de LB mediana 474 ms; abertura com 104 cabeçalhos + âncora em 57 ms; detalhe de 212.967 caracteres; 156 registros ≈ 33,3 milhões de caracteres. A rede de segurança não pôs a meta em risco.
 
-### Matriz de verificação (gates reexecutados pelo `testes` em e99486a; 9a05047 e 2ab750b não foram reexecutados por um validador: o `dev-frontend` declarou os gates de 9a05047, e a reexecução fica para a auditoria independente)
+### Matriz de verificação (gates reexecutados pelo `testes` em e99486a e pela auditoria r01 no HEAD 318a9f7, código = 2ab750b; `npm run ci` com todos os workers verde pelo orquestrador em f34214e)
 
 | Item | Requisito | Verificação | Obrig. | Estado | Evidência |
 |---|---|---|---|---|---|
