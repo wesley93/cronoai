@@ -10,6 +10,7 @@ import SectionCard from '@/components/common/SectionCard.vue'
 import KpiTile, { type KpiTone } from '@/components/common/KpiTile.vue'
 import ProgressBar from '@/components/common/ProgressBar.vue'
 import SeletorLinhaBase from '@/components/common/SeletorLinhaBase.vue'
+import FechamentosPainel from '@/modules/evm/FechamentosPainel.vue'
 import SCurveChart from '@/components/charts/SCurveChart.vue'
 import { buildDiagnosis } from '@/lib/diagnosis'
 import { fmtBRL, fmtBRLCompact, fmtDate, fmtIndex, fmtPct } from '@/lib/format'
@@ -194,6 +195,8 @@ async function copyReport() {
         </div>
       </section>
     </div>
+
+    <FechamentosPainel />
 
     <div class="grid items-start gap-5 xl:grid-cols-2">
       <SectionCard title="Tendência de SPI e CPI" :subtitle="`Índices acumulados mês a mês · ${pkgName ? `pacote ${pkg}` : 'obra inteira'} · abaixo de 1,00 = atraso / estouro`" :icon="Activity">

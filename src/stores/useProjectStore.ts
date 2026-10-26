@@ -24,7 +24,8 @@ import type {
   VersaoPremissas,
 } from '@/types/domain'
 import type { MSProjectPredecessor, MSProjectTask } from '@/types/msProject'
-import type { IndiceObras, MigracaoV1, PersistedState, RegistroRecorte, ResumoObra, ScenarioUndo } from '@/types/obra'
+import type { IndiceObras, MigracaoV1, PersistedState, RegistroRecorte, ResultadoPersistencia, ResumoObra, ScenarioUndo } from '@/types/obra'
+import type { CabecalhoFechamento, DetalheFechamento, RegistroDetalheFechamento, TotaisFechamento } from '@/types/fechamento'
 import { SEED_MATERIALS, SEED_META, SEED_PREMISSAS, SEED_REPORTS, SEED_TASKS } from '@/data/seed'
 import { SINAPI_CATALOG } from '@/data/sinapiCatalog'
 import {
@@ -99,7 +100,7 @@ import {
   type NovoFeriadoManual,
 } from '@/lib/feriadosObra'
 import { compararCronogramas } from '@/lib/previaImpacto'
-import { fmtBRL, fmtBRLCents, fmtMonth, uid } from '@/lib/format'
+import { fmtBRL, fmtBRLCents, fmtIndex, fmtMonth, uid } from '@/lib/format'
 import { calcularDivergencias } from '@/lib/divergencias'
 import type { PreviaImpacto, PreviaPlanilha, PreviaProgresso, PreviaSinapi } from '@/types/previas'
 import { calcularObra, mensagemDoCalculo, verificarCalculo } from '@/lib/horizonte'
@@ -120,7 +121,26 @@ import { equipeDaComposicao, notasDaTarefaSinapi, rotuloFuncao, type ValoresInfo
 import { VERSAO_RECORTE, type FuncaoMaoDeObra, type ItemCatalogoSinapi, type RecorteSinapi } from '@/types/sinapi'
 import { ROTULO_RESTRICAO, calendarioExiste, montarRestricao, tarefasManuaisAlteradas, validarPrazoFinal, validarRestricao, type TipoRestricaoTela } from '@/lib/restricoes'
 import { lagEmDias, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
-import { criarRegistro, lerEstadoV1, migrarRegistro } from '@/lib/migracaoEstado'
+import { ESQUEMA_ATUAL, criarRegistro, lerEstadoV1, migrarRegistro } from '@/lib/migracaoEstado'
+import {
+  LIMITES_FECHAMENTO,
+  avisosAoFechar,
+  capturarFechamento,
+  dmy,
+  efetivos,
+  erroAoFechar,
+  erroDeDataDeInicio,
+  erroDeDataDeStatus,
+  erroDeTextosFechamento,
+  hojeLocalIso,
+  lerDetalheFechamento as lerDetalheDoRegistro,
+  proximaSequencia,
+  retificar,
+  serializarDetalhe,
+  validarCabecalhosFechamento,
+  type AlteracaoTarefa,
+  type EntradaCaptura,
+} from '@/lib/fechamentos'
 import { avaliarCota, erroDoRegistroDeDesfazer, erroDeStatusForaDaJanela, estadoObraVazia, nomeDaCopia, percentualCota, recortesOrfaos, resumirObra, validarDadosObra, validarIndice, validarOpcoesCronograma, type DadosObra } from '@/lib/obras'
 import { obterArmazenamento, type ArmazenamentoObras } from './armazenamentoObras'
 import { useUiStore } from './ui'
@@ -152,7 +172,31 @@ export interface RecorteAtivo {
   substituidoEm?: string
 }
 export type ResultadoAcaoRecorte = { ok: true } | { ok: false; erro: string; erros?: string[]; precisaConfirmar?: boolean }
+/** O que uma ação de fechamento prepara na vez da fila (D-16): o registro a gravar, como mudar o estado (log) e o que fazer em memória depois do sucesso. */
+export type PreparoFechamento =
+  | { erro: string }
+  | {
+      gravar: { cabecalho: CabecalhoFechamento; detalhe: RegistroDetalheFechamento }
+      /** Aplica a entrada de log antes de gravar a obra e devolve como desfazê-la se a gravação falhar. */
+      mutar: () => () => void
+      /** Só depois da gravação bem-sucedida (síncrono, na mesma vez da fila): o histórico em memória cresce. */
+      aposGravar: () => void
+    }
+export type ResultadoFechamento = { ok: true; id: string; avisos: string[] } | { ok: false; erro: string }
+export type ResultadoRetificacaoStore = { ok: true; avisos: string[] } | { ok: false; erro: string }
+export interface PreviaFechamento {
+  dataStatus: string
+  /** LB do valor agregado em vigor (a dos totais). */
+  linhaBase: number
+  sequencia: number
+  avisos: string[]
+  /** Motivo da recusa, se o fechamento seria recusado agora. */
+  erro?: string
+  totais?: TotaisFechamento
+}
 export interface OpcoesSalvar {
+  /** Fechamento ou retificação gravado na MESMA transação da obra e do índice, preparado na vez da fila (com as regras conferidas de novo). */
+  fechamento?: () => PreparoFechamento
   /** Recorte gravado na MESMA transação da obra e do índice. */
   gravarRecorte?: RegistroRecorte
   /** Obra para a qual a ação foi pedida: se a obra ativa mudou até a vez desta gravação, ela desiste sem gravar nada. */
@@ -287,6 +331,20 @@ export const useProjectStore = defineStore('project', () => {
   const recorteDisponivel = ref<string | undefined>(undefined)
   let tokenRecorte = 0
 
+  // ---------------------------------------------------------------- fechamentos (ciclo 00007)
+  /** Cabeçalhos legíveis dos fechamentos da obra ativa, FORA do estado reativo: o observador profundo não os regrava e o estado não os edita (D-22). */
+  const fechamentos = shallowRef<CabecalhoFechamento[]>([])
+  /** Detalhe do 1º fechamento efetivo: ancora a reconstrução da Curva S antes dele (D-28). */
+  const detalheAncora = shallowRef<DetalheFechamento | undefined>(undefined)
+  const fechamentosIlegiveis = ref(0)
+  /** Só depois da leitura bem-sucedida: antes disso (ou se a leitura falhou) nenhum fechamento é gravado. */
+  const fechamentosCarregados = ref(false)
+  const avisoFechamentos = ref('')
+  const persistenciaFechamento = ref<ResultadoPersistencia | undefined>(undefined)
+  const fechamentosEfetivos = computed(() => efetivos(fechamentos.value))
+  let tokenFechamentos = 0
+  let persistenciaPedida = false
+
   let armazenamento: ArmazenamentoObras | undefined
   let indice: IndiceObras | undefined
   let gravacaoLigada = false
@@ -391,8 +449,11 @@ export const useProjectStore = defineStore('project', () => {
       if (opcoes.obraId !== undefined && opcoes.obraId !== obraAtivaId.value) return false
       let desfazer: (() => void) | undefined
       try {
+        // Fechamento: preparado AQUI, na vez da fila, com as regras conferidas de novo contra o histórico em memória de agora
+        const preparo = opcoes.fechamento?.()
+        if (preparo && 'erro' in preparo) return false
         // A mudança entra no estado aqui, na vez desta gravação na fila: nenhuma outra gravação grava a referência sem o recorte
-        desfazer = opcoes.mutar?.()
+        desfazer = preparo ? preparo.mutar() : opcoes.mutar?.()
         if (desfazer) {
           await nextTick() // o observador do estado conta a mudança agora: esta gravação já a leva, então termina "salva"
           clearTimeout(saveTimer) // e o atraso que o observador acabou de agendar não precisa mais correr
@@ -410,8 +471,9 @@ export const useProjectStore = defineStore('project', () => {
           desfazer = undefined
           return false
         }
-        await armazenamento.gravarObra(criarRegistro(obraAtivaId.value, state, em), novoIndice, { gravarRecorte: opcoes.gravarRecorte, excluirRecortes: orfaos })
+        await armazenamento.gravarObra(criarRegistro(obraAtivaId.value, state, em), novoIndice, { gravarRecorte: opcoes.gravarRecorte, excluirRecortes: orfaos, gravarFechamento: preparo?.gravar })
         aceitarIndice(novoIndice)
+        preparo?.aposGravar()
         // Sem IndexedDB o "salvo" é só na memória da sessão: o aviso de indisponibilidade continua.
         // Alteração feita durante a escrita (rev mudou) continua "pendente": o observador já agendou outra gravação.
         if (!armazenamentoIndisponivel.value && rev === revisao) {
@@ -449,6 +511,7 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Coloca o estado na tela sem disparar uma gravação (trocar de obra não é alteração). */
   async function aplicarEstado(novo: PersistedState) {
+    limparFechamentos() // a obra ativa já mudou: nenhuma ação enxerga o histórico da anterior
     gravacaoLigada = false
     Object.assign(state, novo)
     resetScenarioParams()
@@ -578,6 +641,7 @@ export const useProjectStore = defineStore('project', () => {
     await aplicarEstado(inicial)
     avisosCarga.value = avisos
     await carregarRecorteDaObra()
+    await carregarFechamentos()
 
     if (precisaGravar) {
       // Índice e obra na mesma transação. Se falhar, o índice não existe e a v1 fica intacta: a próxima carga tenta de novo (M-4).
@@ -933,9 +997,17 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   // ---------------------------------------------------------------- helpers
-  function log(kind: DecisionLogEntry['kind'], title: string, detail: string) {
-    state.log.unshift({ id: uid('log'), date: state.meta.statusDate, kind, title, detail })
+  /** Registra no log (limite de 60) e devolve como desfazer a entrada, devolvendo a mais antiga se ela foi descartada (gravação que falhou). */
+  function log(kind: DecisionLogEntry['kind'], title: string, detail: string): () => void {
+    const entrada: DecisionLogEntry = { id: uid('log'), date: state.meta.statusDate, kind, title, detail }
+    const descartada = state.log.length >= 60 ? state.log[state.log.length - 1] : undefined
+    state.log.unshift(entrada)
     if (state.log.length > 60) state.log.length = 60
+    return () => {
+      const i = state.log.findIndex((e) => e.id === entrada.id)
+      if (i >= 0) state.log.splice(i, 1)
+      if (descartada) state.log.push(descartada)
+    }
   }
 
   function patchTask(taskUid: number, patch: Partial<Task>) {
@@ -1649,7 +1721,7 @@ export const useProjectStore = defineStore('project', () => {
 
   /** Muda a data de status; recusa data inválida, a mais de 45 anos do início ou que estoure o horizonte de cálculo. */
   function setStatusDate(iso: string): ResultadoAcao {
-    const erro = erroDeStatusForaDaJanela(state.meta.startDate, iso) ?? erroSeAplicar(state.tasks, { ...state.meta, statusDate: iso })
+    const erro = erroDeStatusForaDaJanela(state.meta.startDate, iso) ?? erroDeDataDeStatus(iso, fechamentos.value) ?? erroSeAplicar(state.tasks, { ...state.meta, statusDate: iso })
     if (erro) return { ok: false, erro }
     state.meta.statusDate = iso
     log('sistema', 'Data de status alterada', `Nova data de status: ${iso.split('-').reverse().join('/')}.`)
@@ -1711,6 +1783,18 @@ export const useProjectStore = defineStore('project', () => {
       ...daObra,
       ...Object.fromEntries(Object.entries(result.meta).filter(([, v]) => v !== undefined && v !== '')),
     }
+    // D-13: o arquivo não leva a data de status para antes do último fechamento nem a de início para depois do primeiro: mantém a da obra, com aviso
+    const avisosDeFechamento: string[] = []
+    const ultimo = efetivos(fechamentos.value).at(-1)
+    if (ultimo && meta.statusDate < ultimo.dataStatus) {
+      avisosDeFechamento.push(`A data de status do arquivo (${dmy(meta.statusDate)}) é anterior ao último fechamento (${dmy(ultimo.dataStatus)}): o CronoAI manteve a data de status atual (${dmy(state.meta.statusDate)}).`)
+      meta.statusDate = state.meta.statusDate
+    }
+    const primeiroFechamento = efetivos(fechamentos.value)[0]
+    if (primeiroFechamento && meta.startDate > primeiroFechamento.dataStatus) {
+      avisosDeFechamento.push(`A data de início do arquivo (${dmy(meta.startDate)}) é posterior ao primeiro fechamento (${dmy(primeiroFechamento.dataStatus)}): o CronoAI manteve a data de início atual (${dmy(state.meta.startDate)}).`)
+      meta.startDate = state.meta.startDate
+    }
     let tasks: Task[]
     try {
       tasks = baselineFor(result.tasks, meta, result.calendarios, result.calendarioPadraoUid, state.feriados, true)
@@ -1738,7 +1822,7 @@ export const useProjectStore = defineStore('project', () => {
     state.recoveryCosts = []
     state.undo = []
     log('importacao', 'Importado do MS Project (.xml)', `${tasks.length} tarefas carregadas de "${meta.name}".`)
-    return result.warnings
+    return [...result.warnings, ...avisosDeFechamento]
   }
 
   // ---------------------------------------------------------------- Cronograma: restrições, prazo, calendário e opções (RF-05.3 a RF-05.5)
@@ -2090,6 +2174,7 @@ export const useProjectStore = defineStore('project', () => {
     obraAtivaId.value = id
     await aplicarEstado(r.estado)
     await carregarRecorteDaObra()
+    await carregarFechamentos()
     return { ok: true }
   }
 
@@ -2122,6 +2207,7 @@ export const useProjectStore = defineStore('project', () => {
     obraAtivaId.value = id
     await aplicarEstado(estado)
     await carregarRecorteDaObra()
+    await carregarFechamentos()
     return { ok: true, id }
   }
 
@@ -2133,6 +2219,16 @@ export const useProjectStore = defineStore('project', () => {
     if (!('estado' in origem)) return { ok: false, erro: origem.erro }
     const copia = origem.estado
     copia.meta.name = nomeDaCopia(copia.meta.name, obras.value.map((o) => o.nome))
+    // D-9: as linhas de base vão na cópia (estão no estado); o histórico de fechamentos fica na obra original, e o log da cópia diz isso
+    try {
+      const nFechamentos = (await armazenamento.lerCabecalhosFechamento(id)).length
+      if (nFechamentos > 0) {
+        copia.log.unshift({ id: uid('log'), date: copia.meta.statusDate, kind: 'sistema', title: 'Histórico de fechamentos não copiado', detail: `${nFechamentos} registro(s) de fechamento e retificação ficaram só na obra original; a cópia começa sem histórico.` })
+        if (copia.log.length > 60) copia.log.length = 60
+      }
+    } catch {
+      /* leitura falhou: a cópia segue sem a nota (e sem histórico, que nunca é copiado) */
+    }
     const novoId = uid('obra')
     const em = agora()
     const base = indice ?? indiceComAtivaNova(obraAtivaId.value, obrasPlanas())
@@ -2196,6 +2292,7 @@ export const useProjectStore = defineStore('project', () => {
       obraAtivaId.value = proxima.id
       await aplicarEstado(proxima.estado)
       await carregarRecorteDaObra()
+      await carregarFechamentos()
       estadoGravacao.value = armazenamentoIndisponivel.value ? 'erro' : 'salvo'
     }
     return { ok: true }
@@ -2325,6 +2422,9 @@ export const useProjectStore = defineStore('project', () => {
       primeiroInicioReal: primeiroInicioReal.value,
     })
     if (erros.length) return { ok: false, erros }
+    // D-13: a data de status não volta antes do último fechamento e a de início não passa do primeiro (recusado ANTES de alterar qualquer coisa)
+    const erroFechamento = erroDeDataDeStatus(dados.dataStatus, fechamentos.value) ?? erroDeDataDeInicio(dados.dataInicio, fechamentos.value)
+    if (erroFechamento) return { ok: false, erros: [erroFechamento] }
     // Simula antes de gravar: início, status e opções que estourem o horizonte de 50 anos são recusados
     const opcoesNovas =
       dados.logicaProgresso !== undefined || dados.moverRestante !== undefined
@@ -2379,8 +2479,296 @@ export const useProjectStore = defineStore('project', () => {
     return { ok: true }
   }
 
+  // ---------------------------------------------------------------- fechamentos e retificação (ciclo 00007, SPEC-04)
+  const MENSAGEM_FECHAMENTOS_NAO_LIDOS = 'Os fechamentos desta obra ainda não foram lidos (ou não puderam ser): nada foi gravado.'
+
+  /** Esvazia o histórico em memória (a obra ativa mudou): nenhuma ação enxerga fechamentos de outra obra. */
+  function limparFechamentos() {
+    tokenFechamentos++
+    fechamentos.value = []
+    detalheAncora.value = undefined
+    fechamentosIlegiveis.value = 0
+    fechamentosCarregados.value = false
+    avisoFechamentos.value = ''
+  }
+
+  /**
+   * Lê os cabeçalhos da obra ativa (dado externo: cada um é validado e reconstruído) e o detalhe do 1º fechamento efetivo, que ancora a Curva S antes dele (D-28).
+   * Registro inválido, de formato mais novo ou com detalhe incoerente é ignorado com aviso e NUNCA regravado; o novo fechamento fica bloqueado até resolver.
+   * Leitura que falha deixa o histórico fechado para gravação (estado desconhecido).
+   */
+  async function carregarFechamentos(): Promise<void> {
+    const token = ++tokenFechamentos
+    const obra = obraAtivaId.value
+    fechamentos.value = []
+    detalheAncora.value = undefined
+    fechamentosIlegiveis.value = 0
+    fechamentosCarregados.value = false
+    avisoFechamentos.value = ''
+    if (!armazenamento || !obra) return
+    const atual = () => token === tokenFechamentos && obra === obraAtivaId.value
+    try {
+      const brutos = await armazenamento.lerCabecalhosFechamento(obra)
+      if (!atual()) return
+      const v = validarCabecalhosFechamento(Array.isArray(brutos) ? brutos : [], obra)
+      let cabecalhos = v.cabecalhos
+      let ilegiveis = v.ilegiveis
+      let ancora: DetalheFechamento | undefined
+      // O 1º fechamento efetivo precisa de detalhe legível; se não tiver, ele é tratado como ilegível e vale o seguinte
+      for (let guarda = 0; guarda <= LIMITES_FECHAMENTO.fechamentos + LIMITES_FECHAMENTO.retificacoes + 1; guarda++) {
+        const primeiro = efetivos(cabecalhos)[0]
+        if (!primeiro) break
+        const det = lerDetalheDoRegistro(await armazenamento.lerDetalheFechamento(primeiro.id), primeiro)
+        if (!atual()) return
+        if (det) {
+          ancora = det
+          break
+        }
+        cabecalhos = cabecalhos.filter((c) => c.id !== primeiro.id)
+        ilegiveis++
+      }
+      fechamentos.value = cabecalhos.map((c) => markRaw(c))
+      detalheAncora.value = ancora ? markRaw(ancora) : undefined
+      fechamentosIlegiveis.value = ilegiveis
+      avisoFechamentos.value = ilegiveis > 0 ? `${ilegiveis} fechamento(s) ilegível(is) ignorado(s); os registros ficam intactos.` : ''
+      fechamentosCarregados.value = true
+    } catch {
+      if (atual()) avisoFechamentos.value = 'Não foi possível ler os fechamentos deste navegador: o histórico não é mostrado e novo fechamento fica bloqueado. Nada foi alterado.'
+    }
+  }
+
+  const erroBloqueioFechamento = (): string | undefined =>
+    gravacaoBloqueada.value ? ERRO_BLOQUEADO : !armazenamento || !obraAtivaId.value ? 'As obras ainda não foram carregadas.' : !fechamentosCarregados.value ? MENSAGEM_FECHAMENTOS_NAO_LIDOS : undefined
+
+  /** Entrada da captura com o estado de agora: LB do valor agregado, premissas vigentes, previsão e atraso (contra a LB0). */
+  function entradaDeCaptura(id: string, sequencia: number, autor?: string, observacao?: string): EntradaCaptura {
+    const n = linhaBaseAtiva.value
+    return {
+      obraId: obraAtivaId.value,
+      id,
+      sequencia,
+      dataStatus: state.meta.statusDate,
+      fechadoEm: agora(),
+      autor,
+      observacao,
+      linhaBase: n,
+      linhaBaseSalvaEm: state.linhasBase.find((i) => i.numero === n)?.salvaEm,
+      versaoPremissas: versaoPremissasVigente.value.versao,
+      esquemaObra: ESQUEMA_ATUAL,
+      tarefas: tarefasDoValorAgregado.value,
+      cals: calendariosPv.value,
+      schedule: schedule.value,
+      atrasoDiasUteis: delay.value.delayDays,
+    }
+  }
+
+  const relatosPendentes = () => state.reports.filter((r) => r.status === 'pendente').length
+
+  /** Prévia do fechamento da data de status atual: totais, linha de base, avisos (E-8) ou o motivo da recusa. Não grava nada. */
+  function previaFechamento(): PreviaFechamento {
+    const dataStatus = state.meta.statusDate
+    const avisos = avisosAoFechar({ relatosPendentes: relatosPendentes(), dataStatus, hoje: hojeLocalIso() })
+    const n = linhaBaseAtiva.value
+    const base = { dataStatus, linhaBase: n, sequencia: proximaSequencia(fechamentos.value), avisos }
+    const bloqueio = erroBloqueioFechamento() ?? calculo.value.erro
+    if (bloqueio) return { ...base, erro: bloqueio }
+    const erro = erroAoFechar({ cabecalhos: fechamentos.value, ilegiveis: fechamentosIlegiveis.value, dataStatus, folhas: leaves.value.length })
+    if (erro) return { ...base, erro }
+    return { ...base, totais: capturarFechamento(entradaDeCaptura('previa', base.sequencia)).cabecalho.totais }
+  }
+
+  const textoDaLinhaBase = (n: number) => `LB${n}`
+
+  /**
+   * Fecha a data de status (D-12, D-16): grava o cabeçalho, o detalhe, a obra (com a entrada no log) e o índice NUMA transação, na mesma fila das outras
+   * gravações, com a guarda de obra antes de gravar. Falha = nada gravado, log e estado iguais e o aviso de erro. Só depois do sucesso o histórico em memória cresce.
+   * Pede armazenamento persistente ao navegador no 1º fechamento (D-19).
+   */
+  async function fecharDataDeStatus(d: { autor?: string; observacao?: string } = {}): Promise<ResultadoFechamento> {
+    const bloqueio = erroBloqueioFechamento()
+    if (bloqueio) return { ok: false, erro: bloqueio }
+    if (calculo.value.erro) return { ok: false, erro: calculo.value.erro }
+    const autor = (d.autor ?? '').trim()
+    const observacao = (d.observacao ?? '').trim()
+    const erroTexto = erroDeTextosFechamento({ autor, observacao })
+    if (erroTexto) return { ok: false, erro: erroTexto }
+    const obra = obraAtivaId.value
+    const pre = erroAoFechar({ cabecalhos: fechamentos.value, ilegiveis: fechamentosIlegiveis.value, dataStatus: state.meta.statusDate, folhas: leaves.value.length })
+    if (pre) return { ok: false, erro: pre }
+    let recusa: string | undefined
+    let id = ''
+    let avisos: string[] = []
+    const gravou = await salvarAgora({
+      obraId: obra,
+      fechamento: () => {
+        // Conferido DE NOVO na vez da fila: outro fechamento pode ter sido gravado entre o pedido e esta gravação
+        const erro = erroAoFechar({ cabecalhos: fechamentos.value, ilegiveis: fechamentosIlegiveis.value, dataStatus: state.meta.statusDate, folhas: leaves.value.length })
+        if (erro) {
+          recusa = erro
+          return { erro }
+        }
+        id = uid('fech')
+        const { cabecalho, detalhe } = capturarFechamento(entradaDeCaptura(id, proximaSequencia(fechamentos.value), autor || undefined, observacao || undefined))
+        avisos = avisosAoFechar({ relatosPendentes: relatosPendentes(), dataStatus: cabecalho.dataStatus, hoje: hojeLocalIso() })
+        const t = cabecalho.totais
+        return {
+          gravar: { cabecalho, detalhe: serializarDetalhe(detalhe) },
+          mutar: () =>
+            log(
+              'sistema',
+              'Data de status fechada',
+              `Fechamento ${cabecalho.sequencia} de ${dmy(cabecalho.dataStatus)} contra a ${textoDaLinhaBase(cabecalho.linhaBase)}: BAC ${fmtBRLCents(t.bac)}, PV ${fmtBRLCents(t.pv)}, EV ${fmtBRLCents(t.ev)}, AC ${fmtBRLCents(t.ac)}, SPI ${t.spi === null ? '—' : fmtIndex(t.spi)}, CPI ${t.cpi === null ? '—' : fmtIndex(t.cpi)}, entrega ${dmy(t.entregaPrevista)}.`,
+            ),
+          aposGravar: () => {
+            if (obra !== obraAtivaId.value) return
+            const primeiro = fechamentos.value.length === 0
+            fechamentos.value = [...fechamentos.value, markRaw(cabecalho)]
+            if (primeiro) detalheAncora.value = markRaw(detalhe)
+          },
+        }
+      },
+    })
+    if (!gravou) {
+      if (recusa) return { ok: false, erro: recusa }
+      if (obra !== obraAtivaId.value) return { ok: false, erro: ERRO_OBRA_MUDOU }
+      return { ok: false, erro: mensagemGravacao.value || 'Não foi possível gravar o fechamento no armazenamento do navegador.' }
+    }
+    await pedirPersistencia(obra)
+    return { ok: true, id, avisos }
+  }
+
+  /** Pede armazenamento persistente uma vez (1º fechamento bem-sucedido): o resultado vai para a tela e o log, e nada é bloqueado (D-19). */
+  async function pedirPersistencia(obra: string) {
+    if (persistenciaPedida || !armazenamento) return
+    persistenciaPedida = true
+    let r: ResultadoPersistencia
+    try {
+      r = await armazenamento.persistir()
+    } catch {
+      r = 'indisponivel'
+    }
+    persistenciaFechamento.value = r
+    if (obra !== obraAtivaId.value) return
+    log(
+      'sistema',
+      'Armazenamento persistente',
+      r === 'concedido' ? 'O navegador concedeu armazenamento persistente: o histórico de fechamentos não será apagado por falta de espaço.' : r === 'negado' ? 'O navegador negou o armazenamento persistente: o histórico pode ser apagado sob falta de espaço. Exporte o histórico (JSON) com frequência.' : 'Este navegador não oferece armazenamento persistente: exporte o histórico (JSON) com frequência.',
+    )
+  }
+
+  /** Detalhe de um fechamento, lido sob demanda e validado contra o cabeçalho; `undefined` se ilegível ou se a obra mudou. */
+  async function lerDetalhe(id: string): Promise<DetalheFechamento | undefined> {
+    const cab = fechamentos.value.find((c) => c.id === id)
+    if (!cab || !armazenamento) return undefined
+    const obra = obraAtivaId.value
+    try {
+      const reg = await armazenamento.lerDetalheFechamento(id)
+      if (obra !== obraAtivaId.value) return undefined
+      return lerDetalheDoRegistro(reg, cab)
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * Retifica a data do fechamento `fechamentoId` (D-15): mesma gravação atômica do fechar, com o motivo obrigatório. Parte do fechamento EFETIVO da data (a última
+   * retificação, ou o original), muda só o % físico e o custo real das tarefas escolhidas e aponta para a raiz. O original e a obra atual não mudam.
+   */
+  async function retificarFechamento(d: { fechamentoId: string; alteracoes: AlteracaoTarefa[]; motivo: string; autor?: string }): Promise<ResultadoRetificacaoStore> {
+    const bloqueio = erroBloqueioFechamento()
+    if (bloqueio) return { ok: false, erro: bloqueio }
+    if (fechamentosIlegiveis.value > 0) return { ok: false, erro: `Há ${fechamentosIlegiveis.value} fechamento(s) ilegível(is) nesta obra: a retificação fica bloqueada até resolver (os registros foram mantidos sem alteração).` }
+    const obra = obraAtivaId.value // a obra para a qual a retificação foi pedida: se mudar durante as leituras, desiste
+    const alvo = fechamentos.value.find((c) => c.id === d.fechamentoId)
+    if (!alvo) return { ok: false, erro: 'Fechamento não encontrado nesta obra.' }
+    const ef = fechamentosEfetivos.value
+    const base = ef.find((c) => c.dataStatus === alvo.dataStatus)!
+    const detalheBase = await lerDetalhe(base.id)
+    if (obra !== obraAtivaId.value) return { ok: false, erro: ERRO_OBRA_MUDOU }
+    if (!detalheBase) return { ok: false, erro: 'O detalhe deste fechamento está ilegível: nada foi alterado.' }
+    const proximo = ef.find((c) => c.dataStatus > base.dataStatus)
+    const detalheSeguinte = proximo ? await lerDetalhe(proximo.id) : undefined // só para os avisos: se falhar, retifica sem eles
+    if (obra !== obraAtivaId.value) return { ok: false, erro: ERRO_OBRA_MUDOU }
+    let recusa: string | undefined
+    let avisos: string[] = []
+    const gravou = await salvarAgora({
+      obraId: obra,
+      fechamento: () => {
+        // Conferido DE NOVO na vez da fila: outra retificação desta data pode ter entrado no meio
+        const atual = efetivos(fechamentos.value).find((c) => c.dataStatus === base.dataStatus)
+        if (!atual || atual.id !== base.id) {
+          recusa = 'O fechamento desta data mudou durante a operação. Nada foi gravado: confira a lista e refaça.'
+          return { erro: recusa }
+        }
+        const r = retificar({
+          base: { cabecalho: base, detalhe: detalheBase },
+          seguinte: proximo && detalheSeguinte ? { cabecalho: proximo, detalhe: detalheSeguinte } : undefined,
+          alteracoes: d.alteracoes,
+          motivo: d.motivo,
+          id: uid('fech'),
+          sequencia: proximaSequencia(fechamentos.value),
+          fechadoEm: agora(),
+          autor: (d.autor ?? '').trim() || undefined,
+          cabecalhos: fechamentos.value,
+        })
+        if (!r.ok) {
+          recusa = r.erro
+          return { erro: r.erro }
+        }
+        avisos = r.avisos
+        const t = r.cabecalho.totais
+        return {
+          gravar: { cabecalho: r.cabecalho, detalhe: serializarDetalhe(r.detalhe) },
+          mutar: () =>
+            log(
+              'sistema',
+              'Fechamento retificado',
+              `Fechamento de ${dmy(base.dataStatus)} retificado (sequência ${r.cabecalho.sequencia}): EV ${fmtBRLCents(t.ev)}, AC ${fmtBRLCents(t.ac)}. Motivo: ${r.cabecalho.motivo}. O original foi mantido.`,
+            ),
+          aposGravar: () => {
+            if (obra !== obraAtivaId.value) return
+            const primeiraData = efetivos(fechamentos.value)[0]?.dataStatus === base.dataStatus
+            fechamentos.value = [...fechamentos.value, markRaw(r.cabecalho)]
+            if (primeiraData) detalheAncora.value = markRaw(r.detalhe)
+          },
+        }
+      },
+    })
+    if (!gravou) {
+      if (recusa) return { ok: false, erro: recusa }
+      if (obra !== obraAtivaId.value) return { ok: false, erro: ERRO_OBRA_MUDOU }
+      return { ok: false, erro: mensagemGravacao.value || 'Não foi possível gravar a retificação no armazenamento do navegador.' }
+    }
+    return { ok: true, avisos }
+  }
+
+  /**
+   * Faixa da D-14: a obra mudou depois do fechamento efetivo da data de status atual (EV, AC, BAC ou PV diferentes dos gravados, na mesma linha de base).
+   * O fechamento é imutável e a Curva S o mostra; os KPIs mostram o estado vivo.
+   */
+  const avisoObraMudouDepoisDoFechamento = computed(() => {
+    const f = fechamentosEfetivos.value.find((c) => c.dataStatus === state.meta.statusDate)
+    if (!f || f.linhaBase !== linhaBaseAtiva.value || calculo.value.erro) return ''
+    const e = evm.value
+    const t = f.totais
+    const mudou = [e.ev - t.ev, e.ac - t.ac, e.bac - t.bac, e.pv - t.pv].some((x) => Math.abs(x) >= 0.005)
+    return mudou ? `A obra mudou depois do fechamento de ${dmy(f.dataStatus)}: avance a data de status ou retifique o fechamento.` : ''
+  })
+
   return {
     state,
+    fechamentos,
+    fechamentosEfetivos,
+    fechamentosIlegiveis,
+    fechamentosCarregados,
+    avisoFechamentos,
+    detalheAncora,
+    persistenciaFechamento,
+    avisoObraMudouDepoisDoFechamento,
+    previaFechamento,
+    fecharDataDeStatus,
+    retificarFechamento,
+    lerDetalhe,
     calendar,
     baseCalendar,
     calendarios,

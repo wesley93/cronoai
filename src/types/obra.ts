@@ -3,6 +3,7 @@ import type { ProjectState, ScenarioKind, Task } from './domain'
 import type { BudgetLine } from '@/lib/sinapiBudget'
 import type { ScenarioResult } from '@/lib/scenarios'
 import type { UF } from '@/data/ufs'
+import type { CabecalhoFechamento, RegistroDetalheFechamento } from './fechamento'
 
 export interface ScenarioUndo {
   kind: ScenarioKind
@@ -83,4 +84,9 @@ export interface ExtrasDeGravacao {
   gravarRecorte?: RegistroRecorte
   /** Chaves de recortes que ficaram órfãos (nenhuma obra do índice os usa mais). */
   excluirRecortes?: string[]
+  /** Fechamento ou retificação a gravar (ciclo 00007): cabeçalho e detalhe por `add` (nunca `put`), na mesma transação da obra e do índice. */
+  gravarFechamento?: { cabecalho: CabecalhoFechamento; detalhe: RegistroDetalheFechamento }
 }
+
+/** Resultado do pedido de armazenamento persistente ao navegador (`navigator.storage.persist()`). */
+export type ResultadoPersistencia = 'concedido' | 'negado' | 'indisponivel'

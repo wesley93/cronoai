@@ -162,9 +162,10 @@ test('P-2: obra salva na estrutura 1 do IndexedDB abre igual depois da atualiza�
   await expect(kpi(page, 'Entrega das chaves')).toContainText('+11 d.u.')
   await expect(kpi(page, 'SPI')).toContainText('0,89')
   await expect(kpi(page, 'CPI')).toContainText('0,93')
-  // O banco subiu para a estrutura 2, com a store dos recortes vazia, e a obra continua lá, no esquema 4 e igual (nada foi regravado)
+  // O banco subiu para a estrutura ATUAL, com a store dos recortes vazia, e a obra continua lá, no esquema 4 e igual (nada foi regravado)
+  // Antes do ciclo 00007: versão 2. Depois: 3 (acrescenta as stores de fechamento; a passagem da 2 para a 3 está em e2e/fechamentos.spec.ts)
   const banco = await estadoDoBanco(page)
-  expect(banco).toEqual({ versao: 2, recortes: 0, obras: 1 })
+  expect(banco).toEqual({ versao: 3, recortes: 0, obras: 1 })
   const salva = await page.evaluate(
     () =>
       new Promise<{ versaoEsquema: number; json: string }>((resolve) => {

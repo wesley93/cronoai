@@ -95,10 +95,8 @@ describe('useProjectStore · linhas de base (ciclo 00007, E1)', () => {
   })
 
   it('LB-4 (store): a 801 sem a LB3 e a LB3 do valor agregado: BAC 18.993.000,00, PV 7.259.250,00, EV 6.448.200,00, AC 6.896.900,00, CPI 0,934942, EAC 20.314.633,80 e o aviso', () => {
-    for (const t of folhas()) {
-      if (t.uid === 801) continue
-      store.updateTask(t.uid, { linhasBase: { '3': { inicio: t.baselineStart, termino: t.baselineFinish, duracaoMin: t.baselineDuracaoMin, custo: t.bac } } })
-    }
+    // Uma só atribuição (cada `updateTask` verifica o cronograma inteiro e a soma passaria do teto de 5 s do teste sob cobertura)
+    store.state.tasks = store.state.tasks.map((t) => (t.isSummary || t.uid === 801 ? t : { ...t, linhasBase: { '3': { inicio: t.baselineStart, termino: t.baselineFinish, duracaoMin: t.baselineDuracaoMin, custo: t.bac } } }))
     store.state.linhasBase.push({ numero: 3, nome: 'LB3 de teste', motivo: 'm', origem: 'cronoai' })
     store.definirLinhaBaseAtiva(3)
     expect(store.evm.bac).toBe(18993000)
