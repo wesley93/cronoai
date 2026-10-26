@@ -11,6 +11,7 @@ import {
   dadosDaLinhaBase,
   linhaBaseAtivaEfetiva,
   linhaBaseDoCronograma,
+  normalizarQuebras,
   projetarLinhaBase,
   rollupLinhaBase,
   rotuloLinhaBase,
@@ -195,6 +196,19 @@ describe('metadados da linha de base (D-4)', () => {
     expect(validarTextosLinhaBase({ nome: 'n', motivo: '' })).toEqual(['Informe o motivo da linha de base.'])
     expect(validarTextosLinhaBase({ nome: 'n', motivo: 'm', autor: 'a'.repeat(121) })).toEqual(['O autor passa de 120 caracteres.'])
     expect(validarTextosLinhaBase({ nome: 'n\u0007', motivo: 'm' })).toEqual(['Os textos não podem ter caracteres de controle.'])
+  })
+
+  it('rodada 02 (SEG-5): o motivo aceita a quebra de linha (\\r\\n vira \\n); nome e autor não; os outros caracteres de controle seguem recusados; a leitura vale o mesmo', () => {
+    expect(normalizarQuebras('a\r\nb\rc\nd')).toBe('a\nb\nc\nd')
+    expect(validarTextosLinhaBase({ nome: 'N', motivo: 'linha 1\r\nlinha 2' })).toEqual([])
+    expect(validarTextosLinhaBase({ nome: 'N\nX', motivo: 'm' })).toEqual(['Os textos não podem ter caracteres de controle.'])
+    expect(validarTextosLinhaBase({ nome: 'N', motivo: 'm', autor: 'a\nb' })).toEqual(['Os textos não podem ter caracteres de controle.'])
+    expect(validarTextosLinhaBase({ nome: 'N', motivo: 'm\tx' })).toEqual(['Os textos não podem ter caracteres de controle.'])
+    expect(validarTextosLinhaBase({ nome: 'N', motivo: 'm\u0007' })).toEqual(['Os textos não podem ter caracteres de controle.'])
+    const gravada = { ...info, motivo: 'linha 1\nlinha 2' }
+    expect(validarDadosLinhaBaseInfo(gravada)).toEqual(gravada) // lida de volta igual
+    expect(validarDadosLinhaBaseInfo({ ...info, motivo: 'a\rb' })).toBeUndefined()
+    expect(validarDadosLinhaBaseInfo({ ...info, nome: 'a\nb' })).toBeUndefined()
   })
 
   it('validarDadosLinhaBaseInfo reconstrói só os campos conhecidos e recusa o inválido', () => {

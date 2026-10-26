@@ -80,7 +80,7 @@ const persistencia = computed(() =>
               <span v-else class="chip-neutral">Fechamento</span>
               <span v-if="c.tipo === 'fechamento' && retificadas.has(c.dataStatus)" class="chip-warn ml-1">retificado</span>
               <span v-if="efetivos.has(c.id)" class="chip-ok ml-1">efetivo</span>
-              <div v-if="c.motivo" class="mt-0.5 max-w-[260px] text-[10.5px] text-zinc-500">Motivo: {{ c.motivo }}</div>
+              <div v-if="c.motivo" class="mt-0.5 max-w-[260px] whitespace-pre-line text-[10.5px] text-zinc-500">Motivo: {{ c.motivo }}</div>
               <div v-if="c.autor" class="text-[10.5px] text-zinc-500">Autor declarado: {{ c.autor }}</div>
             </td>
             <td class="text-right tabular-nums">{{ fmtBRLCents(c.totais.pv) }}</td>
@@ -97,7 +97,7 @@ const persistencia = computed(() =>
       </table>
     </div>
     <p v-else class="px-5 py-8 text-center text-xs text-zinc-500" data-testid="sem-fechamentos">
-      {{ project.fechamentosCarregados ? 'Esta obra ainda não tem fechamentos: a Curva S usa o histórico reconstruído linearmente.' : 'Lendo os fechamentos desta obra…' }}
+      {{ project.fechamentosCarregados ? 'Esta obra ainda não tem fechamentos: a Curva S usa o histórico reconstruído linearmente.' : project.fechamentosErroDeLeitura ? 'Não foi possível ler os fechamentos deste navegador. Nada foi alterado e novo fechamento fica bloqueado: recarregue a página.' : 'Lendo os fechamentos desta obra…' }}
     </p>
 
     <FecharDataStatusDialog v-if="fechando" @fechar="fechando = false" />

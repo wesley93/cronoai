@@ -1,6 +1,6 @@
 // Fechamento da data de status e retificação na store (ciclo 00007, E3): gravação atômica na fila, imutabilidade, regras da data de status,
 // leitura adulterada do IndexedDB, guardas de obra (provadas por mutação) e a troca de obra. Números do Aurora conferidos à mão no plano.
-import { isProxy } from 'vue'
+import { isProxy, nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { CabecalhoFechamento } from '@/types/fechamento'
@@ -8,10 +8,12 @@ import fixtureLinhasBase from '@/lib/__fixtures__/mspdi-linhas-base.xml?raw'
 import { computeSCurve } from '@/lib/evm'
 import { useUiStore } from './ui'
 import { criarArmazenamentoMemoria, usarArmazenamento, type ArmazenamentoMemoria } from './armazenamentoObras'
-import { useProjectStore } from './useProjectStore'
+import { buildSeedState, useProjectStore } from './useProjectStore'
 
 /** set/26 sem fechamentos depois de avançar a 302 a 90% (medido; antes, com o fechamento, o EV era 5.408.856,76). */
 const SET_SEM_FECHAMENTO_EV = 5396674.208144797
+/** Entrega do arquivo de teste importado com início em 01/12/2026 (a data de início da obra, 04/05/2026, é mantida; as folhas têm SNET inferida do arquivo). Medido. */
+const ENTREGA_DEPOIS_DO_IMPORT = '2026-12-17'
 const MSG_JA_EXISTE = "Já existe fechamento em 23/10/2026: use 'Retificar'."
 const MSG_ANTERIOR = "A data de status não pode ser anterior ao último fechamento (23/10/2026). Para corrigir um fechamento, use 'Retificar'."
 const MSG_OBRA_MUDOU = 'A obra ativa mudou durante a operação. Nada foi gravado: refaça na obra desejada.'
@@ -314,7 +316,6 @@ describe('leitura adulterada do IndexedDB (P-6, S-2, AC-9)', () => {
     const lixo: Record<string, unknown>[] = [
       { ...structuredClone(valido), id: 'x-formato2', sequencia: 11, versaoFormato: 2 },
       { ...structuredClone(valido), id: 'x-nan', sequencia: 12, totais: { ...valido.totais, ev: 'x' } },
-      { ...structuredClone(valido), id: 'x-seq-repetida', sequencia: 2 },
       { ...structuredClone(valido), id: 'x-linhabase', sequencia: 13, linhaBase: 99 },
       JSON.parse('{"id":"x-proto","obraId":"' + store.obraAtivaId + '","__proto__":{"admin":true},"sequencia":14}'),
     ]
@@ -328,12 +329,12 @@ describe('leitura adulterada do IndexedDB (P-6, S-2, AC-9)', () => {
     const store = await reabrir(adaptador)
     expect(store.obraAtivaId).not.toBe('')
     expect(store.fechamentos.map((c) => c.id)).toEqual([f1.id, f2.id]) // só os 2 válidos
-    expect(store.fechamentosIlegiveis).toBe(5)
-    expect(store.avisoFechamentos).toBe('5 fechamento(s) ilegível(is) ignorado(s); os registros ficam intactos.')
+    expect(store.fechamentosIlegiveis).toBe(4)
+    expect(store.avisoFechamentos).toBe('4 fechamento(s) ilegível(is) ignorado(s); os registros ficam intactos.')
     expect(({} as { admin?: boolean }).admin).toBeUndefined()
     // fechar e retificar ficam bloqueados até resolver
     store.setStatusDate('2026-11-06')
-    expect(await store.fecharDataDeStatus()).toEqual({ ok: false, erro: 'Há 5 fechamento(s) ilegível(is) nesta obra: novo fechamento bloqueado até resolver (os registros foram mantidos sem alteração).' })
+    expect(await store.fecharDataDeStatus()).toEqual({ ok: false, erro: 'Há 4 fechamento(s) ilegível(is) nesta obra: novo fechamento bloqueado até resolver (os registros foram mantidos sem alteração).' })
     expect((await store.retificarFechamento({ fechamentoId: f1.id, alteracoes: [{ uid: 104, pct: 45 }], motivo: 'm' })).ok).toBe(false)
     // nada foi regravado nos registros de fechamento (nem depois de salvar a obra e trocar de obra)
     await store.salvarAgora()
@@ -436,7 +437,7 @@ describe('faixa da D-14: a obra mudou depois do fechamento', () => {
     await fechar(store)
     expect(store.avisoObraMudouDepoisDoFechamento).toBe('')
     store.updateTask(104, { percentComplete: 60 })
-    expect(store.avisoObraMudouDepoisDoFechamento).toBe('A obra mudou depois do fechamento de 23/10/2026: avance a data de status ou retifique o fechamento.')
+    expect(store.avisoObraMudouDepoisDoFechamento).toBe('A obra difere do fechamento efetivo de 23/10/2026: corrija a EAP, avance a data de status ou retifique o fechamento.')
     store.setStatusDate('2026-10-30')
     expect(store.avisoObraMudouDepoisDoFechamento).toBe('')
   })
@@ -747,5 +748,176 @@ describe('Curva S, tendência, comparação e exportação pelos fechamentos (ci
     if (!r.ok) throw new Error(r.erro)
     expect(r.avisos).toEqual(['1 fechamento(s) com detalhe ilegível ficaram de fora do arquivo.'])
     expect(JSON.parse(r.texto).fechamentos.map((f: { cabecalho: CabecalhoFechamento }) => f.cabecalho.id)).toEqual([f1.id])
+  })
+})
+
+describe('rodada 02: SEG-1, SEG-2, SEG-5, desvio 9, nota da LB e gravação pendente', () => {
+  /** .xml fictício: um pacote com TAB no nome e uma folha com WBS de 70 caracteres. */
+  const xmlComTabEWbsLongo = (wbsLongo: string) => `<?xml version="1.0" encoding="UTF-8"?>
+<Project xmlns="http://schemas.microsoft.com/project"><Title>Obra fictícia</Title><StartDate>2026-03-02T08:00:00</StartDate><StatusDate>2026-03-06T17:00:00</StatusDate>
+<Tasks>
+<Task><UID>1</UID><ID>1</ID><Name>Pacote\tcom tab</Name><WBS>1</WBS><OutlineNumber>1</OutlineNumber><OutlineLevel>1</OutlineLevel><Start>2026-03-02T08:00:00</Start><Finish>2026-03-13T17:00:00</Finish><Duration>PT80H0M0S</Duration><Summary>1</Summary></Task>
+<Task><UID>2</UID><ID>2</ID><Name>Alvenaria</Name><WBS>${wbsLongo}</WBS><OutlineNumber>${wbsLongo}</OutlineNumber><OutlineLevel>2</OutlineLevel><Start>2026-03-02T08:00:00</Start><Finish>2026-03-13T17:00:00</Finish><Duration>PT80H0M0S</Duration><Summary>0</Summary><Cost>1000.00</Cost>
+<Baseline><Number>0</Number><Start>2026-03-02T08:00:00</Start><Finish>2026-03-13T17:00:00</Finish><Duration>PT80H0M0S</Duration><Cost>1000.00</Cost></Baseline></Task>
+</Tasks></Project>`
+
+  it('SEG-1: .xml com TAB no nome do pacote e WBS de 70 caracteres: fechar, reabrir e 0 ilegíveis (antes: o fechamento era gravado e virava ilegível ao reabrir)', async () => {
+    const wbs = '1.' + '9'.repeat(68)
+    expect(wbs).toHaveLength(70)
+    const { adaptador, store } = await abrir()
+    store.importXml(xmlComTabEWbsLongo(wbs))
+    expect(store.state.tasks.find((t) => t.isSummary)?.name).toContain('\t') // o TAB entrou na obra
+    await fechar(store)
+    await store.salvarAgora()
+    const reaberta = await reabrir(adaptador)
+    expect(reaberta.fechamentosIlegiveis).toBe(0)
+    expect(reaberta.avisoFechamentos).toBe('')
+    expect(reaberta.fechamentos).toHaveLength(1)
+    expect(reaberta.fechamentos[0].porPacote.map((p) => p.nome)).toEqual(['Pacote com tab']) // o TAB virou espaço no registro
+    const detalhe = await reaberta.lerDetalhe(reaberta.fechamentos[0].id)
+    expect(detalhe?.tarefas.map((t) => t[1])).toEqual([wbs])
+    const exportado = await reaberta.exportarHistorico()
+    if (!exportado.ok) throw new Error(exportado.erro)
+    expect(JSON.parse(exportado.texto).fechamentos).toHaveLength(1)
+  })
+
+  it('SEG-1 (rede de segurança): WBS acima do limite: o fechamento é RECUSADO em português, nada é gravado e o log e o estado ficam iguais', async () => {
+    const { adaptador, store } = await abrir()
+    store.importXml(xmlComTabEWbsLongo('1.' + '9'.repeat(300)))
+    const antes = JSON.stringify(store.state.log)
+    const r = await store.fecharDataDeStatus()
+    expect(r).toEqual({
+      ok: false,
+      erro: 'Este fechamento não pode ser gravado: algum dado da obra (por exemplo, um código de EAP com mais de 200 caracteres) não passa na validação de leitura e o registro ficaria ilegível. Nada foi gravado.',
+    })
+    expect(adaptador.fechamentos.size).toBe(0)
+    expect(adaptador.detalhes.size).toBe(0)
+    expect(JSON.stringify(store.state.log)).toBe(antes)
+    expect(store.fechamentos).toEqual([])
+  })
+
+  it('SEG-2: duas abas gravaram a mesma sequência: nenhum é ilegível, o aviso diz que foi em paralelo, o efetivo é o gravado por último e a obra segue fechável', async () => {
+    const { adaptador, store } = await abrir()
+    const f1 = await fechar(store)
+    const original = adaptador.fechamentos.get(f1.id) as CabecalhoFechamento
+    // A "outra aba" gravou o mesmo número de sequência (1) para a data seguinte, um pouco depois
+    const outra: CabecalhoFechamento = { ...structuredClone(original), id: 'fech-outra-aba', dataStatus: '2026-10-30', fechadoEm: '2026-10-31T10:00:00.000Z' }
+    adaptador.fechamentos.set(outra.id, outra)
+    adaptador.detalhes.set(outra.id, { id: outra.id, json: (adaptador.detalhes.get(f1.id) as { json: string }).json.replace(`"id":"${f1.id}"`, `"id":"${outra.id}"`) })
+    const mesmaData: CabecalhoFechamento = { ...structuredClone(original), id: 'aaa-mesma-sequencia', fechadoEm: '2026-10-25T16:00:00.000Z' }
+    adaptador.fechamentos.set(mesmaData.id, mesmaData)
+    adaptador.detalhes.set(mesmaData.id, { id: mesmaData.id, json: (adaptador.detalhes.get(f1.id) as { json: string }).json.replace(`"id":"${f1.id}"`, `"id":"${mesmaData.id}"`) })
+    const store2 = await reabrir(adaptador)
+    expect(store2.fechamentosIlegiveis).toBe(0)
+    expect(store2.fechamentos).toHaveLength(3)
+    expect(store2.avisoFechamentos).toBe('Há fechamentos gravados em paralelo (3 registro(s) com a mesma sequência, por exemplo de duas abas): o efetivo de cada data é o gravado por último. Confira a lista.')
+    // O efetivo de 23/10 é o gravado por último (mesma sequência: fechadoEm mais novo); o de 30/10 é o da outra aba
+    expect(store2.fechamentosEfetivos.map((c) => c.id)).toEqual(['aaa-mesma-sequencia', 'fech-outra-aba'])
+    // A obra NÃO fica bloqueada: a data de status avança e o novo fechamento recebe uma sequência nova
+    store2.setStatusDate('2026-11-06')
+    const r = await store2.fecharDataDeStatus()
+    if (!r.ok) throw new Error(r.erro)
+    expect(store2.fechamentos.find((c) => c.id === r.id)?.sequencia).toBe(2)
+  })
+
+  it('SEG-5: o Enter nos textos longos vale (\\r\\n vira \\n) na observação do fechamento, no motivo da retificação e no motivo da LB; vai e volta do armazenamento; o autor continua de uma linha', async () => {
+    const { adaptador, store } = await abrir()
+    expect(await store.fecharDataDeStatus({ autor: 'a\nb' })).toEqual({ ok: false, erro: 'Os textos não podem ter caracteres de controle.' })
+    expect(await store.fecharDataDeStatus({ observacao: 'x\u0007' })).toEqual({ ok: false, erro: 'Os textos não podem ter caracteres de controle.' })
+    const f1 = await fechar(store, { observacao: 'linha 1\r\nlinha 2' })
+    const r = await store.retificarFechamento({ fechamentoId: f1.id, alteracoes: [{ uid: 104, pct: 45 }], motivo: 'Medição revisada\r\npelo mestre' })
+    expect(r.ok).toBe(true)
+    expect(store.salvarLinhaBase({ numero: 1, nome: 'Replanejamento', motivo: 'Chuvas de setembro\r\ne de outubro' })).toEqual({ ok: true })
+    expect(store.state.linhasBase.find((i) => i.numero === 1)?.motivo).toBe('Chuvas de setembro\ne de outubro')
+    expect((adaptador.fechamentos.get(f1.id) as CabecalhoFechamento).observacao).toBe('linha 1\nlinha 2')
+    await store.salvarAgora()
+    const reaberta = await reabrir(adaptador)
+    expect(reaberta.fechamentosIlegiveis).toBe(0) // lidos de volta: o \n é legível
+    expect(reaberta.fechamentos.find((c) => c.tipo === 'retificacao')?.motivo).toBe('Medição revisada\npelo mestre')
+    expect(reaberta.state.linhasBase.find((i) => i.numero === 1)?.motivo).toBe('Chuvas de setembro\ne de outubro')
+    expect(reaberta.avisosCarga).toEqual([])
+  })
+
+  it('R-3 / nota 1 dos testes: gravar com a LB1 ativa NÃO grava a projeção: as tarefas gravadas têm a LB0 (datas e bac da LB0)', async () => {
+    const { adaptador, store } = await abrir()
+    store.salvarLinhaBase({ numero: 1, nome: 'Replanejamento', motivo: 'Teste' })
+    store.definirLinhaBaseAtiva(1)
+    expect(await store.salvarAgora()).toBe(true)
+    const gravada = JSON.parse(adaptador.obras.get(store.obraAtivaId)!.json)
+    const t104 = gravada.tasks.find((t: { uid: number }) => t.uid === 104)
+    // LB0 do 104 no Aurora: 25/09 a 13/10, R$ 168.000,00; a LB1 (projeção) seria 05/10 a 05/11
+    expect([t104.baselineStart, t104.baselineFinish, t104.bac]).toEqual(['2026-09-25', '2026-10-13', 168000])
+    expect(t104.baselineStart).not.toBe('2026-10-05')
+    expect(t104.linhasBase['1']).toEqual({ inicio: '2026-10-05', termino: '2026-11-05', duracaoMin: 10176, custo: 168000 })
+    expect(gravada.meta.linhaBaseAtiva).toBe(1)
+    // todas as folhas gravadas têm a LB0 do seed (nenhuma foi trocada pela LB1)
+    const lb0Seed = buildSeedState().tasks.map((t) => [t.uid, t.baselineStart, t.baselineFinish, t.bac])
+    expect(gravada.tasks.map((t: { uid: number; baselineStart?: string; baselineFinish?: string; bac: number }) => [t.uid, t.baselineStart, t.baselineFinish, t.bac])).toEqual(lb0Seed)
+  })
+
+  it('desvio 9 (ESP P-1): importar .xml com data de início posterior ao 1º fechamento mantém a data de início da obra, avisa, calcula a LB0 e a exportação leva a data mantida', async () => {
+    const { store } = await abrir()
+    await fechar(store)
+    const entregaAntes = store.schedule.projectFinish
+    const xml = fixtureLinhasBase
+      .replace('<StartDate>2026-03-02T08:00:00</StartDate>', '<StartDate>2026-12-01T08:00:00</StartDate>')
+      .replace('<StatusDate>2026-03-06T17:00:00</StatusDate>', '<StatusDate>2026-12-10T17:00:00</StatusDate>')
+      .replace(/<Baseline>[\s\S]*?<\/Baseline>/g, '')
+      .replace('<BaselineForEarnedValue>3</BaselineForEarnedValue>', '')
+    const avisos = store.importXml(xml)
+    expect(avisos).toContain('A data de início do arquivo (01/12/2026) é posterior ao primeiro fechamento (23/10/2026): o CronoAI manteve a data de início atual (04/05/2026). Confira se o arquivo é da mesma obra; a exportação levará a data de início mantida.')
+    expect(store.state.meta.startDate).toBe('2026-05-04') // mantida
+    expect(store.state.meta.statusDate).toBe('2026-12-10') // a de status é posterior ao último fechamento: vale a do arquivo
+    expect(entregaAntes).toBe('2027-06-23')
+    expect(store.schedule.projectFinish).toBe(ENTREGA_DEPOIS_DO_IMPORT)
+    // a LB0 que o arquivo não trazia foi calculada pelo CronoAI, com os metadados dela
+    expect(store.state.linhasBase).toEqual([expect.objectContaining({ numero: 0, motivo: 'Calculada na importação: o arquivo não trazia a linha de base 0', origem: 'cronoai' })])
+    expect(store.state.tasks.filter((t) => !t.isSummary).every((t) => t.baselineStart !== undefined && t.baselineFinish !== undefined)).toBe(true)
+    // a exportação leva a data de início mantida
+    expect(store.exportXml().xml).toContain('<StartDate>2026-05-04T08:00:00</StartDate>')
+    expect(store.fechamentos).toHaveLength(1) // o histórico não é tocado
+  })
+
+  it('P-2 (ESP): a importação troca as LBs e a nota "fechado contra a LB0" passa a avisar da troca; antes, a LB importada sem data de gravação escondia a mudança', async () => {
+    const { store } = await abrir()
+    await fechar(store)
+    expect(store.notasDaCurva).toEqual([])
+    vi.setSystemTime(new Date('2026-10-26T15:00:00.000Z'))
+    store.importXml(fixtureLinhasBase)
+    // as LBs importadas ganham a data da importação como data de gravação
+    expect(store.state.linhasBase.every((i) => i.salvaEm === '2026-10-26T15:00:00.000Z' && i.origem === 'arquivo')).toBe(true)
+    expect(store.notasDaCurva).toEqual(['Fechamento de 23/10/2026: fechado contra a LB0 de 27/04/2026; a LB0 atual é de 26/10/2026. O PV da curva é o da LB3.']) // o arquivo traz BaselineForEarnedValue 3
+  })
+
+  it('N-4: o fechamento recusado na vez da fila não deixa sem gravar uma edição pendente (o atraso de gravação é reagendado)', async () => {
+    vi.useRealTimers() // o beforeEach só moqueou a data: aqui os relógios são falsos de verdade
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-25T15:00:00.000Z'))
+    try {
+      const { adaptador, store } = await abrir()
+      store.updateTask(104, { percentComplete: 60 })
+      await nextTick()
+      expect(store.estadoGravacao).toBe('pendente')
+      const pedido = store.fecharDataDeStatus() // passa na conferência do pedido e entra na fila
+      // Antes da vez dela, o histórico em memória ganha um fechamento da mesma data (outra aba, por exemplo): a conferência DA FILA recusa
+      store.fechamentos = [
+        { versaoFormato: 1, id: 'fech-de-outra-aba', obraId: store.obraAtivaId, sequencia: 1, tipo: 'fechamento', dataStatus: '2026-10-23', fechadoEm: '2026-10-25T14:00:00.000Z', linhaBase: 0, versaoPremissas: 1, esquemaObra: 6, totais: { bac: 1, pv: 1, ev: 1, ac: 1, spi: 1, cpi: 1, eac: 1, entregaPrevista: '2027-06-23', atrasoDiasUteis: 16 }, porPacote: [], quantidadeTarefas: 0 },
+      ]
+      expect(await pedido).toEqual({ ok: false, erro: MSG_JA_EXISTE })
+      expect(adaptador.fechamentos.size).toBe(0)
+      // A edição que estava pendente NÃO ficou sem gravar: o atraso foi reagendado
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(store.estadoGravacao).toBe('salvo')
+      expect(JSON.parse(adaptador.obras.get(store.obraAtivaId)!.json).tasks.find((t: { uid: number }) => t.uid === 104).percentComplete).toBe(60)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('VIS-1: depois de retificar, a faixa da D-14 manda corrigir a EAP (a retificação não altera a obra) e não induz a retificar de novo', async () => {
+    const { store } = await abrir()
+    const f1 = await fechar(store)
+    await store.retificarFechamento({ fechamentoId: f1.id, alteracoes: [{ uid: 104, pct: 45, custoReal: 75000 }], motivo: 'Medição revisada' })
+    expect(store.avisoObraMudouDepoisDoFechamento).toBe('A obra difere do fechamento efetivo de 23/10/2026: corrija a EAP, avance a data de status ou retifique o fechamento.')
   })
 })

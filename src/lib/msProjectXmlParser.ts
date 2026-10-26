@@ -1220,7 +1220,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   ].filter(Boolean)
   if (lbIgnoradas.length) warnings.push(`Linhas de base ignoradas: ${lbIgnoradas.join('; ')}.`)
   if (lbCustoInvalido) warnings.push(`${lbCustoInvalido} custo(s) de linha de base inválido(s) ou fora da faixa ignorado(s).`)
-  if (lb0SemDatas) warnings.push(`${lb0SemDatas} tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas da linha de base 0 delas.`)
+  if (lb0SemDatas) warnings.push(`${lb0SemDatas} tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas e a duração da linha de base 0 delas.`)
   // Sem término ou sem início, evm.ts devolve PV zero: a store mantém a LB0 incompleta do arquivo (withBaseline onlyMissing, CR-12).
   if (baselineNoFinish) warnings.push(`${baselineNoFinish} tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.`)
   if (baselineNoStart) warnings.push(`${baselineNoStart} tarefa(s) com linha de base 0 sem início: o término do arquivo é mantido e o valor planejado (PV) delas fica zero.`)

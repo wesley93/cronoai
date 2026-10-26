@@ -16,7 +16,7 @@ import { TETO_DIAS } from './calendar'
 import { MINUTOS_NO_DIA_CORRIDO, type CalendariosCompilados } from './calendarioTrabalho'
 import { computeEvm, computePackageEvm, plannedFraction } from './evm'
 import { fmtBRLCents } from './format'
-import { NUMERO_MAX_LINHA_BASE, dataHoraIsoValida, dataIsoValida, dataLocalDeIso } from './linhasBase'
+import { CONTROLE_SEM_QUEBRA, NUMERO_MAX_LINHA_BASE, dataHoraIsoValida, dataIsoValida, dataLocalDeIso, normalizarQuebras } from './linhasBase'
 
 /** Limites do histórico e da leitura (G4, RNF-04.2 e seção 08 do plano). */
 export const LIMITES_FECHAMENTO = {
@@ -30,6 +30,8 @@ export const LIMITES_FECHAMENTO = {
   /** Tamanho do texto do detalhe, medido ANTES do `JSON.parse`. */
   detalheChars: 8 * 1024 * 1024,
   id: 64,
+  /** Código de EAP (WBS): o estado e o importador não limitam o tamanho; acima disto o fechamento é recusado ANTES de gravar (rede de segurança). */
+  wbs: 200,
   autor: 120,
   observacao: 500,
   motivo: 500,
@@ -49,6 +51,11 @@ const eNumero = (v: unknown): v is number => typeof v === 'number' && Number.isF
 const eInteiro = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v)
 const dinheiro = (v: unknown): v is number => eNumero(v) && v >= 0 && v <= LIMITES_FECHAMENTO.valorMax
 const textoCurto = (v: unknown, max: number, minimo = 1): v is string => typeof v === 'string' && v.length >= minimo && v.length <= max && !CONTROLE.test(v)
+/** Texto de várias linhas (observação e motivo): a quebra de linha `\n` vale; os outros caracteres de controle não. */
+const textoLongo = (v: unknown, max: number, minimo = 1): v is string => typeof v === 'string' && v.length >= minimo && v.length <= max && !CONTROLE_SEM_QUEBRA.test(v)
+/** Texto vindo da obra (nome do pacote, código de EAP) vira texto sem caractere de controle: o TAB de um .xml não pode tornar o registro ilegível. */
+// eslint-disable-next-line no-control-regex -- é justamente o que se quer trocar
+export const limparControles = (s: string): string => s.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
 
 export const dmy = (iso: string): string => iso.split('-').reverse().join('/')
 
@@ -99,7 +106,7 @@ export function capturarFechamento(e: EntradaCaptura): { cabecalho: CabecalhoFec
     const s = e.schedule.byUid.get(t.uid)
     return [
       t.uid,
-      t.wbs,
+      limparControles(t.wbs),
       t.percentComplete,
       t.actualCost,
       t.bac,
@@ -123,8 +130,8 @@ export function capturarFechamento(e: EntradaCaptura): { cabecalho: CabecalhoFec
     atrasoDiasUteis: e.atrasoDiasUteis,
   }
   const porPacote: PacoteFechamento[] = computePackageEvm(e.tarefas, e.cals, e.dataStatus).map((p) => ({
-    wbs: p.wbs.slice(0, LIMITES_FECHAMENTO.id),
-    nome: p.name.slice(0, LIMITES_FECHAMENTO.nomePacote),
+    wbs: limparControles(p.wbs),
+    nome: limparControles(p.name).slice(0, LIMITES_FECHAMENTO.nomePacote),
     bac: p.bac,
     pv: p.pv,
     ev: p.ev,
@@ -158,11 +165,15 @@ export function serializarDetalhe(d: DetalheFechamento): RegistroDetalheFechamen
 // -------------------------------------------------------------------------------------------------------------- efetivos e regras
 
 /** O fechamento efetivo de cada data: a retificação de maior `sequencia` (ou o original), em ordem de data. */
+/** O registro mais novo: maior `sequencia`; sequência repetida (duas abas gravando ao mesmo tempo) desempata por `fechadoEm` e depois por `id`, sempre do mesmo jeito. */
+const maisNovo = (a: CabecalhoFechamento, b: CabecalhoFechamento): boolean =>
+  a.sequencia !== b.sequencia ? a.sequencia > b.sequencia : a.fechadoEm !== b.fechadoEm ? a.fechadoEm > b.fechadoEm : a.id > b.id
+
 export function efetivos(cabecalhos: readonly CabecalhoFechamento[]): CabecalhoFechamento[] {
   const porData = new Map<string, CabecalhoFechamento>()
   for (const c of cabecalhos) {
     const atual = porData.get(c.dataStatus)
-    if (!atual || c.sequencia > atual.sequencia) porData.set(c.dataStatus, c)
+    if (!atual || maisNovo(c, atual)) porData.set(c.dataStatus, c)
   }
   return [...porData.values()].sort((a, b) => (a.dataStatus < b.dataStatus ? -1 : a.dataStatus > b.dataStatus ? 1 : 0))
 }
@@ -239,10 +250,10 @@ const pertenceAoPacote = (wbs: string, pacote: string) => wbs === pacote || wbs.
  * Avisos sem bloquear (E-5): EV retificado acima do EV do fechamento seguinte, e % de tarefa acima do dela no seguinte.
  */
 export function retificar(e: EntradaRetificacao): ResultadoRetificacao {
-  const motivo = e.motivo.trim()
+  const motivo = normalizarQuebras(e.motivo).trim()
   if (!motivo) return { ok: false, erro: 'Informe o motivo da retificação.' }
   if (motivo.length > LIMITES_FECHAMENTO.motivo) return { ok: false, erro: `O motivo da retificação passa de ${LIMITES_FECHAMENTO.motivo} caracteres.` }
-  if (CONTROLE.test(motivo) || CONTROLE.test(e.autor ?? '')) return { ok: false, erro: 'Os textos não podem ter caracteres de controle.' }
+  if (CONTROLE_SEM_QUEBRA.test(motivo) || CONTROLE.test(e.autor ?? '')) return { ok: false, erro: 'Os textos não podem ter caracteres de controle.' }
   if (e.autor && e.autor.length > LIMITES_FECHAMENTO.autor) return { ok: false, erro: `O autor passa de ${LIMITES_FECHAMENTO.autor} caracteres.` }
   if (e.cabecalhos.filter((h) => h.tipo === 'retificacao').length >= LIMITES_FECHAMENTO.retificacoes) return { ok: false, erro: msgLimite(LIMITES_FECHAMENTO.retificacoes, 'retificações') }
   if (!e.alteracoes.length) return { ok: false, erro: 'Escolha ao menos uma tarefa para retificar.' }
@@ -334,7 +345,7 @@ function pacotesValidos(v: unknown): PacoteFechamento[] | undefined {
   if (!Array.isArray(v) || v.length > LIMITES_FECHAMENTO.pacotes) return undefined
   const out: PacoteFechamento[] = []
   for (const p of v) {
-    if (!eObjeto(p) || !textoCurto(p.wbs, LIMITES_FECHAMENTO.id) || !textoCurto(p.nome, LIMITES_FECHAMENTO.nomePacote, 0)) return undefined
+    if (!eObjeto(p) || !textoCurto(p.wbs, LIMITES_FECHAMENTO.wbs) || !textoCurto(p.nome, LIMITES_FECHAMENTO.nomePacote, 0)) return undefined
     if (!dinheiro(p.bac) || !dinheiro(p.pv) || !dinheiro(p.ev) || !dinheiro(p.ac)) return undefined
     out.push({ wbs: p.wbs, nome: p.nome, bac: p.bac, pv: p.pv, ev: p.ev, ac: p.ac })
   }
@@ -358,8 +369,8 @@ export function validarCabecalhoFechamento(v: unknown, obraId?: string): Cabecal
   if (!retificacao && v.retificaId !== undefined) return undefined
   if (!dataIsoValida(v.dataStatus) || !dataHoraIsoValida(v.fechadoEm)) return undefined
   if (v.autor !== undefined && !textoCurto(v.autor, LIMITES_FECHAMENTO.autor, 0)) return undefined
-  if (v.observacao !== undefined && !textoCurto(v.observacao, LIMITES_FECHAMENTO.observacao, 0)) return undefined
-  if (retificacao ? !textoCurto(v.motivo, LIMITES_FECHAMENTO.motivo) : v.motivo !== undefined && !textoCurto(v.motivo, LIMITES_FECHAMENTO.motivo, 0)) return undefined
+  if (v.observacao !== undefined && !textoLongo(v.observacao, LIMITES_FECHAMENTO.observacao, 0)) return undefined
+  if (retificacao ? !textoLongo(v.motivo, LIMITES_FECHAMENTO.motivo) : v.motivo !== undefined && !textoLongo(v.motivo, LIMITES_FECHAMENTO.motivo, 0)) return undefined
   if (!eInteiro(v.linhaBase) || v.linhaBase < 0 || v.linhaBase > NUMERO_MAX_LINHA_BASE) return undefined
   if (v.linhaBaseSalvaEm !== undefined && !dataHoraIsoValida(v.linhaBaseSalvaEm)) return undefined
   if (!eInteiro(v.versaoPremissas) || v.versaoPremissas < 0 || v.versaoPremissas > 1e6) return undefined
@@ -393,24 +404,43 @@ export function validarCabecalhoFechamento(v: unknown, obraId?: string): Cabecal
 /**
  * Valida a lista de cabeçalhos da obra: inválidos saem; `id` e `sequencia` repetidos também (vale o primeiro). Devolve os legíveis e quantos ficaram de fora.
  */
-export function validarCabecalhosFechamento(brutos: readonly unknown[], obraId: string): { cabecalhos: CabecalhoFechamento[]; ilegiveis: number } {
+export function validarCabecalhosFechamento(brutos: readonly unknown[], obraId: string): { cabecalhos: CabecalhoFechamento[]; ilegiveis: number; repetidas: number } {
   const ids = new Set<string>()
-  const sequencias = new Set<number>()
   const cabecalhos: CabecalhoFechamento[] = []
   for (const b of brutos) {
     const c = validarCabecalhoFechamento(b, obraId)
-    if (!c || ids.has(c.id) || sequencias.has(c.sequencia)) continue
+    if (!c || ids.has(c.id)) continue
     ids.add(c.id)
-    sequencias.add(c.sequencia)
     cabecalhos.push(c)
   }
-  return { cabecalhos: cabecalhos.sort((a, b) => a.sequencia - b.sequencia), ilegiveis: brutos.length - cabecalhos.length }
+  // Sequência repetida (duas abas gravaram ao mesmo tempo) NÃO torna nenhum dos dois ilegível: o efetivo sai do desempate (`fechadoEm`, depois `id`) e a tela avisa
+  const contagem = new Map<number, number>()
+  for (const c of cabecalhos) contagem.set(c.sequencia, (contagem.get(c.sequencia) ?? 0) + 1)
+  const repetidas = cabecalhos.filter((c) => (contagem.get(c.sequencia) ?? 0) > 1).length
+  const ordem = (a: CabecalhoFechamento, b: CabecalhoFechamento) => (a.sequencia !== b.sequencia ? a.sequencia - b.sequencia : a.fechadoEm !== b.fechadoEm ? (a.fechadoEm < b.fechadoEm ? -1 : 1) : a.id < b.id ? -1 : 1)
+  return { cabecalhos: cabecalhos.sort(ordem), ilegiveis: brutos.length - cabecalhos.length, repetidas }
+}
+
+/** Aviso das sequências repetidas (gravações em paralelo): nenhum registro é ilegível; o efetivo é o gravado por último. */
+export const avisoDeRepetidas = (repetidas: number): string =>
+  `Há fechamentos gravados em paralelo (${repetidas} registro(s) com a mesma sequência, por exemplo de duas abas): o efetivo de cada data é o gravado por último. Confira a lista.`
+
+/**
+ * Rede de segurança antes de gravar (SEG-1): o registro que a captura ou a retificação montou precisa passar pela MESMA validação de leitura que o abrirá depois.
+ * Se não passar (por exemplo, um código de EAP com mais de 200 caracteres), o fechamento é recusado com esta mensagem e nada é gravado.
+ */
+export function erroDeGravacaoDoRegistro(cabecalho: CabecalhoFechamento, detalhe: RegistroDetalheFechamento): string | undefined {
+  const lido = validarCabecalhoFechamento(JSON.parse(JSON.stringify(cabecalho)), cabecalho.obraId)
+  if (!lido || !lerDetalheFechamento(detalhe, lido)) {
+    return `Este fechamento não pode ser gravado: algum dado da obra (por exemplo, um código de EAP com mais de ${LIMITES_FECHAMENTO.wbs} caracteres) não passa na validação de leitura e o registro ficaria ilegível. Nada foi gravado.`
+  }
+  return undefined
 }
 
 function tuplaValida(t: unknown): TarefaFechamento | undefined {
   if (!Array.isArray(t) || t.length !== 12) return undefined
   const [uid, wbs, pct, custoReal, bac, pv, inicioReal, terminoReal, inicioPrevisto, terminoPrevisto, folga, critica] = t as unknown[]
-  if (!eInteiro(uid) || !textoCurto(wbs, LIMITES_FECHAMENTO.id)) return undefined
+  if (!eInteiro(uid) || !textoCurto(wbs, LIMITES_FECHAMENTO.wbs)) return undefined
   if (!eNumero(pct) || pct < 0 || pct > 100) return undefined
   if (!dinheiro(custoReal) || !dinheiro(bac) || !dinheiro(pv)) return undefined
   if (inicioReal !== null && !dataIsoValida(inicioReal)) return undefined
@@ -488,10 +518,10 @@ export function serieDosFechamentos(ef: readonly CabecalhoFechamento[]): PontoSe
 /** Autor (até 120) e observação (até 500) digitados ao fechar: sem caractere de controle. `undefined` = válido. */
 export function erroDeTextosFechamento(t: { autor?: string; observacao?: string }): string | undefined {
   const autor = t.autor ?? ''
-  const observacao = t.observacao ?? ''
+  const observacao = normalizarQuebras(t.observacao ?? '')
   if (autor.length > LIMITES_FECHAMENTO.autor) return `O autor passa de ${LIMITES_FECHAMENTO.autor} caracteres.`
   if (observacao.length > LIMITES_FECHAMENTO.observacao) return `A observação passa de ${LIMITES_FECHAMENTO.observacao} caracteres.`
-  if (CONTROLE.test(autor) || CONTROLE.test(observacao)) return 'Os textos não podem ter caracteres de controle.'
+  if (CONTROLE.test(autor) || CONTROLE_SEM_QUEBRA.test(observacao)) return 'Os textos não podem ter caracteres de controle.'
   return undefined
 }
 
@@ -507,10 +537,11 @@ export function notasDaLinhaBaseDosFechamentos(
   const notas: string[] = []
   for (const c of efetivosDaObra) {
     const atual = infos.find((i) => i.numero === c.linhaBase)
-    const sobrescrita = c.linhaBaseSalvaEm !== undefined && atual?.salvaEm !== undefined && atual.salvaEm !== c.linhaBaseSalvaEm
+    // Sobrescrita, ou trocada por importação (a LB atual sem data de gravação conta como diferente): o PV de hoje não é o do fechamento
+    const sobrescrita = c.linhaBaseSalvaEm !== undefined && atual?.salvaEm !== c.linhaBaseSalvaEm
     if (c.linhaBase === linhaBaseAtiva && !sobrescrita) continue
     const quando = c.linhaBaseSalvaEm ? ` de ${dataLocalDeIso(c.linhaBaseSalvaEm)}` : ''
-    const depois = sobrescrita && atual?.salvaEm ? `; a LB${c.linhaBase} atual é de ${dataLocalDeIso(atual.salvaEm)}` : ''
+    const depois = sobrescrita ? (atual?.salvaEm ? `; a LB${c.linhaBase} atual é de ${dataLocalDeIso(atual.salvaEm)}` : `; a LB${c.linhaBase} atual não é mais a mesma (foi trocada)`) : ''
     notas.push(`Fechamento de ${dmy(c.dataStatus)}: fechado contra a LB${c.linhaBase}${quando}${depois}.${c.linhaBase !== linhaBaseAtiva ? ` O PV da curva é o da LB${linhaBaseAtiva}.` : ''}`)
   }
   return notas

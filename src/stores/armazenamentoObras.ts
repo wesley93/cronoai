@@ -232,7 +232,8 @@ function transacao<T>(db: IDBDatabase, modo: IDBTransactionMode, fn: (tx: IDBTra
       const tx = db.transaction([STORE_OBRAS, STORE_META, STORE_RECORTES, STORE_FECHAMENTOS, STORE_DETALHES], modo)
       const req = fn(tx)
       tx.oncomplete = () => resolve(req ? req.result : undefined)
-      tx.onerror = () => reject(tx.error ?? new Error('Falha na transação do IndexedDB'))
+      // O erro do pedido (ex.: ConstraintError do `add`) chega em `event.target.error`; `tx.error` ainda é nulo aqui (só o aborto o preenche) e o `onerror` rejeita primeiro
+      tx.onerror = (ev) => reject((ev.target as IDBRequest | null)?.error ?? tx.error ?? new Error('Falha na transação do IndexedDB'))
       tx.onabort = () => reject(tx.error ?? new Error('Transação do IndexedDB abortada'))
     } catch (e) {
       reject(e)

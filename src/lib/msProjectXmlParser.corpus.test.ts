@@ -388,7 +388,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       // Antes do ciclo 00007: "Linhas de base 1 a 10 não importadas em N tarefa(s)" (470 em 7 arquivos). Depois: o aviso deixou de existir
       expect(w.filter((a) => /^Linhas de base 1 a 10 não importadas/.test(a))).toEqual([])
       expect(w.filter((a) => /^Linhas de base ignoradas/.test(a))).toEqual([]) // o corpus não tem Interim, Number fora de 0–10 nem repetido
-      confere(est.lb0SemDatas, `${est.lb0SemDatas} tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas da linha de base 0 delas.`, /sem datas no arquivo/)
+      confere(est.lb0SemDatas, `${est.lb0SemDatas} tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas e a duração da linha de base 0 delas.`, /sem datas no arquivo/)
       confere(est.lb0SemTermino, `${est.lb0SemTermino} tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.`, /linha de base 0 sem término/)
       confere(est.lb0SemInicio, `${est.lb0SemInicio} tarefa(s) com linha de base 0 sem início: o término do arquivo é mantido e o valor planejado (PV) delas fica zero.`, /linha de base 0 sem início/)
       // E3: duração e lag exatos em minutos e calendário por tarefa lidos. Antes: tempo corrido (5), meio dia (4), fração (20),

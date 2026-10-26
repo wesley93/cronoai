@@ -15,6 +15,12 @@ const eObjeto = (v: unknown): v is Record<string, unknown> => typeof v === 'obje
 const eNumero = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 // eslint-disable-next-line no-control-regex -- é justamente o que se quer recusar
 const CONTROLE = /[\u0000-\u001f\u007f-\u009f]/
+// Campos de várias linhas (motivo, observação): a quebra de linha (\n, depois de normalizar \r\n) vale; os demais caracteres de controle continuam recusados
+// eslint-disable-next-line no-control-regex -- idem
+export const CONTROLE_SEM_QUEBRA = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/
+
+/** Normaliza as quebras de linha de um campo de várias linhas (`\r\n` e `\r` viram `\n`): o que o Enter do `textarea` produz. */
+export const normalizarQuebras = (s: string): string => s.replace(/\r\n?/g, '\n')
 
 /** Data ISO `yyyy-mm-dd` que existe no calendário. */
 export function dataIsoValida(v: unknown): v is string {
@@ -186,14 +192,14 @@ export function sanearLinhasBase<T extends { linhasBase?: unknown }>(tasks: T[],
 export function validarTextosLinhaBase(d: { nome: string; motivo: string; autor?: string }): string[] {
   const erros: string[] = []
   const nome = d.nome.trim()
-  const motivo = d.motivo.trim()
+  const motivo = normalizarQuebras(d.motivo).trim()
   const autor = (d.autor ?? '').trim()
   if (!nome) erros.push('Informe o nome da linha de base.')
   else if (nome.length > LIMITES_LINHA_BASE.nome) erros.push(`O nome da linha de base passa de ${LIMITES_LINHA_BASE.nome} caracteres.`)
   if (!motivo) erros.push('Informe o motivo da linha de base.')
   else if (motivo.length > LIMITES_LINHA_BASE.motivo) erros.push(`O motivo da linha de base passa de ${LIMITES_LINHA_BASE.motivo} caracteres.`)
   if (autor.length > LIMITES_LINHA_BASE.autor) erros.push(`O autor passa de ${LIMITES_LINHA_BASE.autor} caracteres.`)
-  if (CONTROLE.test(nome) || CONTROLE.test(motivo) || CONTROLE.test(autor)) erros.push('Os textos não podem ter caracteres de controle.')
+  if (CONTROLE.test(nome) || CONTROLE_SEM_QUEBRA.test(motivo) || CONTROLE.test(autor)) erros.push('Os textos não podem ter caracteres de controle.')
   return erros
 }
 
@@ -206,6 +212,7 @@ export function validarDadosLinhaBaseInfo(v: unknown): LinhaBaseInfo | undefined
   const { numero, nome, motivo, autor, salvaEm, dataStatus, origem } = v
   if (typeof numero !== 'number' || !Number.isInteger(numero) || numero < 0 || numero > NUMERO_MAX_LINHA_BASE) return undefined
   if (typeof nome !== 'string' || typeof motivo !== 'string') return undefined
+  if (motivo.includes(String.fromCharCode(13))) return undefined // gravado e normalizado: CR solto é dado adulterado
   if (validarTextosLinhaBase({ nome, motivo, autor: typeof autor === 'string' ? autor : undefined }).length) return undefined
   if (autor !== undefined && typeof autor !== 'string') return undefined
   if (salvaEm !== undefined && !dataHoraIsoValida(salvaEm)) return undefined

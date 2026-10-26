@@ -62,6 +62,14 @@ const ROTULO_ORIGEM: Record<OrigemPonto, string> = {
   reconstruido: 'Reconstruído linearmente',
   atual: 'Estado de hoje',
 }
+/** Com fechamentos, tendência e último texto falam de fechamentos (não de meses). */
+const porFechamento = computed(() => project.fechamentos.length > 0)
+/** SV, CV, ETC e TCPI do cartão são da obra de agora (não do ponto selecionado): quando o ponto não é o atual, o rótulo diz isso. Nenhum número muda. */
+const sufixoEstadoVivo = computed(() => {
+  const p = pontoSelecionado.value?.acc
+  const ehOAtual = !!p && p.label.endsWith('●') && p.origem !== 'fechamento'
+  return ehOAtual || !p ? '' : ' · obra na data de status'
+})
 const rotuloDaOrigem = (o: OrigemPonto | null) => (o ? ROTULO_ORIGEM[o] : '—')
 watch([pkg, mode], () => (selectedIdx.value = undefined))
 /**
@@ -199,10 +207,10 @@ async function copyReport() {
         </div>
 
         <div class="mt-3 grid grid-cols-2 gap-3 border-t border-zinc-200 pt-3 text-[12px] dark:border-zinc-800 sm:grid-cols-4">
-          <div><span class="text-zinc-500">SV (EV − PV)</span><div class="font-semibold tabular-nums" :class="curveEvm.sv < 0 ? 'text-coral-600 dark:text-coral-400' : 'text-emerald-600 dark:text-emerald-400'">{{ fmtBRL(curveEvm.sv) }}</div></div>
-          <div><span class="text-zinc-500">CV (EV − AC)</span><div class="font-semibold tabular-nums" :class="curveEvm.cv < 0 ? 'text-coral-600 dark:text-coral-400' : 'text-emerald-600 dark:text-emerald-400'">{{ fmtBRL(curveEvm.cv) }}</div></div>
-          <div><span class="text-zinc-500">ETC (EAC − AC)</span><div class="font-semibold tabular-nums">{{ fmtBRL(curveEvm.etc) }}</div></div>
-          <div><span class="text-zinc-500">TCPI</span><div class="font-semibold tabular-nums" :class="curveEvm.tcpi > 1.05 ? 'text-coral-600 dark:text-coral-400' : ''">{{ fmtIndex(curveEvm.tcpi) }}</div></div>
+          <div><span class="text-zinc-500">SV (EV − PV){{ sufixoEstadoVivo }}</span><div class="font-semibold tabular-nums" :class="curveEvm.sv < 0 ? 'text-coral-600 dark:text-coral-400' : 'text-emerald-600 dark:text-emerald-400'">{{ fmtBRL(curveEvm.sv) }}</div></div>
+          <div><span class="text-zinc-500">CV (EV − AC){{ sufixoEstadoVivo }}</span><div class="font-semibold tabular-nums" :class="curveEvm.cv < 0 ? 'text-coral-600 dark:text-coral-400' : 'text-emerald-600 dark:text-emerald-400'">{{ fmtBRL(curveEvm.cv) }}</div></div>
+          <div><span class="text-zinc-500">ETC (EAC − AC){{ sufixoEstadoVivo }}</span><div class="font-semibold tabular-nums">{{ fmtBRL(curveEvm.etc) }}</div></div>
+          <div><span class="text-zinc-500">TCPI{{ sufixoEstadoVivo }}</span><div class="font-semibold tabular-nums" :class="curveEvm.tcpi > 1.05 ? 'text-coral-600 dark:text-coral-400' : ''">{{ fmtIndex(curveEvm.tcpi) }}</div></div>
         </div>
       </SectionCard>
 
@@ -237,12 +245,12 @@ async function copyReport() {
     </div>
 
     <div class="grid items-start gap-5 xl:grid-cols-2">
-      <SectionCard title="Tendência de SPI e CPI" :subtitle="`Índices acumulados mês a mês · ${pkgName ? `pacote ${pkg}` : 'obra inteira'} · abaixo de 1,00 = atraso / estouro`" :icon="Activity">
+      <SectionCard title="Tendência de SPI e CPI" :subtitle="`${porFechamento ? 'Índices gravados em cada fechamento' : 'Índices acumulados mês a mês'} · ${pkgName ? `pacote ${pkg}` : 'obra inteira'} · abaixo de 1,00 = atraso / estouro`" :icon="Activity">
         <IndexTrendChart v-if="indexPoints.length" :points="indexPoints" />
         <p v-else class="py-10 text-center text-xs text-zinc-500">Sem execução registrada neste recorte.</p>
         <p v-if="project.fechamentos.length" class="mt-2 text-[11px] leading-relaxed text-zinc-500">Índices dos fechamentos calculados contra a linha de base vigente em cada fechamento.</p>
         <div v-if="indexPoints.length >= 2" class="mt-2 text-[11.5px] text-zinc-500">
-          No último mês o SPI {{ trendWord(indexPoints.at(-2)!.spi, indexPoints.at(-1)!.spi) }}
+          {{ porFechamento ? 'Entre os dois últimos fechamentos' : 'No último mês' }} o SPI {{ trendWord(indexPoints.at(-2)!.spi, indexPoints.at(-1)!.spi) }}
           ({{ fmtIndex(indexPoints.at(-2)!.spi) }} → {{ fmtIndex(indexPoints.at(-1)!.spi) }}) e o CPI {{ trendWord(indexPoints.at(-2)!.cpi, indexPoints.at(-1)!.cpi) }}
           ({{ fmtIndex(indexPoints.at(-2)!.cpi) }} → {{ fmtIndex(indexPoints.at(-1)!.cpi) }}).
         </div>
@@ -262,19 +270,19 @@ async function copyReport() {
         </table>
         <div class="mt-4 grid grid-cols-3 gap-3 text-[12px]">
           <div class="rounded-lg bg-zinc-50 p-2.5 dark:bg-zinc-800/60">
-            <div class="eyebrow">Linha de base</div>
+            <div class="eyebrow">Linha de base (LB{{ project.linhaBaseAtiva }} do valor agregado)</div>
             <div class="mt-0.5 font-semibold tabular-nums">{{ fmtDate(forecast.baselineFinish) }}</div>
             <div class="text-[10.5px] text-zinc-500">{{ forecast.bySpi.plannedDays }} d.u. planejados</div>
           </div>
           <div class="rounded-lg bg-zinc-50 p-2.5 dark:bg-zinc-800/60">
             <div class="eyebrow">Pelo SPI</div>
             <div class="mt-0.5 font-semibold tabular-nums" :class="forecast.bySpi.date > forecast.baselineFinish ? 'text-coral-600 dark:text-coral-400' : ''">{{ fmtDate(forecast.bySpi.date) }}</div>
-            <div class="text-[10.5px] text-zinc-500">{{ forecast.bySpi.plannedDays }} ÷ {{ fmtIndex(e.spi) }} = {{ forecast.bySpi.estimatedDays }} d.u.</div>
+            <div class="text-[10.5px] text-zinc-500">{{ forecast.bySpi.plannedDays }} ÷ {{ fmtIndex(e.spi) }} = {{ forecast.bySpi.estimatedDays }} d.u. (LB{{ project.linhaBaseAtiva }} do valor agregado)</div>
           </div>
           <div class="rounded-lg bg-zinc-50 p-2.5 dark:bg-zinc-800/60">
             <div class="eyebrow">Pelo CPM</div>
             <div class="mt-0.5 font-semibold tabular-nums" :class="forecast.cpmFinish > forecast.baselineFinish ? 'text-coral-600 dark:text-coral-400' : ''">{{ fmtDate(forecast.cpmFinish) }}</div>
-            <div class="text-[10.5px] text-zinc-500">rede reprogramada</div>
+            <div class="text-[10.5px] text-zinc-500">rede reprogramada; o atraso é medido contra a LB0</div>
           </div>
         </div>
         <p class="mt-3 text-[10.5px] leading-relaxed text-zinc-500">

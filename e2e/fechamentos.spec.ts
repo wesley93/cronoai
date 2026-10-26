@@ -225,6 +225,13 @@ test('3 fechamentos com avanços diferentes: a tabela da Curva S mostra o EV e o
   await expect(page.getByTestId('legenda-curva')).toContainText('Pontilhado curto: interpolado entre fechamentos')
   await expect(page.getByTestId('legenda-curva')).toContainText('Ponto de fechamento: EV e AC gravados')
 
+  // O cartão do ponto selecionado rotula SV, CV, ETC e TCPI como da obra na data de status (não do ponto de fechamento) e os cartões de término dizem a LB que usam
+  await expect(page.getByText('SV (EV − PV) · obra na data de status')).toBeVisible()
+  await expect(page.getByText('TCPI · obra na data de status')).toBeVisible()
+  await expect(page.getByText('Linha de base (LB0 do valor agregado)')).toBeVisible()
+  await expect(page.getByText('rede reprogramada; o atraso é medido contra a LB0')).toBeVisible()
+  await expect(page.getByText('Entre os dois últimos fechamentos o SPI')).toBeVisible()
+  await expect(page.getByText('Índices gravados em cada fechamento')).toBeVisible()
   // Tendência e entrega: a tabela traz os 3 fechamentos e a nota dos índices
   await expect(page.getByTestId('tabela-entrega').getByRole('row')).toHaveCount(4)
   await expect(page.getByTestId('nota-indices')).toContainText('Índices dos fechamentos calculados contra a linha de base vigente em cada fechamento.')

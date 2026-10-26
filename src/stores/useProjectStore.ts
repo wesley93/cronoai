@@ -65,7 +65,7 @@ import {
   semDiasExtras,
 } from '@/lib/calendarioTrabalho'
 import { computeSchedule, optsDaObra, withBaseline } from '@/lib/cpm'
-import { NUMERO_MAX_LINHA_BASE, avisoTarefasSemLinhaBase, dataLocalDeIso, linhaBaseAtivaEfetiva, linhaBaseDoCronograma, projetarLinhaBase, rotuloLinhaBase, validarTextosLinhaBase } from '@/lib/linhasBase'
+import { NUMERO_MAX_LINHA_BASE, normalizarQuebras, avisoTarefasSemLinhaBase, dataLocalDeIso, linhaBaseAtivaEfetiva, linhaBaseDoCronograma, projetarLinhaBase, rotuloLinhaBase, validarTextosLinhaBase } from '@/lib/linhasBase'
 import { computeEvm, computePackageEvm, computeSCurve, eacVariants, forecastFinishBySpi, plannedFraction, type HistoricoCurva } from '@/lib/evm'
 import { compararFechamentos, type ResultadoComparacao } from '@/lib/comparacaoFechamentos'
 import { montarExportacaoHistorico } from '@/lib/exportacaoHistorico'
@@ -129,8 +129,10 @@ import {
   avisosAoFechar,
   capturarFechamento,
   dmy,
+  avisoDeRepetidas,
   efetivos,
   erroAoFechar,
+  erroDeGravacaoDoRegistro,
   erroDeDataDeInicio,
   erroDeDataDeStatus,
   erroDeTextosFechamento,
@@ -343,6 +345,8 @@ export const useProjectStore = defineStore('project', () => {
   const fechamentosIlegiveis = ref(0)
   /** Só depois da leitura bem-sucedida: antes disso (ou se a leitura falhou) nenhum fechamento é gravado. */
   const fechamentosCarregados = ref(false)
+  /** A leitura dos fechamentos falhou (e não só "ainda lendo"): a tela diz isso, e nada é gravado até recarregar. */
+  const fechamentosErroDeLeitura = ref(false)
   const avisoFechamentos = ref('')
   const persistenciaFechamento = ref<ResultadoPersistencia | undefined>(undefined)
   const fechamentosEfetivos = computed(() => efetivos(fechamentos.value))
@@ -455,7 +459,11 @@ export const useProjectStore = defineStore('project', () => {
       try {
         // Fechamento: preparado AQUI, na vez da fila, com as regras conferidas de novo contra o histórico em memória de agora
         const preparo = opcoes.fechamento?.()
-        if (preparo && 'erro' in preparo) return false
+        if (preparo && 'erro' in preparo) {
+          // salvarAgora zerou o atraso de uma gravação pendente (edição ainda não salva): a recusa não pode deixá-la sem gravar
+          if (estadoGravacao.value === 'pendente' && !timerPendente) agendarGravacao()
+          return false
+        }
         // A mudança entra no estado aqui, na vez desta gravação na fila: nenhuma outra gravação grava a referência sem o recorte
         desfazer = preparo ? preparo.mutar() : opcoes.mutar?.()
         if (desfazer) {
@@ -1348,10 +1356,23 @@ export const useProjectStore = defineStore('project', () => {
     const s = schedule.value.byUid.get(task.uid)
     if (s) {
       patchTask(task.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin })
+      garantirMetadadoLinhaBase0()
       incluirNaLinhaBaseAtiva([task.uid])
     }
     log('sinapi', `Pacote incluído na EAP: [UID ${task.uid}] ${task.wbs}`, `${input.name} — ${input.durationDays} dias úteis, BAC ${fmtBRLCents(task.bac)}.`)
     return { ok: true, task }
+  }
+
+  /** Alguma folha tem dado de LB0 (início ou término da linha de base). */
+  const temDadosLinhaBase0 = computed(() => state.tasks.some((t) => !t.isSummary && (t.baselineStart !== undefined || t.baselineFinish !== undefined)))
+
+  /**
+   * Obra com dado de LB0 e sem o metadado dela (obra em branco que ganhou tarefas por SINAPI ou planilha): cria o metadado pela mesma regra da migração
+   * (`temLinhaBase0`), para a tela e o salvar enxergarem a mesma LB0 (sem isso o diálogo pedia confirmação sem mostrar a caixa).
+   */
+  function garantirMetadadoLinhaBase0() {
+    if (state.linhasBase.some((i) => i.numero === 0) || !temDadosLinhaBase0.value) return
+    state.linhasBase = [{ numero: 0, nome: 'Linha de base 0', motivo: 'Linha de base calculada na inclusão de escopo (SINAPI ou planilha)', salvaEm: agora(), dataStatus: state.meta.statusDate, origem: 'cronoai' as const }, ...state.linhasBase]
   }
 
   /**
@@ -1645,6 +1666,7 @@ export const useProjectStore = defineStore('project', () => {
       const s = schedule.value.byUid.get(t.uid)
       if (s) patchTask(t.uid, { baselineStart: s.start, baselineFinish: s.finish, baselineDuracaoMin: s.duracaoMin })
     }
+    garantirMetadadoLinhaBase0()
     incluirNaLinhaBaseAtiva(created.map((t) => t.uid))
     const bac = created.reduce((a, t) => a + t.bac, 0)
     log('sinapi', `Cronograma gerado da planilha SINAPI (${created.length} pacotes)`, `Vínculos ${opts.mode === 'SS' ? `SS com defasagem de ${opts.overlapPct}%` : 'FS em série'} · BAC +${fmtBRLCents(bac)}.`)
@@ -1699,7 +1721,7 @@ export const useProjectStore = defineStore('project', () => {
       const quem = existente ? descreverLinhaBase(existente) : 'Linha de base 0'
       return { ok: false, precisaConfirmar: true, erro: `A linha de base ${n} já existe (${quem}). Confirme para substituí-la.` }
     }
-    const info: LinhaBaseInfo = { numero: n, nome: d.nome.trim(), motivo: d.motivo.trim(), salvaEm: agora(), dataStatus: state.meta.statusDate, origem: 'cronoai' }
+    const info: LinhaBaseInfo = { numero: n, nome: d.nome.trim(), motivo: normalizarQuebras(d.motivo).trim(), salvaEm: agora(), dataStatus: state.meta.statusDate, origem: 'cronoai' }
     const autor = (d.autor ?? '').trim()
     if (autor) info.autor = autor
     state.tasks = linhaBaseDoCronograma(state.tasks, schedule.value, n)
@@ -1798,7 +1820,7 @@ export const useProjectStore = defineStore('project', () => {
     }
     const primeiroFechamento = efetivos(fechamentos.value)[0]
     if (primeiroFechamento && meta.startDate > primeiroFechamento.dataStatus) {
-      avisosDeFechamento.push(`A data de início do arquivo (${dmy(meta.startDate)}) é posterior ao primeiro fechamento (${dmy(primeiroFechamento.dataStatus)}): o CronoAI manteve a data de início atual (${dmy(state.meta.startDate)}).`)
+      avisosDeFechamento.push(`A data de início do arquivo (${dmy(meta.startDate)}) é posterior ao primeiro fechamento (${dmy(primeiroFechamento.dataStatus)}): o CronoAI manteve a data de início atual (${dmy(state.meta.startDate)}). Confira se o arquivo é da mesma obra; a exportação levará a data de início mantida.`)
       meta.startDate = state.meta.startDate
     }
     let tasks: Task[]
@@ -1812,7 +1834,8 @@ export const useProjectStore = defineStore('project', () => {
     if (erroHorizonte) throw new Error(`Arquivo não importado: ${erroHorizonte}`)
     const uids = new Set(tasks.map((t) => t.uid))
     // Linhas de base do arquivo (0 a 10). A LB0 que o arquivo não trouxe e o CronoAI calculou (`baselineFor`, só nas que faltam) ganha os metadados dela
-    const linhasBase = [...result.linhasBase]
+    const gravadaEm = agora()
+    const linhasBase = result.linhasBase.map((i) => ({ ...i, salvaEm: gravadaEm, dataStatus: meta.statusDate }))
     if (!linhasBase.some((i) => i.numero === 0) && tasks.some((t) => !t.isSummary && t.baselineStart !== undefined)) {
       linhasBase.unshift({ numero: 0, nome: 'Linha de base 0', motivo: 'Calculada na importação: o arquivo não trazia a linha de base 0', salvaEm: agora(), dataStatus: meta.statusDate, origem: 'cronoai' })
     }
@@ -2495,6 +2518,7 @@ export const useProjectStore = defineStore('project', () => {
     detalheAncora.value = undefined
     fechamentosIlegiveis.value = 0
     fechamentosCarregados.value = false
+    fechamentosErroDeLeitura.value = false
     avisoFechamentos.value = ''
   }
 
@@ -2510,6 +2534,7 @@ export const useProjectStore = defineStore('project', () => {
     detalheAncora.value = undefined
     fechamentosIlegiveis.value = 0
     fechamentosCarregados.value = false
+    fechamentosErroDeLeitura.value = false
     avisoFechamentos.value = ''
     if (!armazenamento || !obra) return
     const atual = () => token === tokenFechamentos && obra === obraAtivaId.value
@@ -2536,10 +2561,13 @@ export const useProjectStore = defineStore('project', () => {
       fechamentos.value = cabecalhos.map((c) => markRaw(c))
       detalheAncora.value = ancora ? markRaw(ancora) : undefined
       fechamentosIlegiveis.value = ilegiveis
-      avisoFechamentos.value = ilegiveis > 0 ? `${ilegiveis} fechamento(s) ilegível(is) ignorado(s); os registros ficam intactos.` : ''
+      avisoFechamentos.value = [ilegiveis > 0 ? `${ilegiveis} fechamento(s) ilegível(is) ignorado(s); os registros ficam intactos.` : '', v.repetidas > 0 ? avisoDeRepetidas(v.repetidas) : ''].filter(Boolean).join(' ')
       fechamentosCarregados.value = true
     } catch {
-      if (atual()) avisoFechamentos.value = 'Não foi possível ler os fechamentos deste navegador: o histórico não é mostrado e novo fechamento fica bloqueado. Nada foi alterado.'
+      if (atual()) {
+        fechamentosErroDeLeitura.value = true
+        avisoFechamentos.value = 'Não foi possível ler os fechamentos deste navegador: o histórico não é mostrado e novo fechamento fica bloqueado. Nada foi alterado.'
+      }
     }
   }
 
@@ -2595,7 +2623,7 @@ export const useProjectStore = defineStore('project', () => {
     if (bloqueio) return { ok: false, erro: bloqueio }
     if (calculo.value.erro) return { ok: false, erro: calculo.value.erro }
     const autor = (d.autor ?? '').trim()
-    const observacao = (d.observacao ?? '').trim()
+    const observacao = normalizarQuebras(d.observacao ?? '').trim()
     const erroTexto = erroDeTextosFechamento({ autor, observacao })
     if (erroTexto) return { ok: false, erro: erroTexto }
     const obra = obraAtivaId.value
@@ -2615,10 +2643,17 @@ export const useProjectStore = defineStore('project', () => {
         }
         id = uid('fech')
         const { cabecalho, detalhe } = capturarFechamento(entradaDeCaptura(id, proximaSequencia(fechamentos.value), autor || undefined, observacao || undefined))
+        const registro = serializarDetalhe(detalhe)
+        // Rede de segurança: o registro precisa passar pela mesma validação que o abrirá depois; senão, recusa e nada é gravado
+        const erroRegistro = erroDeGravacaoDoRegistro(cabecalho, registro)
+        if (erroRegistro) {
+          recusa = erroRegistro
+          return { erro: erroRegistro }
+        }
         avisos = avisosAoFechar({ relatosPendentes: relatosPendentes(), dataStatus: cabecalho.dataStatus, hoje: hojeLocalIso() })
         const t = cabecalho.totais
         return {
-          gravar: { cabecalho, detalhe: serializarDetalhe(detalhe) },
+          gravar: { cabecalho, detalhe: registro },
           mutar: () =>
             log(
               'sistema',
@@ -2721,10 +2756,16 @@ export const useProjectStore = defineStore('project', () => {
           recusa = r.erro
           return { erro: r.erro }
         }
+        const registro = serializarDetalhe(r.detalhe)
+        const erroRegistro = erroDeGravacaoDoRegistro(r.cabecalho, registro)
+        if (erroRegistro) {
+          recusa = erroRegistro
+          return { erro: erroRegistro }
+        }
         avisos = r.avisos
         const t = r.cabecalho.totais
         return {
-          gravar: { cabecalho: r.cabecalho, detalhe: serializarDetalhe(r.detalhe) },
+          gravar: { cabecalho: r.cabecalho, detalhe: registro },
           mutar: () =>
             log(
               'sistema',
@@ -2813,7 +2854,7 @@ export const useProjectStore = defineStore('project', () => {
     const e = evm.value
     const t = f.totais
     const mudou = [e.ev - t.ev, e.ac - t.ac, e.bac - t.bac, e.pv - t.pv].some((x) => Math.abs(x) >= 0.005)
-    return mudou ? `A obra mudou depois do fechamento de ${dmy(f.dataStatus)}: avance a data de status ou retifique o fechamento.` : ''
+    return mudou ? `A obra difere do fechamento efetivo de ${dmy(f.dataStatus)}: corrija a EAP, avance a data de status ou retifique o fechamento.` : ''
   })
 
   return {
@@ -2822,6 +2863,8 @@ export const useProjectStore = defineStore('project', () => {
     fechamentosEfetivos,
     fechamentosIlegiveis,
     fechamentosCarregados,
+    fechamentosErroDeLeitura,
+    temDadosLinhaBase0,
     avisoFechamentos,
     detalheAncora,
     persistenciaFechamento,

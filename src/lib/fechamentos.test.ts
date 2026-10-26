@@ -8,15 +8,20 @@ import { calendarioPadrao, compilarCalendarios } from './calendarioTrabalho'
 import { calcularObra } from './horizonte'
 import {
   LIMITES_FECHAMENTO,
+  avisoDeRepetidas,
   avisosAoFechar,
   capturarFechamento,
   efetivos,
   erroAoFechar,
+  erroDeGravacaoDoRegistro,
+  erroDeTextosFechamento,
   erroDeDataDeInicio,
   erroDeDataDeStatus,
   hojeLocalIso,
   indicesDoFechamento,
   lerDetalheFechamento,
+  limparControles,
+  notasDaLinhaBaseDosFechamentos,
   proximaSequencia,
   retificar,
   serializarDetalhe,
@@ -79,7 +84,7 @@ describe('capturarFechamento (FE-1, D-10, D-11)', () => {
     const obraNova = capturarFechamento(entrada({ tarefas: seed.tasks.map((t) => ({ ...t, percentComplete: 0, actualCost: 0, baselineStart: '2030-01-07', baselineFinish: '2030-01-11' })) }))
     expect([obraNova.cabecalho.totais.pv, obraNova.cabecalho.totais.ev, obraNova.cabecalho.totais.ac]).toEqual([0, 0, 0])
     expect([obraNova.cabecalho.totais.spi, obraNova.cabecalho.totais.cpi, obraNova.cabecalho.totais.eac]).toEqual([null, null, null])
-    expect(validarCabecalhoFechamento(JSON.parse(JSON.stringify(obraNova.cabecalho)))).toBeDefined() // null é valor legível
+    expect(validarCabecalhoFechamento(JSON.parse(JSON.stringify(obraNova.cabecalho)))).toEqual(obraNova.cabecalho) // null é valor legível e volta como null
   })
 
   it('teste 34: tuplas serializam e voltam iguais; 3.000 tarefas cabem em até 400 mil caracteres', () => {
@@ -320,12 +325,13 @@ describe('leitura validada: cabeçalho (S-2, D-24)', () => {
     expect(validarCabecalhoFechamento(ruim, 'o1')).toBeUndefined()
   })
 
-  it('validarCabecalhosFechamento: id e sequência repetidos e inválidos saem, com a contagem; o resto vem ordenado', () => {
+  it('validarCabecalhosFechamento: id repetido e inválidos saem, com a contagem; sequência repetida NÃO é ilegível (SEG-2); o resto vem ordenado', () => {
     const a = valido()
     const b = { ...valido(), id: 'f2', sequencia: 2 }
     const r = validarCabecalhosFechamento([b, a, { ...a }, { ...a, id: 'f9' }, { ...a, versaoFormato: 2, id: 'f8', sequencia: 8 }, 'lixo'], 'o1')
-    expect(r.cabecalhos.map((c) => c.id)).toEqual(['f1', 'f2'])
-    expect(r.ilegiveis).toBe(4)
+    expect(r.cabecalhos.map((c) => c.id)).toEqual(['f1', 'f9', 'f2']) // f1 e f9 têm a sequência 1: desempate por fechadoEm (iguais) e depois por id
+    expect(r.ilegiveis).toBe(3) // o id repetido, o formato 2 e o texto
+    expect(r.repetidas).toBe(2)
   })
 })
 
@@ -382,6 +388,85 @@ describe('leitura validada: detalhe (S-2, D-24)', () => {
   })
 
   it('a soma dentro de R$ 0,01 passa', () => {
-    expect(lerDetalheFechamento(reg((d) => tarefa0(d, 3, Number(d.tarefas[0][3]) + 0.004)), cabecalho)).toBeDefined()
+    const lido = lerDetalheFechamento(reg((d) => tarefa0(d, 3, Number(d.tarefas[0][3]) + 0.004)), cabecalho)
+    expect(lido?.tarefas).toHaveLength(20)
+    expect(lido?.tarefas[0][3]).toBe(Number(detalhe.tarefas[0][3]) + 0.004) // o valor lido é o gravado, com a diferença de meio centavo
+  })
+})
+
+describe('rodada 02: SEG-1 (registro que não passa na leitura), SEG-2 (sequência repetida) e SEG-5 (quebra de linha)', () => {
+  const comWbs = (wbs: string, nomePacote = 'Infraestrutura') =>
+    capturarFechamento(
+      entrada({
+        tarefas: (JSON.parse(JSON.stringify(seed.tasks)) as Task[]).map((t) => (t.uid === 301 ? { ...t, wbs } : t.uid === 3 ? { ...t, name: nomePacote } : t)),
+      }),
+    )
+
+  it('SEG-1: o TAB no nome do pacote vira espaço e o WBS de 70 caracteres passa; o registro volta legível, sem nenhum caractere de controle', () => {
+    const longo = '02.01.' + '9'.repeat(64) // 70 caracteres
+    const { cabecalho, detalhe } = capturarFechamento(
+      entrada({ tarefas: (JSON.parse(JSON.stringify(seed.tasks)) as Task[]).map((t) => (t.uid === 301 ? { ...t, wbs: longo } : t.isSummary && t.outlineLevel === 1 ? { ...t, name: `Pacote\tcom\u0007tab` } : t)) }),
+    )
+    expect(longo).toHaveLength(70)
+    expect(cabecalho.porPacote.every((p) => p.nome === 'Pacote com tab')).toBe(true)
+    expect(detalhe.tarefas.some((t) => t[POS.wbs] === longo)).toBe(true)
+    expect(limparControles('a\tb\nc\u007fd')).toBe('a b c d')
+    expect(validarCabecalhoFechamento(JSON.parse(JSON.stringify(cabecalho)), 'o1')).toEqual(cabecalho)
+    expect(lerDetalheFechamento(serializarDetalhe(detalhe), cabecalho)?.tarefas).toHaveLength(20)
+    expect(erroDeGravacaoDoRegistro(cabecalho, serializarDetalhe(detalhe))).toBeUndefined()
+  })
+
+  it('SEG-1 (rede de segurança): um código de EAP acima do limite (200) não passa na leitura: a verificação antes de gravar recusa, em português', () => {
+    const { cabecalho, detalhe } = comWbs('02.01.' + '9'.repeat(300))
+    expect(lerDetalheFechamento(serializarDetalhe(detalhe), cabecalho)).toBeUndefined()
+    expect(erroDeGravacaoDoRegistro(cabecalho, serializarDetalhe(detalhe))).toBe(
+      'Este fechamento não pode ser gravado: algum dado da obra (por exemplo, um código de EAP com mais de 200 caracteres) não passa na validação de leitura e o registro ficaria ilegível. Nada foi gravado.',
+    )
+    // um campo inválido qualquer do cabeçalho também é pego (aqui, um R$ fora da faixa)
+    const ruim = { ...cabecalho, totais: { ...cabecalho.totais, ev: -1 } }
+    expect(erroDeGravacaoDoRegistro(ruim, serializarDetalhe(fe1().detalhe))).toContain('Nada foi gravado.')
+  })
+
+  it('SEG-2: sequência repetida (duas abas) desempata por fechadoEm e depois por id; nenhum dos dois é ilegível', () => {
+    const base = fe1().cabecalho
+    const a: CabecalhoFechamento = { ...base, id: 'aaa', sequencia: 2, dataStatus: '2026-10-30', fechadoEm: '2026-10-31T10:00:00.000Z' }
+    const b: CabecalhoFechamento = { ...base, id: 'bbb', sequencia: 2, dataStatus: '2026-10-30', fechadoEm: '2026-10-31T10:00:05.000Z' }
+    const c: CabecalhoFechamento = { ...base, id: 'ccc', sequencia: 2, dataStatus: '2026-10-30', fechadoEm: '2026-10-31T10:00:05.000Z' }
+    expect(efetivos([a, b]).map((x) => x.id)).toEqual(['bbb']) // o gravado por último
+    expect(efetivos([b, a]).map((x) => x.id)).toEqual(['bbb']) // a ordem de leitura não muda o resultado
+    expect(efetivos([b, c]).map((x) => x.id)).toEqual(['ccc']) // mesmo fechadoEm: o id decide, sempre do mesmo jeito
+    expect(efetivos([c, b]).map((x) => x.id)).toEqual(['ccc'])
+    const r = validarCabecalhosFechamento([JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b))], 'o1')
+    expect([r.ilegiveis, r.repetidas, r.cabecalhos.map((x) => x.id)]).toEqual([0, 2, ['aaa', 'bbb']])
+    expect(avisoDeRepetidas(2)).toBe('Há fechamentos gravados em paralelo (2 registro(s) com a mesma sequência, por exemplo de duas abas): o efetivo de cada data é o gravado por último. Confira a lista.')
+    expect(proximaSequencia([a, b])).toBe(3) // a obra segue fechável: a próxima sequência é nova
+  })
+
+  it('SEG-5: observação e motivo aceitam a quebra de linha (\\r\\n vira \\n); os outros caracteres de controle continuam recusados, na escrita e na leitura', () => {
+    expect(erroDeTextosFechamento({ observacao: 'linha 1\r\nlinha 2' })).toBeUndefined()
+    expect(erroDeTextosFechamento({ observacao: 'linha\u0007' })).toBe('Os textos não podem ter caracteres de controle.')
+    expect(erroDeTextosFechamento({ observacao: 'a\tb' })).toBe('Os textos não podem ter caracteres de controle.')
+    expect(erroDeTextosFechamento({ autor: 'a\nb' })).toBe('Os textos não podem ter caracteres de controle.') // o autor é de uma linha só
+    const { cabecalho, detalhe } = fe1()
+    const r = retificar({ base: { cabecalho, detalhe }, alteracoes: [{ uid: 104, pct: 45 }], motivo: 'Medição revisada\r\nem campo\rpelo mestre', id: 'f2', sequencia: 2, fechadoEm: '2026-10-26T12:00:00.000Z', cabecalhos: [cabecalho] })
+    if (!r.ok) throw new Error(r.erro)
+    expect(r.cabecalho.motivo).toBe('Medição revisada\nem campo\npelo mestre')
+    expect(retificar({ base: { cabecalho, detalhe }, alteracoes: [{ uid: 104, pct: 45 }], motivo: 'm\tx', id: 'f3', sequencia: 3, fechadoEm: '2026-10-26T12:00:00.000Z', cabecalhos: [cabecalho] })).toEqual({ ok: false, erro: 'Os textos não podem ter caracteres de controle.' })
+    // Leitura: \n vale em motivo e observação; \r e TAB não
+    const gravado = JSON.parse(JSON.stringify(r.cabecalho)) as Record<string, unknown>
+    expect(validarCabecalhoFechamento(gravado)?.motivo).toBe('Medição revisada\nem campo\npelo mestre')
+    expect(validarCabecalhoFechamento({ ...gravado, observacao: 'a\nb' })?.observacao).toBe('a\nb')
+    expect(validarCabecalhoFechamento({ ...gravado, motivo: 'a\rb' })).toBeUndefined()
+    expect(validarCabecalhoFechamento({ ...gravado, motivo: 'a\tb' })).toBeUndefined()
+    expect(validarCabecalhoFechamento({ ...gravado, autor: 'a\nb' })).toBeUndefined()
+  })
+
+  it('a nota "fechado contra a LBk": a LB atual sem data de gravação (trocada por importação) conta como diferente', () => {
+    const c: CabecalhoFechamento = { ...fe1().cabecalho, linhaBaseSalvaEm: '2026-04-27T12:00:00.000Z' }
+    expect(notasDaLinhaBaseDosFechamentos([c], 0, [{ numero: 0, salvaEm: '2026-04-27T12:00:00.000Z' }])).toEqual([]) // a mesma LB: sem nota
+    expect(notasDaLinhaBaseDosFechamentos([c], 0, [{ numero: 0 }])).toEqual(['Fechamento de 23/10/2026: fechado contra a LB0 de 27/04/2026; a LB0 atual não é mais a mesma (foi trocada).'])
+    expect(notasDaLinhaBaseDosFechamentos([c], 0, [])).toEqual(['Fechamento de 23/10/2026: fechado contra a LB0 de 27/04/2026; a LB0 atual não é mais a mesma (foi trocada).'])
+    // fechamento de uma LB migrada (sem data de gravação): não há como comparar, sem nota
+    expect(notasDaLinhaBaseDosFechamentos([{ ...c, linhaBaseSalvaEm: undefined }], 0, [{ numero: 0 }])).toEqual([])
   })
 })

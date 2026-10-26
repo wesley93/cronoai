@@ -1070,7 +1070,7 @@ describe('linhas de base 1 a 10 no MSPDI (ciclo 00007, E2)', () => {
       [5, 'Linha de base 5 (importada do MS Project)', 'Importada do arquivo', 'arquivo'],
     ])
     expect(r.warnings).toContain('Linhas de base ignoradas: 1 com plano provisório (Interim); 1 com número fora de 0 a 10; 1 repetida(s) na mesma tarefa (vale a primeira).')
-    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas da linha de base 0 delas.')
+    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas e a duração da linha de base 0 delas.')
     expect(r.warnings.find((w) => w.startsWith('Não importado do MS Project'))).toContain('1 valor(es) de trabalho (Work) das linhas de base')
     expect(sem(r)).not.toMatch(/não importadas em/)
   })
@@ -1091,7 +1091,7 @@ describe('linhas de base 1 a 10 no MSPDI (ciclo 00007, E2)', () => {
   it('MS-6: LB0 só com custo (sem datas) avisa; LB0 só com uma data segue com o aviso de PV zero e sem o novo; resumo não conta', () => {
     const soCusto = '<Baseline><Number>0</Number><Cost>10.00</Cost></Baseline>'
     const r = parseMspdiXml(projeto({ tasks: tarefa(1, { extra: soCusto }) + tarefa(2, { extra: '<Baseline><Number>0</Number><Start>2026-03-02T08:00:00</Start></Baseline>' }) }))
-    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas da linha de base 0 delas.')
+    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas e a duração da linha de base 0 delas.')
     expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.')
     const resumo = parseMspdiXml(projeto({ tasks: tarefa(1, { extra: '<Summary>1</Summary>' + soCusto }) + tarefa(2) }))
     expect(sem(resumo)).not.toMatch(/sem datas no arquivo/)

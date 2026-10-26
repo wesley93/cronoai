@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Salvar a linha de base 0 a 10 (ciclo 00007, D-2): número com as existentes listadas, nome, motivo, autor declarado e confirmação de sobrescrita.
 import { computed, ref } from 'vue'
+import type { LinhaBaseInfo } from '@/types/domain'
 import ModalBase from '@/components/common/ModalBase.vue'
 import { LIMITES_LINHA_BASE, NUMERO_MAX_LINHA_BASE, dataLocalDeIso, validarTextosLinhaBase } from '@/lib/linhasBase'
 import { fmtDate } from '@/lib/format'
@@ -12,7 +13,12 @@ const project = useProjectStore()
 const ui = useUiStore()
 
 const numeros = Array.from({ length: NUMERO_MAX_LINHA_BASE + 1 }, (_, n) => n)
-const existentes = computed(() => new Map(project.state.linhasBase.map((i) => [i.numero, i])))
+const existentes = computed(() => {
+  const m = new Map<number, LinhaBaseInfo>(project.state.linhasBase.map((i) => [i.numero, i]))
+  // LB0 com dado e sem metadado (estado antigo): conta como existente, para o diálogo mostrar a confirmação que o salvar exige
+  if (!m.has(0) && project.temDadosLinhaBase0) m.set(0, { numero: 0, nome: 'Linha de base 0', motivo: '', origem: 'cronoai' })
+  return m
+})
 const primeiraLivre = () => numeros.find((n) => n > 0 && !existentes.value.has(n)) ?? 1
 
 const numero = ref(primeiraLivre())

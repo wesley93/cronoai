@@ -146,6 +146,7 @@ function editar(uid: number, campo: 'pct' | 'custo', valor: string) {
           <div>EAC <strong class="tabular-nums">{{ previa.cabecalho.totais.eac === null ? '—' : fmtBRLCents(previa.cabecalho.totais.eac) }}</strong></div>
         </div>
       </div>
+      <p v-if="previa && !previa.ok" class="text-[12px] text-coral-600 dark:text-coral-400" role="alert" data-testid="erro-previa">{{ previa.erro }}</p>
       <ul v-if="previa && previa.ok && previa.avisos.length" class="space-y-1" data-testid="avisos-retificacao">
         <li v-for="a in previa.avisos" :key="a" class="rounded-md border border-amber-400/40 bg-amber-400/[0.06] px-3 py-1.5 text-[12px] text-amber-800 dark:text-amber-200" role="status">{{ a }}</li>
       </ul>
