@@ -36,8 +36,9 @@ const MO = {
   c89357: [f('3', 'ENCANADOR OU BOMBEIRO HIDRÁULICO', 0.488576), f('4', 'AUXILIAR DE ENCANADOR OU BOMBEIRO HIDRÁULICO', 0.488576)],
   c92413: [f('1', 'CARPINTEIRO DE FORMAS', 2.052), f('5', 'AJUDANTE DE CARPINTEIRO', 0.376)],
   c103669: [f(SERV, 'SERVENTE', 7.377), f(PED, 'PEDREIRO', 2.459), f('1', 'CARPINTEIRO DE FORMAS', 2.459)],
-  c107113: [f(SERV, 'SERVENTE', 1.5816), f('6', 'ENGENHEIRO CIVIL DE OBRA PLENO', 0.0041)],
-  c101183: [f('7', 'ENCARREGADO GERAL', 0.351), f(PED, 'PEDREIRO', 0.276)],
+  // Coeficientes PUBLICADOS (planilha 09/2026, na ordem do Analítico; o plano os arredondava para 1,5816 e 0,0041)
+  c107113: [f('90778', 'ENGENHEIRO CIVIL DE OBRA PLENO', 0.004143), f(SERV, 'SERVENTE', 1.5815891)],
+  c101183: [f('90778', 'ENGENHEIRO CIVIL DE OBRA PLENO', 0.035), f('90776', 'ENCARREGADO GERAL', 0.351), f(SERV, 'SERVENTE', 1.128), f(PED, 'PEDREIRO', 0.276)],
 }
 
 describe('mão de obra do Analítico (D-5)', () => {
@@ -101,11 +102,15 @@ describe('função principal (D-6, EO-1)', () => {
   })
 
   it('supervisão não é principal nem recurso: 107113 → SERVENTE e 101183 → PEDREIRO', () => {
-    expect(funcaoPrincipal(MO.c107113)?.funcao).toBe('SERVENTE') // ANTES da EO-1: o engenheiro (0,0041 h/m)
+    expect(funcaoPrincipal(MO.c107113)?.funcao).toBe('SERVENTE') // ANTES da EO-1: o engenheiro (0,004143 h/m)
     expect(funcaoPrincipal(MO.c101183)?.funcao).toBe('PEDREIRO') // ANTES da EO-1: o encarregado (0,351)
     const eq = equipeDaComposicao(MO.c107113)!
     expect(eq.proporcoes).toEqual([])
     expect(eq.supervisao.map((x) => x.funcao)).toEqual(['ENGENHEIRO CIVIL DE OBRA PLENO'])
+    // 101183: engenheiro e encarregado ficam fora dos recursos; o servente (1,128 ÷ 0,276 = 4,0870 → 4,09) entra proporcional ao pedreiro
+    const eq2 = equipeDaComposicao(MO.c101183)!
+    expect(eq2.supervisao.map((x) => x.funcao)).toEqual(['ENGENHEIRO CIVIL DE OBRA PLENO', 'ENCARREGADO GERAL'])
+    expect(eq2.proporcoes).toEqual([{ recurso: 'Servente', proporcao: 1.128 / 0.276 }])
   })
 
   it('CR-8: 103669 → proporções Servente 3,0 e Carpinteiro 1,0', () => {
@@ -175,8 +180,10 @@ describe('duração, equipe e BAC: CR-1 a CR-7 e CR-13/CR-14 (tabela 4.3 do plan
     { cr: 'CR-5', mo: MO.c93358, q: 50, equipe: 3, custo: 93.59, hh: 197.788335, bruto: 8.241180625, dias: 9, recursos: ['Servente 3'], bac: 4679.5 },
     { cr: 'CR-6', mo: MO.c89357, q: 3600, equipe: 6, custo: 38.84, hh: 1758.8736, bruto: 36.6432, dias: 37, recursos: ['Encanador 6', 'Auxiliar de encanador ou bombeiro hidráulico 6'], bac: 139824 },
     { cr: 'CR-7', mo: MO.c92413, q: 1500, equipe: 6, custo: 118.57, hh: 3078, bruto: 64.125, dias: 65, recursos: ['Carpinteiro 6', 'Ajudante de carpinteiro 2'], bac: 177855 },
-    { cr: 'CR-13', mo: MO.c107113, q: 100, equipe: 2, custo: 1, hh: 158.16, bruto: 9.885, dias: 10, recursos: ['Servente 2'], bac: 100 },
-    { cr: 'CR-14', mo: MO.c101183, q: 50, equipe: 2, custo: 1, hh: 13.8, bruto: 0.8625, dias: 1, recursos: ['Pedreiro 2'], bac: 50 },
+    // CR-13 com o coeficiente publicado 1,5815891: HH 158,15891; 9,884931875 → 10 d (com 1,5816 eram 158,16 e 9,885: mesmo resultado)
+    { cr: 'CR-13', mo: MO.c107113, q: 100, equipe: 2, custo: 1, hh: 158.15891, bruto: 9.884931875, dias: 10, recursos: ['Servente 2'], bac: 100 },
+    // CR-14 completo, como na planilha real: o servente (4,09 × 2 = 8,18 → 9) entra; encarregado e engenheiro não (antes: só 'Pedreiro 2' na fixture incompleta)
+    { cr: 'CR-14', mo: MO.c101183, q: 50, equipe: 2, custo: 1, hh: 13.8, bruto: 0.8625, dias: 1, recursos: ['Pedreiro 2', 'Servente 9'], bac: 50 },
   ]
 
   it.each(casos)('$cr', ({ mo, q, equipe, custo, hh, bruto, dias, recursos, bac }) => {
@@ -276,10 +283,10 @@ describe('custo de mão de obra por função (CR-15, D-21, R-1)', () => {
   it('função fora das taxas usa a taxa não cadastrada e é listada; supervisão entra como custo', () => {
     const r = custoMaoDeObraPorFuncao(100, MO.c107113, taxaDe, cadastrada)
     expect(r.funcoes.map((x) => [x.rotulo, x.foraDasTaxas])).toEqual([
-      ['Servente', false],
       ['Engenheiro civil de obra pleno', true],
+      ['Servente', false],
     ])
-    expect(r.funcoes[1].custo).toBeCloseTo(100 * 0.0041 * 30, 9) // taxaFuncaoNaoCadastrada = R$ 30/h (ilustrativa)
+    expect(r.funcoes[0].custo).toBeCloseTo(100 * 0.004143 * 30, 9) // R$ 12,43: taxaFuncaoNaoCadastrada = R$ 30/h (ilustrativa)
   })
 
   it('quantidade negativa não gera custo negativo', () => {
@@ -291,7 +298,7 @@ describe('notas da tarefa (D-23)', () => {
   it('com recorte: fonte, principal e coeficiente, equipe, supervisão não alocada e aviso das subcomposições', () => {
     const recursos = recursosDaEquipe('Servente', 2, [])
     expect(notasDaTarefaSinapi({ codigo: '107113', quantidade: 100, unidade: 'M', fonte: 'SP 09/2026 não desonerado', maoDeObra: MO.c107113, recursos })).toBe(
-      'Gerado pelo CronoAI a partir do SINAPI 107113 (SP 09/2026 não desonerado): 100 M. Função principal SERVENTE, RUP 1,5816 h/M. Equipe: Servente 2. ' +
+      'Gerado pelo CronoAI a partir do SINAPI 107113 (SP 09/2026 não desonerado): 100 M. Função principal SERVENTE, RUP 1,5815891 h/M. Equipe: Servente 2. ' +
         'Supervisão (administração local): Engenheiro civil de obra pleno: 0,41 h, não alocado. HH de subcomposições (ex.: preparo de argamassa) não incluída.',
     )
   })
@@ -350,5 +357,30 @@ describe('notas com valores informados pelo usuário (B2): só o que mudou é "i
       { rotulo: 'Encarregado geral', horas: 100 * 0.351 },
     ])
     expect(horasDeSupervisao(-5, sup).map((h) => h.horas)).toEqual([0, 0])
+  })
+})
+
+describe('arredondarProporcao: meio para cima em ponto flutuante (auditoria, achado 5)', () => {
+  it('0,145 → 0,15 e 1,005 → 1,01 (o Math.round direto dava 0,14 e 1,00)', () => {
+    expect(Math.round(0.145 * 100) / 100).toBe(0.14) // o defeito de antes
+    expect(Math.round(1.005 * 100) / 100).toBe(1) // idem
+    expect(arredondarProporcao(0.145)).toBe(0.15)
+    expect(arredondarProporcao(1.005)).toBe(1.01)
+    expect(arredondarProporcao(2.675)).toBe(2.68)
+    expect(arredondarProporcao(0.285)).toBe(0.29)
+  })
+
+  it('proporção 0,29 ÷ 2 = 0,145 com equipe 7 dá 2 ajudantes (antes: 0,14 × 7 = 0,98 → 1)', () => {
+    const p = 0.29 / 2
+    expect(recursosDaEquipe('Principal', 7, [{ recurso: 'Ajudante', proporcao: p }])[1]!.units).toBe(2) // 7 × 0,15 = 1,05 → 2
+    expect(Math.max(1, Math.ceil(7 * (Math.round(p * 100) / 100) - 1e-9))).toBe(1) // o valor de antes da correção
+  })
+
+  it('os valores que não estão no meio não mudam (CR-1 a CR-8: 0,5; 2,0016 → 2; 0,8018 → 0,8; 0,25; 0,3836 → 0,38; 0,1832 → 0,18; 3; 1)', () => {
+    expect([0.5, 1.279 / 0.639, 1.145 / 1.428, 0.357 / 1.428, 1.8305384 / 4.7714472, 0.376 / 2.052, 3, 1].map(arredondarProporcao)).toEqual([0.5, 2, 0.8, 0.25, 0.38, 0.18, 3, 1])
+  })
+
+  it('valores já com 2 casas voltam iguais (sem ruído de ponto flutuante)', () => {
+    for (let i = 0; i <= 500; i++) expect(arredondarProporcao(i / 100)).toBe(i / 100)
   })
 })

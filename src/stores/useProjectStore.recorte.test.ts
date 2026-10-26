@@ -1010,3 +1010,38 @@ describe('guardas de obra em salvarAgora, provadas por mutação (rodada 04)', (
     expect(store.state.meta.recorteSinapi).toEqual(refDaNova)
   })
 })
+
+describe('BAC com centavos pela store: CR-3, CR-4 e CR-5 (auditoria, achado 1)', () => {
+  // Fonte: SINAPI 09/2026, Caixa: 103681 SC R$ 904,47/m³; 100700 RN R$ 998,96/un; 93358 PI R$ 93,59/m³ (tabela 4.2 do plano).
+  // ANTES (Math.round na tarefa): 289.430, 9.990 e 4.680. DEPOIS (q × custo, sem arredondar): 289.430,40; 9.989,60; 4.679,50.
+  const casos = [
+    { cr: 'CR-3', code: '103681', unit: 'm³', q: 320, custo: 904.47, bac: 289430.4, antes: 289430, dias: 15 },
+    { cr: 'CR-4', code: '100700', unit: 'un', q: 10, custo: 998.96, bac: 9989.6, antes: 9990, dias: 6 },
+    { cr: 'CR-5', code: '93358', unit: 'm³', q: 50, custo: 93.59, bac: 4679.5, antes: 4680, dias: 9 },
+  ]
+
+  it.each(casos)('$cr pela calculadora (addSinapiTask): BAC com centavos', async ({ code, unit, q, custo, bac, antes, dias }) => {
+    const { store } = await abrir()
+    const r = store.addSinapiTask({
+      name: `Pacote ${code}`, code, unit, quantity: q, unitCost: custo, durationDays: dias,
+      resources: [{ resource: 'Pedreiro', units: 1 }], parentWbs: '', newGroupName: 'Grupo (teste)', linkType: 'FS', lagDays: 0,
+    })
+    if (!r.ok) throw new Error(r.erro)
+    expect(r.task.bac).toBeCloseTo(bac, 2)
+    expect(Math.round(q * custo)).toBe(antes) // o que a tarefa gravava antes da D-19
+    expect(r.task.bac).not.toBe(antes)
+    expect(r.task.duracaoMin / 480).toBe(dias)
+  })
+
+  it('CR-3, CR-4 e CR-5 pelo lote da planilha: o BAC de cada tarefa gerada tem os centavos', async () => {
+    const { store } = await abrir()
+    store.clearBudget()
+    for (const c of casos) {
+      store.addBudgetLine({ code: c.code, description: `Serviço ${c.code}`, location: '', unit: c.unit, quantity: c.q, rup: 0.5, unitCost: c.custo, professional: 'Pedreiro', helperRatio: 0, team: 4, group: '09' })
+    }
+    const g = store.generateFromBudget({ mode: 'FS', overlapPct: 0 })
+    if (!g.ok) throw new Error(g.erro)
+    for (const c of casos) expect(g.created.find((t) => t.sinapi === c.code)!.bac).toBeCloseTo(c.bac, 2)
+    expect(g.created.reduce((s, t) => s + t.bac, 0)).toBeCloseTo(289430.4 + 9989.6 + 4679.5, 2)
+  })
+})

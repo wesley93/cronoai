@@ -12,10 +12,13 @@ import type { EquipeProporcional, FuncaoMaoDeObra } from '@/types/sinapi'
  */
 export const CASAS_PROPORCAO_EQUIPE = 2
 
-/** Proporção arredondada a `CASAS_PROPORCAO_EQUIPE` casas (meio para cima). */
+/**
+ * Proporção arredondada a `CASAS_PROPORCAO_EQUIPE` casas (meio para cima). O produto em ponto flutuante é limpo com 12 algarismos
+ * significativos antes do `Math.round`: 0,145 × 100 = 14,499999999999998 (daria 0,14) e 1,005 × 100 = 100,49999999999999 (daria 1,00).
+ */
 export function arredondarProporcao(proporcao: number): number {
   const f = 10 ** CASAS_PROPORCAO_EQUIPE
-  return Math.round(proporcao * f) / f
+  return Math.round(Number((proporcao * f).toPrecision(12))) / f
 }
 
 const SUFIXO_MAO_DE_OBRA = /\s*COM ENCARGOS COMPLEMENTARES\s*$/i

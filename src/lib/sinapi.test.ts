@@ -31,7 +31,7 @@ describe('SINAPI: horas por dia da obra (CR-12, EO-3, D-18)', () => {
     expect(scheduleDays(durationFromTeam(640, 1.6225376, 4, horasPorDia(480)))).toBe(33)
   })
 
-  it('450 min/dia (7,5 h): 34,614135 → 35 d.u. = 15.750 min, contra 33 d.u. = 14.850 min das 8 h fixas (ANTES: 727 min a menos)', () => {
+  it('450 min/dia (7,5 h): 34,614135 → 35 d.u. = 15.750 min, contra 33 d.u. = 14.850 min das 8 h fixas (ANTES: 726 min a menos, 726,36)', () => {
     const raw = durationFromTeam(640, 1.6225376, 4, horasPorDia(450))
     expect(raw).toBeCloseTo(34.614135, 6)
     const dias = scheduleDays(raw)
