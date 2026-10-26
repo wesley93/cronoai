@@ -432,7 +432,7 @@ export const avisoDeRepetidas = (repetidas: number): string =>
 export function erroDeGravacaoDoRegistro(cabecalho: CabecalhoFechamento, detalhe: RegistroDetalheFechamento): string | undefined {
   const lido = validarCabecalhoFechamento(JSON.parse(JSON.stringify(cabecalho)), cabecalho.obraId)
   if (lido && lerDetalheFechamento(detalhe, lido)) return undefined
-  // Diz QUAL tarefa causa a recusa (o UID e o início do WBS): o usuário precisa saber o que encurtar no MS Project
+  // Diz QUAL tarefa causa a recusa (pelo UID): o usuário precisa saber o que corrigir no MS Project
   const culpada = tarefaQueNaoPassa(detalhe)
   // Texto livre do arquivo (o WBS) não entra na mensagem: só o UID e o TAMANHO do código (regra de msproject-mspdi.md)
   const onde = !culpada
