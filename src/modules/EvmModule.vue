@@ -2,7 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { TrendingUp, Gauge, Wallet, Target, Bot, Copy, Table2, LineChart, ClipboardList, Sigma, Activity, CalendarCheck, MousePointerClick } from '@lucide/vue'
 import IndexTrendChart from '@/components/charts/IndexTrendChart.vue'
-import { indexSeries, monthlyIncrements } from '@/lib/evm'
+import { indexSeries, monthlyIncrements, type OrigemPonto } from '@/lib/evm'
+import { dmy } from '@/lib/fechamentos'
 import { useProjectStore } from '@/stores/useProjectStore'
 import { useUiStore } from '@/stores/ui'
 import ModuleHeader from '@/components/common/ModuleHeader.vue'
@@ -11,9 +12,11 @@ import KpiTile, { type KpiTone } from '@/components/common/KpiTile.vue'
 import ProgressBar from '@/components/common/ProgressBar.vue'
 import SeletorLinhaBase from '@/components/common/SeletorLinhaBase.vue'
 import FechamentosPainel from '@/modules/evm/FechamentosPainel.vue'
+import CompararFechamentos from '@/modules/evm/CompararFechamentos.vue'
+import TendenciaFechamentos from '@/modules/evm/TendenciaFechamentos.vue'
 import SCurveChart from '@/components/charts/SCurveChart.vue'
 import { buildDiagnosis } from '@/lib/diagnosis'
-import { fmtBRL, fmtBRLCompact, fmtDate, fmtIndex, fmtPct } from '@/lib/format'
+import { fmtBRL, fmtBRLCents, fmtBRLCompact, fmtDate, fmtIndex, fmtPct } from '@/lib/format'
 import { rotuloVersao } from '@/lib/premissas'
 
 const project = useProjectStore()
@@ -25,16 +28,26 @@ const view = ref<'grafico' | 'tabela'>('grafico')
 const pkg = ref('')
 const mode = ref<'acumulado' | 'mensal'>('acumulado')
 const curve = computed(() => project.sCurveFor(pkg.value || undefined))
+// No modo mensal só os fins de mês entram (os pontos de fechamento ficam fora das contas mensais): o índice do ponto selecionado é o do gráfico em uso
 const curveShown = computed(() => (mode.value === 'mensal' ? monthlyIncrements(curve.value) : curve.value))
 const curveEvm = computed(() => project.evmFor(pkg.value || undefined))
 const selectedIdx = ref<number>()
 const statusIdx = computed(() => curve.value.findIndex((p) => p.label.endsWith('●')))
-const snapshotIdx = computed(() => selectedIdx.value ?? (statusIdx.value >= 0 ? statusIdx.value : undefined))
-const snapshot = computed(() => {
-  const i = snapshotIdx.value
-  if (i === undefined || !curve.value[i]) return undefined
-  const acc = curve.value[i]
-  const month = monthlyIncrements(curve.value)[i]
+const indiceSelecionado = computed(() => {
+  const i = selectedIdx.value ?? (statusIdx.value >= 0 ? statusIdx.value : undefined)
+  if (mode.value === 'mensal' && i !== undefined && curve.value[i]) return curveShown.value.findIndex((p) => p.date === curve.value[i].date)
+  return i
+})
+/** Ponto da curva acumulada que corresponde ao selecionado (no modo mensal, o índice é o da lista mensal). */
+const pontoAcumulado = computed(() => {
+  const i = indiceSelecionado.value
+  if (i === undefined || i < 0) return undefined
+  return mode.value === 'mensal' ? curve.value.find((p) => p.date === curveShown.value[i]?.date && p.tipo === 'mes') : curve.value[i]
+})
+const pontoSelecionado = computed(() => {
+  const acc = pontoAcumulado.value
+  if (!acc) return undefined
+  const month = acc.tipo === 'mes' ? monthlyIncrements(curve.value).find((p) => p.date === acc.date) : undefined
   return {
     acc,
     month,
@@ -43,8 +56,25 @@ const snapshot = computed(() => {
     future: acc.ev === null,
   }
 })
-watch(pkg, () => (selectedIdx.value = undefined))
-const indexPoints = computed(() => indexSeries(curve.value))
+const ROTULO_ORIGEM: Record<OrigemPonto, string> = {
+  fechamento: 'Fechamento (valor gravado)',
+  interpolado: 'Interpolado entre fechamentos',
+  reconstruido: 'Reconstruído linearmente',
+  atual: 'Estado de hoje',
+}
+const rotuloDaOrigem = (o: OrigemPonto | null) => (o ? ROTULO_ORIGEM[o] : '—')
+watch([pkg, mode], () => (selectedIdx.value = undefined))
+/**
+ * Tendência de SPI e CPI (RF-04.4): com fechamentos, os índices GRAVADOS (os nulos, sem divisor, ficam de fora); no pacote, os dos pontos de fechamento do pacote;
+ * sem fechamentos, os da reconstrução linear de hoje.
+ */
+const indexPoints = computed(() => {
+  if (!project.fechamentos.length) return indexSeries(curve.value)
+  if (pkg.value) return indexSeries(curve.value.filter((p) => p.origem === 'fechamento'))
+  return project.serieFechamentos
+    .filter((p) => p.spi !== null && p.cpi !== null)
+    .map((p) => ({ label: dmy(p.data).slice(0, 5), date: p.data, spi: p.spi as number, cpi: p.cpi as number }))
+})
 /** Variações menores que o arredondamento exibido (0,01) contam como estáveis. */
 const trendWord = (before: number, after: number) => (Math.abs(after - before) < 0.005 ? 'ficou estável' : after > before ? 'melhorou' : 'piorou')
 const forecast = computed(() => project.evmForecast)
@@ -116,7 +146,7 @@ async function copyReport() {
     <div class="grid items-start gap-5 xl:grid-cols-[minmax(0,8fr)_minmax(0,5fr)]">
       <SectionCard
         title="Curva S Físico-Financeira"
-        :subtitle="`${pkgName ? `Pacote ${pkg} ${pkgName}` : 'Obra inteira'} · ● = mês da data de status · clique num mês para detalhar`"
+        :subtitle="`${pkgName ? `Pacote ${pkg} ${pkgName}` : 'Obra inteira'} · ● = mês da data de status · ◆ = fechamento · clique num ponto para detalhar`"
         :icon="LineChart"
       >
         <template #actions>
@@ -133,35 +163,38 @@ async function copyReport() {
             <button class="flex items-center gap-1 px-2 py-1" :class="view === 'tabela' ? 'bg-zinc-200 font-semibold dark:bg-zinc-700' : ''" @click="view = 'tabela'"><Table2 class="h-3 w-3" /> Tabela</button>
           </div>
         </template>
-        <SCurveChart v-if="view === 'grafico'" :points="curveShown" :bac="curveEvm.bac" :mode="mode" :selected-index="snapshotIdx" @select="(i) => (selectedIdx = i)" />
+        <p class="mb-2 text-[11.5px] text-zinc-500" data-testid="aviso-curva">{{ project.avisoCurva }}</p>
+        <ul v-if="project.notasDaCurva.length" class="mb-2 space-y-0.5 text-[11.5px] text-zinc-500" data-testid="notas-curva"><li v-for="n in project.notasDaCurva" :key="n">{{ n }}</li></ul>
+        <SCurveChart v-if="view === 'grafico'" :points="curveShown" :bac="curveEvm.bac" :mode="mode" :selected-index="indiceSelecionado" @select="(i) => (selectedIdx = mode === 'mensal' ? curve.findIndex((p) => p.date === curveShown[i]?.date && p.tipo === 'mes') : i)" />
         <div v-else class="max-h-[340px] overflow-auto">
           <table class="table-base">
-            <thead><tr><th>Mês</th><th class="text-right">PV {{ mode }}</th><th class="text-right">EV {{ mode }}</th><th class="text-right">AC {{ mode }}</th><th class="text-right">Tendência</th></tr></thead>
+            <thead><tr><th>Ponto</th><th>Origem</th><th class="text-right">PV {{ mode }}</th><th class="text-right">EV {{ mode }}</th><th class="text-right">AC {{ mode }}</th><th class="text-right">Tendência</th></tr></thead>
             <tbody>
-              <tr v-for="(p, i) in curveShown" :key="p.date" class="cursor-pointer" :class="i === snapshotIdx ? 'bg-amber-400/10' : ''" @click="selectedIdx = i">
+              <tr v-for="(p, i) in curveShown" :key="p.date + p.tipo" class="cursor-pointer" :class="i === indiceSelecionado ? 'bg-amber-400/10' : ''" @click="selectedIdx = mode === 'mensal' ? curve.findIndex((q) => q.date === p.date && q.tipo === 'mes') : i">
                 <td class="capitalize">{{ p.label }}</td>
-                <td class="text-right tabular-nums">{{ fmtBRL(p.pv) }}</td>
-                <td class="text-right tabular-nums">{{ p.ev === null ? '—' : fmtBRL(p.ev) }}</td>
-                <td class="text-right tabular-nums">{{ p.ac === null ? '—' : fmtBRL(p.ac) }}</td>
-                <td class="text-right tabular-nums text-zinc-500">{{ p.forecast === null ? '—' : fmtBRL(p.forecast) }}</td>
+                <td class="text-[11px] text-zinc-500" :data-testid="p.origem === 'fechamento' ? 'origem-fechamento' : undefined">{{ rotuloDaOrigem(p.origem) }}</td>
+                <td class="text-right tabular-nums">{{ fmtBRLCents(p.pv) }}</td>
+                <td class="text-right tabular-nums" :data-testid="p.origem === 'fechamento' ? 'ev-gravado' : undefined">{{ p.ev === null ? '—' : fmtBRLCents(p.ev) }}</td>
+                <td class="text-right tabular-nums" :data-testid="p.origem === 'fechamento' ? 'ac-gravado' : undefined">{{ p.ac === null ? '—' : fmtBRLCents(p.ac) }}</td>
+                <td class="text-right tabular-nums text-zinc-500">{{ p.forecast === null ? '—' : fmtBRLCents(p.forecast) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
 
         <!-- Detalhe do mês selecionado -->
-        <div v-if="snapshot" class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/[0.05] p-3 text-[12px]">
+        <div v-if="pontoSelecionado" class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/[0.05] p-3 text-[12px]">
           <div class="mb-2 flex items-center gap-1.5 font-semibold">
             <MousePointerClick class="h-3.5 w-3.5 text-amber-500" />
-            <span class="capitalize">{{ snapshot.acc.label.replace(' ●', '') }}</span>
-            <span class="text-[11px] font-normal text-zinc-500">{{ snapshotIdx === statusIdx ? '(até a data de status)' : snapshot.future ? '(planejado — mês futuro)' : '(acumulado no fim do mês)' }}</span>
+            <span class="capitalize">{{ pontoSelecionado.acc.label.replace(' ●', '').replace(' ◆', ' (fechamento)') }}</span>
+            <span class="text-[11px] font-normal text-zinc-500">{{ pontoSelecionado.acc.label.endsWith('●') ? '(até a data de status)' : pontoSelecionado.future ? '(planejado — mês futuro)' : pontoSelecionado.acc.tipo === 'fechamento' ? '(data do fechamento)' : '(acumulado no fim do mês)' }} · {{ rotuloDaOrigem(pontoSelecionado.acc.origem) }}</span>
           </div>
           <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
-            <div><span class="text-zinc-500">PV acum.</span><div class="font-semibold tabular-nums">{{ fmtBRLCompact(snapshot.acc.pv) }}</div><div class="text-[10.5px] text-zinc-500">mês {{ fmtBRLCompact(snapshot.month.pv) }}</div></div>
-            <div><span class="text-zinc-500">EV acum.</span><div class="font-semibold tabular-nums">{{ snapshot.acc.ev === null ? '—' : fmtBRLCompact(snapshot.acc.ev) }}</div><div v-if="snapshot.month.ev !== null" class="text-[10.5px] text-zinc-500">mês {{ fmtBRLCompact(snapshot.month.ev) }}</div></div>
-            <div><span class="text-zinc-500">AC acum.</span><div class="font-semibold tabular-nums">{{ snapshot.acc.ac === null ? '—' : fmtBRLCompact(snapshot.acc.ac) }}</div><div v-if="snapshot.month.ac !== null" class="text-[10.5px] text-zinc-500">mês {{ fmtBRLCompact(snapshot.month.ac) }}</div></div>
-            <div><span class="text-zinc-500">SPI</span><div class="font-semibold tabular-nums" :class="snapshot.spi !== undefined && snapshot.spi < 0.95 ? 'text-coral-600 dark:text-coral-400' : ''">{{ snapshot.spi === undefined ? '—' : fmtIndex(snapshot.spi) }}</div></div>
-            <div><span class="text-zinc-500">CPI</span><div class="font-semibold tabular-nums" :class="snapshot.cpi !== undefined && snapshot.cpi < 0.95 ? 'text-coral-600 dark:text-coral-400' : ''">{{ snapshot.cpi === undefined ? '—' : fmtIndex(snapshot.cpi) }}</div></div>
+            <div><span class="text-zinc-500">PV acum.</span><div class="font-semibold tabular-nums">{{ fmtBRLCompact(pontoSelecionado.acc.pv) }}</div><div v-if="pontoSelecionado.month" class="text-[10.5px] text-zinc-500">mês {{ fmtBRLCompact(pontoSelecionado.month.pv) }}</div></div>
+            <div><span class="text-zinc-500">EV acum.</span><div class="font-semibold tabular-nums">{{ pontoSelecionado.acc.ev === null ? '—' : fmtBRLCompact(pontoSelecionado.acc.ev) }}</div><div v-if="pontoSelecionado.month && pontoSelecionado.month.ev !== null" class="text-[10.5px] text-zinc-500">mês {{ fmtBRLCompact(pontoSelecionado.month.ev) }}</div></div>
+            <div><span class="text-zinc-500">AC acum.</span><div class="font-semibold tabular-nums">{{ pontoSelecionado.acc.ac === null ? '—' : fmtBRLCompact(pontoSelecionado.acc.ac) }}</div><div v-if="pontoSelecionado.month && pontoSelecionado.month.ac !== null" class="text-[10.5px] text-zinc-500">mês {{ fmtBRLCompact(pontoSelecionado.month.ac) }}</div></div>
+            <div><span class="text-zinc-500">SPI</span><div class="font-semibold tabular-nums" :class="pontoSelecionado.spi !== undefined && pontoSelecionado.spi < 0.95 ? 'text-coral-600 dark:text-coral-400' : ''">{{ pontoSelecionado.spi === undefined ? '—' : fmtIndex(pontoSelecionado.spi) }}</div></div>
+            <div><span class="text-zinc-500">CPI</span><div class="font-semibold tabular-nums" :class="pontoSelecionado.cpi !== undefined && pontoSelecionado.cpi < 0.95 ? 'text-coral-600 dark:text-coral-400' : ''">{{ pontoSelecionado.cpi === undefined ? '—' : fmtIndex(pontoSelecionado.cpi) }}</div></div>
           </div>
         </div>
 
@@ -199,9 +232,15 @@ async function copyReport() {
     <FechamentosPainel />
 
     <div class="grid items-start gap-5 xl:grid-cols-2">
+      <TendenciaFechamentos />
+      <CompararFechamentos />
+    </div>
+
+    <div class="grid items-start gap-5 xl:grid-cols-2">
       <SectionCard title="Tendência de SPI e CPI" :subtitle="`Índices acumulados mês a mês · ${pkgName ? `pacote ${pkg}` : 'obra inteira'} · abaixo de 1,00 = atraso / estouro`" :icon="Activity">
         <IndexTrendChart v-if="indexPoints.length" :points="indexPoints" />
         <p v-else class="py-10 text-center text-xs text-zinc-500">Sem execução registrada neste recorte.</p>
+        <p v-if="project.fechamentos.length" class="mt-2 text-[11px] leading-relaxed text-zinc-500">Índices dos fechamentos calculados contra a linha de base vigente em cada fechamento.</p>
         <div v-if="indexPoints.length >= 2" class="mt-2 text-[11.5px] text-zinc-500">
           No último mês o SPI {{ trendWord(indexPoints.at(-2)!.spi, indexPoints.at(-1)!.spi) }}
           ({{ fmtIndex(indexPoints.at(-2)!.spi) }} → {{ fmtIndex(indexPoints.at(-1)!.spi) }}) e o CPI {{ trendWord(indexPoints.at(-2)!.cpi, indexPoints.at(-1)!.cpi) }}

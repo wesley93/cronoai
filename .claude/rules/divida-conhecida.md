@@ -14,7 +14,7 @@ O código vizinho tem limitações vivas, listadas no `CLAUDE.md › Dívida con
 
 | Dívida | Onde aparece | Regra |
 |---|---|---|
-| Histórico da Curva S reconstruído linearmente | `computeSCurve`/`earnedShareAt` (`lib/evm.ts`) | não trate o histórico como medido; snapshots são a SPEC-04 |
+| Curva S reconstruída linearmente **só sem fechamentos e antes do 1º fechamento** (ciclo 00007) | `computeSCurve`/`earnedShareAt` (`lib/evm.ts`) | sem fechamentos a curva tem o aviso "reconstruído linearmente"; não trate esse trecho como medido |
 | Premissas padrão ilustrativas (agora por obra, versionadas) | `premissasPadrao()` (`lib/premissas.ts`), catálogo `data/sinapiCatalog.ts` | os padrões seguem marcados "ilustrativa" até a validação com RH/Jurídico e Orçamento/Custos; não acrescente constante de premissa em `scenarios.ts` ou `supplies.ts` (vai em `PremissasObra`, com origem); o catálogo SINAPI é do ciclo 00006 (Inviolável 7) |
 | Feriados estaduais e municipais só manuais (RF-03.5 parcial) | `feriadosObra.ts`, aba Premissas › Feriados | sem lista oficial embutida: a lista e a importação são da Fase 2; não invente feriado de UF ou município |
 | Hora extra só em sábados (inteiros ou de 4 h); sem domingo, feriado, hora além da jornada, banco de horas nem compensação; `applyScenario` arredonda o custo comprometido a R$ inteiro (`Math.round`) | `simulateOvertime`, `applyScenario` | RF-03.6 só pede sábados; o arredondamento é dívida do gate P2 (o arredondamento bancário é só na exibição) |
@@ -30,6 +30,18 @@ O código vizinho tem limitações vivas, listadas no `CLAUDE.md › Dívida con
 | `vitest` 3 (críticas) e `tailwindcss` 3 (moderadas) com aviso de vulnerabilidade (dev) | `package.json` | as correções exigem `vitest` 5 e Tailwind 4, cada uma num PR próprio; não misture |
 | `criarObra`, `duplicarObra` e `excluirObra` gravam o índice das obras fora da fila de gravação (a `trocarObra` já grava sob a fila desde o ciclo 00006) | `useProjectStore.ts` (índice das obras), `armazenamentoObras.ts` | janela estreita com uma importação de recorte ou um atraso de gravação: a obra nova pode sumir do índice até a próxima gravação, a chave de um recorte compartilhado pode sumir ("recorte não encontrado", reimportar) ou a obra excluída pode reaparecer como ilegível; sem perda de dado. Corrigir passando toda gravação de índice pela fila, no padrão da `trocarObra`; não conserte de passagem |
 | Teto de custo unitário de R$ 10.000.000 recusa verba global maior (elevadores, subestação) | `LIMITES_LINHA` (`sinapiBudget.ts`) | contorno: lançar a verba em reais (quantidade = valor, custo R$ 1,00); subir o teto para 1e9 (quantidade × custo continua finito) depende do Orçamento/Custos |
+
+## Dívida do ciclo 00007 (linhas de base e fechamentos)
+
+| Dívida | Onde aparece | Regra |
+|---|---|---|
+| O custo da LB0 acompanha o `bac` vivo (no MS Project ficaria congelado), enquanto as LB1 a LB10 congelam o custo | `projetarLinhaBase`, `dadosDaLinhaBase` (`lib/linhasBase.ts`) | não "conserte" de passagem: muda os números da LB0; ciclo próprio com Planejamento/Controle e Orçamento (E-2) |
+| A duração gravada na LB é o **vão** em minutos úteis (numa tarefa interrompida na data de status é maior que a duração: ~36,9 d em vez de 36 d); a `Duration` da LB0 do resumo sai 0 | `linhaBaseDoCronograma`, `taskNode` | só afeta a `Duration` exportada da LB n, não o PV |
+| PV linear entre início e término da LB (regra do CronoAI); o MS Project distribui no tempo (`TimephasedData`, RF-04.8, fora do escopo) | `plannedFraction` | uma LB salva no meio da obra nasce com SPI < 1 |
+| Hora das datas da LB e o `Work` da LB do arquivo não voltam ao .xml; LB0 sem datas no arquivo é calculada | parser | avisados na importação e na exportação; `Work` opaco no ciclo 00010 |
+| A LB do valor agregado não muda o atraso nem as variações (G5 = b); o texto do RF-04.5 ("no PV e nas variações") está desatualizado | `analyzeDelay`, `finishVarianceDays` | atualização da spec com Planejamento/Controle; um seletor "comparar variações com LB0 | LBn" é ciclo próprio |
+| O histórico de fechamentos fica só no navegador (apagar os dados do site apaga o histórico; `persist()` é pedido, mas o navegador decide); limite de 104 fechamentos e 52 retificações; sem excluir, arquivar nem importar o JSON | `armazenamentoObras.ts`, `fechamentos.ts` | exporte o JSON; a persistência real é a da SPEC-01 e a trilha com identidade é a da SPEC-02 (o autor é texto declarado) |
+| `criarObra`, `duplicarObra` e `excluirObra` seguem gravando o índice fora da fila (dívida do ciclo 00006); o fechamento e a retificação passam pela fila com a guarda de obra | `useProjectStore.ts` | não conserte de passagem |
 
 ## Aproximações e armadilhas observadas no código
 

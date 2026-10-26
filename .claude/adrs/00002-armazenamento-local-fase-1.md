@@ -48,7 +48,10 @@ A Fase 1 guarda as obras no **IndexedDB**, a partir do ciclo 00002: banco `crono
 | `meta` | `'indice'` | `{ versaoIndice: 1, obraAtivaId, obras: ResumoObra[], migracaoV1? }` | 00002 |
 | `obras` | `id` (keyPath) | `{ id, versaoEsquema, json, atualizadoEm }` | 00002 |
 | `recortesSinapi` | `chave` = `uf\|regime\|dataBase` (keyPath) | `{ chave, versaoFormato, json, sha256Origem, importadoEm, composicoes }` (recorte JSON compacto + metadados da fonte) | 00006 (estrutura 2, implementada) |
-| `snapshots` | `[obraId, dataStatus]` | snapshot imutável | 00007 (estrutura 3) |
+| `fechamentos` | `id` (keyPath), índice `obraId` | cabeçalho do fechamento ou da retificação (`CabecalhoFechamento`: totais, totais por pacote, linha de base usada, motivo), gravado por `add` | 00007 (estrutura 3, implementada) |
+| `fechamentoTarefas` | `id` (keyPath) | detalhe por folha em tuplas de 12 posições, como texto JSON (`{ id, json }`; o tamanho é conferido antes do `JSON.parse`), gravado por `add` | 00007 (estrutura 3, implementada) |
+
+**Emenda do ciclo 00007:** a store `snapshots` com a chave `[obraId, dataStatus]` não comporta a retificação, que tem a mesma data do original; no lugar entram as duas stores acima (chave `id`, índice `obraId`). Abrir a obra lê só os cabeçalhos (até 156 de ~0,4 a 2 KB) e o detalhe do 1º fechamento efetivo. Cabeçalho e detalhe, a obra e o índice entram na **mesma transação** (`add`: um `id` que já existe falha com `ConstraintError`, e nada é gravado); excluir a obra apaga os fechamentos dela na mesma transação. **Volume medido** (3.000 tarefas, `fechamentos.desempenho.test.ts`): ~213 mil caracteres por detalhe e ~0,4 mil por cabeçalho; 156 registros ≈ 33 milhões de caracteres (a estimativa do ADR era ~37 milhões); a obra com 3.000 tarefas e uma LB salva tem ~0,94 milhão de caracteres. O app anterior (estrutura 2) recebe `VersionError` ao abrir a estrutura 3 e cai na memória sem gravar.
 
 Cada ciclo que acrescenta store sobe a versão de estrutura; cada ciclo que muda o formato da obra acrescenta um passo à cadeia de esquema e o teste com o formato anterior.
 
@@ -74,7 +77,7 @@ Cada ciclo que acrescenta store sobe a versão de estrutura; cada ciclo que muda
 - O adaptador IndexedDB depende do E2E para teste (sem teste unitário no jsdom).
 - Duas abas na mesma obra: a última gravação vence (igual a hoje).
 - A chave `cronoai-state-v1` fica no navegador, congelada, como cópia de segurança para rollback. Apagá-la é decisão de um ciclo futuro.
-- Continua "best-effort": o navegador pode apagar os dados sob falta de disco até a SPEC-01. O pedido de armazenamento persistente fica para o 00007.
+- Continua "best-effort": o navegador pode apagar os dados sob falta de disco até a SPEC-01. O pedido de armazenamento persistente (`navigator.storage.persist()`) é feito no 1º fechamento bem-sucedido (ciclo 00007), com o resultado na tela e no log, sem bloquear nada.
 
 **Efeito nos números** — nenhum. O formato MSPDI não muda.
 

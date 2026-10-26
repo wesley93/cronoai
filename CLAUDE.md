@@ -60,7 +60,9 @@ docker compose --profile dev up dev  # desenvolvimento em container
 | `src/lib/cpm.ts` | **Motor CPM em minutos úteis** (FS/SS/FF/SF, lag útil, corrido e %, calendário por tarefa, 8 restrições, prazo final, lógica retida/substituir, reprogramação pela data de status, folgas) |
 | `src/lib/restricoes.ts`, `src/lib/divergencias.ts` | Validação das restrições/prazo/calendário da tela e painel "Divergências com o MS Project" (causa provável por tarefa) |
 | `src/lib/horizonte.ts`, `src/types/previas.ts` | **Cálculo único da obra** (`calcularObra`: calendários, previsão, EVM e atraso), verificação do horizonte de 50 anos antes de gravar (`verificarCalculo`), mensagem do cálculo (`mensagemDoCalculo`: só texto de erro conhecido do motor) e tipos das prévias com erro |
-| `src/lib/evm.ts` | **EVM**: PV/EV/AC/SPI/CPI/EAC, Curva S, séries e variantes de EAC |
+| `src/lib/evm.ts` | **EVM**: PV/EV/AC/SPI/CPI/EAC, Curva S (com os fechamentos: ponto por fechamento, interpolação em dias úteis e reconstrução ancorada no 1º), séries e variantes de EAC |
+| `src/lib/linhasBase.ts` | **Linhas de base LB0 a LB10** (ciclo 00007): projeção da LB do valor agregado (LB0 devolve o mesmo array; sem custo na LB n, BAC, PV e EV zero), cópia do cronograma, *rollup* com duração, saneamento e validação do que é lido |
+| `src/lib/fechamentos.ts`, `comparacaoFechamentos.ts`, `exportacaoHistorico.ts`, `src/types/fechamento.ts` | **Fechamento da data de status** (ciclo 00007): captura em tuplas de 12 posições, SPI/CPI/EAC nulos sem divisor, retificação com motivo, efetivo de cada data, regras de data e de limite (104 fechamentos, 52 retificações), leitura validada (reconstrói o objeto; 8 MiB antes do `JSON.parse`), série, comparação entre dois fechamentos e o JSON do histórico |
 | `src/lib/scenarios.ts` | Efeito dominó e cenários Crashing / Fast Tracking / Hora Extra (premissas da obra; hora extra com meio período e frentes escolhidas, por calendário derivado) |
 | `src/lib/supplies.ts` | DLP e alertas de suprimentos |
 | `src/lib/sinapi.ts`, `sinapiBudget.ts` | Duração por RUP (horas por dia = `minutosPorDia ÷ 60` da obra, parâmetro obrigatório); planilha orçamentária (CSV) e geração em lote, com equipe por função (`BudgetLine.equipe`) quando a linha vem do recorte |
@@ -70,7 +72,7 @@ docker compose --profile dev up dev  # desenvolvimento em container
 | `src/lib/fieldAi.ts` | De-Para relato de campo → tarefa (heurística local) |
 | `src/lib/diagnosis.ts` | Diagnóstico executivo determinístico |
 | `src/stores/useProjectStore.ts` | **Store central** (estado da obra ativa + derivados + ações de todos os módulos + lista de obras: carregar, trocar, criar, duplicar, excluir) |
-| `src/stores/armazenamentoObras.ts` | Acesso ao IndexedDB (banco `cronoai`, estrutura 2: obras, índice e `recortesSinapi`) e adaptador de memória para testes |
+| `src/stores/armazenamentoObras.ts` | Acesso ao IndexedDB (banco `cronoai`, estrutura 3: obras, índice, `recortesSinapi`, `fechamentos` com índice `obraId` e `fechamentoTarefas`; fechamento só por `add`, nunca `put`) e adaptador de memória para testes |
 | `src/types/obra.ts`, `src/lib/migracaoEstado.ts`, `src/lib/obras.ts`, `src/data/ufs.ts` | Tipos da persistência, cadeia de migrações do esquema da obra, regras da obra (validação, cota) e as 27 UFs |
 | `src/stores/ui.ts` | Tema, navegação por hash, toasts |
 | `src/modules/*.vue` | Telas dos módulos (Apontamento, Caminho Crítico, Suprimentos, SINAPI, EVM, EAP, Obras: lista, criação, dados da obra, Premissas: valores com origem, versões, calendários e feriados, e Integrações: cartão SINAPI com importação do recorte e cartões da Fase 2 só informativos, sem campos) |
@@ -143,7 +145,7 @@ Não substitua o parecer dessas áreas: registre a pendência no PR/ciclo.
 
 ## Dívida conhecida
 
-- O histórico da Curva S é reconstruído linearmente (SPEC-04).
+- A Curva S só é reconstruída linearmente na obra **sem fechamentos** e **antes do 1º fechamento** (ancorada nos dados dele), sempre com aviso na tela; entre dois fechamentos a interpolação é em dias úteis do calendário padrão (SPEC-04, ciclo 00007). O histórico de fechamentos fica só no navegador (*best-effort*, com `navigator.storage.persist()` pedido no 1º fechamento) até a SPEC-01.
 - Premissas padrão ilustrativas até a validação (RH/Jurídico: adicional, jornada, sábado; Orçamento/Custos: indireto mensal → diário, encargos, arredondamento) e feriados estaduais e municipais só manuais, com fonte (a lista oficial é da Fase 2, RF-03.5). Hora extra só em sábados (inteiros ou de 4 h); `applyScenario` ainda arredonda o custo comprometido a R$ inteiro.
 - Cálculo (SPEC-05, parte 2 e 00005): sem calendário por **recurso**, sem nivelamento nem vários caminhos críticos (RF-05.2 por recurso, RF-05.6, RF-05.7); tarefa **agendada manualmente** no MS Project é calculada automaticamente (a marca é preservada, o painel explica a divergência e a exportação devolve as datas do arquivo enquanto a tarefa não for alterada); o PV ignora as exceções úteis do calendário (sábado de hora extra); exceção recorrente sem lista legada e `WorkWeeks` só avisam; datas reais sem hora. Regras sem fonte oficial (lag entre calendários = o da sucessora; `HonorConstraints`; folga de ALAP; `LinkLag` em %) aguardam a conferência no MS Project real (M-5/M-6).
 - Desempenho: a edição de uma célula com 3.000 tarefas leva ~0,8 s em máquina livre a ~1,5 s com a máquina carregada (medido 802 ms, 1.364–1.435 ms e 1.443 ms em 25/10/2026) (verificação da hipótese + recálculo), acima da meta de 500 ms da RNF-05.1; aceita no protótipo. O cálculo vai para o servidor nos ciclos 00016/00017 do `docs/specs/PLANO-FASE-2.md` (branch `feat/00011-backend-esqueleto`).

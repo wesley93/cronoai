@@ -1,5 +1,6 @@
 // Gerenciamento do Valor Agregado (EVM / PMBOK) e Curva S físico-financeira.
 import type { ScheduleResult, Task } from '@/types/domain'
+import { POS, type CabecalhoFechamento, type DetalheFechamento } from '@/types/fechamento'
 import { addCalendarDays, parseISO, toISO, type WorkCalendar } from './calendar'
 import { MINUTOS_NO_DIA_CORRIDO, diaRelativo, type CalendarioCompilado, type CalendariosCompilados } from './calendarioTrabalho'
 
@@ -25,6 +26,9 @@ export interface PackageEvm extends EvmMetrics {
   name: string
 }
 
+/** De onde vêm o EV e o AC de um ponto da Curva S (ciclo 00007, SPEC-04). */
+export type OrigemPonto = 'fechamento' | 'interpolado' | 'reconstruido' | 'atual'
+
 export interface SCurvePoint {
   date: string
   label: string
@@ -32,6 +36,22 @@ export interface SCurvePoint {
   ev: number | null
   ac: number | null
   forecast: number | null
+  /** 'mes' = fim de mês (ou a data de status); 'fechamento' = ponto extra na data de um fechamento que não cai num fim de mês. */
+  tipo: 'mes' | 'fechamento'
+  /** Origem do EV e do AC: o fechamento (valor gravado), a interpolação entre fechamentos, a reconstrução linear, o estado vivo na data de status. `null` no futuro. */
+  origem: OrigemPonto | null
+  fechamentoId?: string
+  /** Linha de base usada nos totais do fechamento (o PV da curva é sempre o da LB do valor agregado). */
+  linhaBaseFechamento?: number
+}
+
+/** Histórico que a Curva S usa no lugar da reconstrução (D-25): os fechamentos efetivos e o detalhe do 1º, que ancora o que veio antes dele (D-28). */
+export interface HistoricoCurva {
+  /** Efetivos e legíveis (a curva só usa os de data até a data de status). */
+  fechamentos: readonly CabecalhoFechamento[]
+  ancora?: DetalheFechamento
+  /** Pacote de 1º nível da curva: o EV e o AC vêm do `porPacote` dos fechamentos. Vazio ou ausente = obra inteira. */
+  wbs?: string
 }
 
 const safeDiv = (a: number, b: number, fallback = 1) => (b === 0 ? fallback : a / b)
@@ -55,8 +75,16 @@ export function plannedFraction(task: Task, cals: CalendariosCompilados, date: s
   return elapsedFraction(cals.de(task.calendarioUid), task.baselineStart, task.baselineFinish, date)
 }
 
+/** O que a reconstrução precisa de uma tarefa: o avanço, as datas reais e o calendário (uma tarefa de verdade ou uma tupla do fechamento). */
+interface AvancoDaTarefa {
+  percentComplete: number
+  actualStart?: string
+  actualFinish?: string
+  calendarioUid?: number
+}
+
 /** Fração do avanço físico atual que já havia sido realizada em `date` (distribuição linear no período real). */
-function earnedShareAt(task: Task, cals: CalendariosCompilados, date: string, statusDate: string): number {
+function earnedShareAt(task: AvancoDaTarefa, cals: CalendariosCompilados, date: string, statusDate: string): number {
   if (task.percentComplete <= 0 || !task.actualStart) return 0
   const end = task.percentComplete >= 100 && task.actualFinish ? task.actualFinish : statusDate
   if (end < task.actualStart) return date >= task.actualStart ? 1 : 0
@@ -122,8 +150,33 @@ function monthEnds(fromIso: string, toIso: string): string[] {
 }
 
 /**
- * Curva S mensal acumulada: PV (linha de base), EV e AC (até a data de status) e
- * tendência reprogramada (PV recalculado sobre o cronograma previsto).
+ * Fração (0..1) do tempo útil do calendário padrão entre o fim do dia `de` e o fim do dia `ate` que já passou em `corte` (D-27: a mesma régua do PV,
+ * sem as exceções úteis). Sem tempo útil entre as duas datas, o valor vai direto ao do fim.
+ */
+function fracaoUtilEntre(cals: CalendariosCompilados, de: string, ate: string, corte: string): number {
+  const cal = cals.padrao
+  const fimDoDia = (d: string) => (diaRelativo(cal.base, d) + 1) * MINUTOS_NO_DIA_CORRIDO
+  const total = cal.minutosUteisEntre(fimDoDia(de), fimDoDia(ate))
+  if (total <= 0) return 1
+  return Math.min(1, Math.max(0, cal.minutosUteisEntre(fimDoDia(de), fimDoDia(corte)) / total))
+}
+
+/** `dd/mm ◆`: rótulo do ponto de um fechamento que não cai num fim de mês nem na data de status. */
+const rotuloDeFechamento = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)} ◆`
+
+interface Marco {
+  data: string
+  ev: number
+  ac: number
+}
+
+/**
+ * Curva S acumulada: PV (linha de base do valor agregado), EV e AC (até a data de status) e tendência reprogramada (PV recalculado sobre o cronograma previsto).
+ *
+ * Sem `historico` (ou sem fechamentos): a reconstrução linear de hoje, ponto a ponto, com `origem: 'reconstruido'`.
+ * Com fechamentos (D-25 a D-30): os pontos são os fins de mês, a data de status e **um ponto por fechamento**; neles o EV e o AC são **exatamente** os gravados;
+ * entre dois fechamentos e depois do último até a data de status, a interpolação em minutos úteis do calendário padrão (o último ponto é o estado vivo, `'atual'`);
+ * antes do 1º fechamento, a reconstrução ancorada nos dados dele. O PV é sempre o da linha de base que as `tasks` carregam.
  */
 export function computeSCurve(
   tasks: Task[],
@@ -131,6 +184,7 @@ export function computeSCurve(
   statusDate: string,
   forecast: ScheduleResult,
   monthLabel: (iso: string) => string,
+  historico?: HistoricoCurva,
 ): SCurvePoint[] {
   const leaves = tasks.filter((t) => !t.isSummary)
   const starts = leaves.map((t) => t.baselineStart ?? forecast.byUid.get(t.uid)?.start).filter((x): x is string => !!x)
@@ -140,36 +194,160 @@ export function computeSCurve(
   const last = finishes.sort().at(-1)!
   const statusMonthEnd = monthEnds(statusDate, statusDate)[0]
 
-  return monthEnds(first, last).map((end) => {
+  const pacote = historico?.wbs || undefined
+  const valorDoFechamento = (f: CabecalhoFechamento): { ev: number; ac: number } | undefined => {
+    if (!pacote) return { ev: f.totais.ev, ac: f.totais.ac }
+    const p = f.porPacote.find((x) => x.wbs === pacote)
+    return p ? { ev: p.ev, ac: p.ac } : undefined // fechamento sem o pacote fica fora da curva do pacote
+  }
+  const marcos = new Map<string, { id: string; linhaBase: number; ev: number; ac: number }>()
+  for (const f of [...(historico?.fechamentos ?? [])].sort((a, b) => (a.dataStatus < b.dataStatus ? -1 : 1))) {
+    const v = f.dataStatus <= statusDate ? valorDoFechamento(f) : undefined
+    if (v) marcos.set(f.dataStatus, { id: f.id, linhaBase: f.linhaBase, ...v })
+  }
+  const datasDosMarcos = [...marcos.keys()].sort()
+
+  // Pontos: fins de mês (no mês da data de status, o corte é a própria data) mais um por fechamento que não cai neles
+  interface Candidato {
+    date: string
+    cut: string
+    tipo: 'mes' | 'fechamento'
+    label: string
+  }
+  const candidatos: Candidato[] = monthEnds(first, last).map((end) => {
     const cut = end === statusMonthEnd ? statusDate : end
-    const isPast = cut <= statusDate
-    let pv = 0, ev = 0, ac = 0, fc = 0
+    return { date: end, cut, tipo: 'mes', label: end === statusMonthEnd ? `${monthLabel(end)} ●` : monthLabel(end) }
+  })
+  for (const d of datasDosMarcos) {
+    if (!candidatos.some((c) => c.cut === d)) candidatos.push({ date: d, cut: d, tipo: 'fechamento', label: rotuloDeFechamento(d) })
+  }
+  candidatos.sort((a, b) => (a.cut < b.cut ? -1 : a.cut > b.cut ? 1 : 0))
+
+  // Estado vivo na data de status (soma do avanço e do custo real de agora)
+  const vivo: Marco = { data: statusDate, ev: 0, ac: 0 }
+  for (const t of leaves) {
+    vivo.ev += (t.bac * t.percentComplete) / 100
+    vivo.ac += t.actualCost
+  }
+  // Reconstrução ancorada no 1º fechamento (D-28): o avanço e o custo de cada tarefa dele, no calendário atual da tarefa (ou no padrão se ela saiu)
+  const primeiraData = datasDosMarcos[0]
+  const calendarioPorUid = new Map(tasks.map((t) => [t.uid, t.calendarioUid]))
+  const ancora = historico?.ancora?.tarefas.filter((t) => !pacote || t[POS.wbs] === pacote || t[POS.wbs].startsWith(pacote + '.'))
+  const reconstruirAncorado = (corte: string): { ev: number; ac: number } => {
+    let ev = 0
+    let ac = 0
+    for (const t of ancora ?? []) {
+      const share = earnedShareAt(
+        { percentComplete: t[POS.pct], actualStart: t[POS.inicioReal] ?? undefined, actualFinish: t[POS.terminoReal] ?? undefined, calendarioUid: calendarioPorUid.get(t[POS.uid]) },
+        cal,
+        corte,
+        primeiraData,
+      )
+      ev += ((t[POS.bac] * t[POS.pct]) / 100) * share
+      ac += t[POS.custoReal] * share
+    }
+    return { ev, ac }
+  }
+  const reconstruirVivo = (corte: string): { ev: number; ac: number } => {
+    let ev = 0
+    let ac = 0
     for (const t of leaves) {
-      pv += t.bac * plannedFraction(t, cal, cut) // no mês da data de status, PV até a data de status (coerente com EV/AC)
-      if (isPast) {
-        const share = earnedShareAt(t, cal, cut, statusDate)
-        ev += ((t.bac * t.percentComplete) / 100) * share
-        ac += t.actualCost * share
+      const share = earnedShareAt(t, cal, corte, statusDate)
+      ev += ((t.bac * t.percentComplete) / 100) * share
+      ac += t.actualCost * share
+    }
+    return { ev, ac }
+  }
+  /** Interpolação entre o marco anterior e o próximo (o próximo fechamento, ou o estado vivo na data de status). */
+  const interpolar = (corte: string): { ev: number; ac: number } => {
+    const anterior = [...datasDosMarcos].reverse().find((d) => d < corte)!
+    const seguinte = datasDosMarcos.find((d) => d > corte)
+    const a = marcos.get(anterior)!
+    const b: Marco = seguinte ? { data: seguinte, ...marcos.get(seguinte)! } : vivo
+    const f = fracaoUtilEntre(cal, anterior, b.data, corte)
+    return { ev: a.ev + (b.ev - a.ev) * f, ac: a.ac + (b.ac - a.ac) * f }
+  }
+
+  // Desempenho (lição 3): com um ponto por fechamento são ~100 pontos a mais, cada um somando o PV de TODAS as tarefas. O que não depende do ponto (o dia da linha
+  // de base de cada tarefa e o total de minutos úteis dela) sai do laço, e o dia do corte é convertido uma vez por ponto: a mesma conta de `plannedFraction`, sem
+  // reconverter datas em texto 3 vezes por tarefa e por ponto. Os números são idênticos (a caracterização C-1 segue verde).
+  const baseDoCalendario = cal.padrao.base
+  const planejadas = leaves.map((t) => {
+    const ct = cal.de(t.calendarioUid)
+    if (!t.baselineStart || !t.baselineFinish || ct.base !== baseDoCalendario) return { t, ct, rapida: false as const }
+    const ini = diaRelativo(baseDoCalendario, t.baselineStart) * MINUTOS_NO_DIA_CORRIDO
+    const total = ct.minutosUteisEntre(ini, (diaRelativo(baseDoCalendario, t.baselineFinish) + 1) * MINUTOS_NO_DIA_CORRIDO)
+    return { t, ct, rapida: true as const, ini, total, inicio: t.baselineStart, termino: t.baselineFinish }
+  })
+
+  return candidatos.map((c) => {
+    const cut = c.cut
+    const isPast = cut <= statusDate
+    const fimDoCorte = (diaRelativo(baseDoCalendario, cut) + 1) * MINUTOS_NO_DIA_CORRIDO
+    let pv = 0, fc = 0
+    for (const pl of planejadas) {
+      const t = pl.t
+      // PV: no mês da data de status, até a data de status (coerente com EV/AC)
+      if (!pl.rapida) pv += t.bac * plannedFraction(t, cal, cut)
+      else if (cut < pl.inicio) pv += t.bac * 0
+      else if (cut >= pl.termino || pl.total <= 0) pv += t.bac * 1
+      else pv += t.bac * Math.min(1, Math.max(0, pl.ct.minutosUteisEntre(pl.ini, fimDoCorte) / pl.total))
+    }
+    // A tendência só aparece do mês da data de status em diante: o resto não a calcula
+    if (c.date >= statusMonthEnd) {
+      for (const t of leaves) {
+        const s = forecast.byUid.get(t.uid)
+        if (s) {
+          const earnedNow = (t.bac * t.percentComplete) / 100
+          const remainingValue = t.bac - earnedNow
+          // Saldo distribuído no período previsto restante
+          const restStart = s.start > statusDate ? s.start : addCalendarDays(statusDate, 1)
+          const frac = s.finish < restStart ? (cut >= s.finish ? 1 : 0) : elapsedFraction(cal.de(t.calendarioUid), restStart, s.finish, cut)
+          fc += earnedNow + remainingValue * (cut > statusDate ? frac : 0)
+        }
       }
-      const s = forecast.byUid.get(t.uid)
-      if (s) {
-        const earnedNow = (t.bac * t.percentComplete) / 100
-        const remainingValue = t.bac - earnedNow
-        // Saldo distribuído no período previsto restante
-        const restStart = s.start > statusDate ? s.start : addCalendarDays(statusDate, 1)
-        const frac = s.finish < restStart ? (cut >= s.finish ? 1 : 0) : elapsedFraction(cal.de(t.calendarioUid), restStart, s.finish, cut)
-        fc += earnedNow + remainingValue * (cut > statusDate ? frac : 0)
+    }
+    let ev: number | null = null
+    let ac: number | null = null
+    let origem: OrigemPonto | null = null
+    let marco: { id: string; linhaBase: number } | undefined
+    if (isPast) {
+      const m = marcos.get(cut)
+      if (m) {
+        ;({ ev, ac } = m)
+        origem = 'fechamento'
+        marco = m
+      } else if (!datasDosMarcos.length) {
+        ;({ ev, ac } = reconstruirVivo(cut))
+        origem = 'reconstruido'
+      } else if (cut < primeiraData) {
+        ;({ ev, ac } = ancora ? reconstruirAncorado(cut) : reconstruirVivo(cut))
+        origem = 'reconstruido'
+      } else if (cut === statusDate) {
+        ;({ ev, ac } = vivo)
+        origem = 'atual'
+      } else {
+        ;({ ev, ac } = interpolar(cut))
+        origem = 'interpolado'
       }
     }
     return {
-      date: end,
-      label: end === statusMonthEnd ? `${monthLabel(end)} ●` : monthLabel(end),
+      date: c.date,
+      label: c.label,
       pv,
-      ev: isPast ? ev : null,
-      ac: isPast ? ac : null,
-      forecast: end >= statusMonthEnd ? fc : null,
+      ev,
+      ac,
+      forecast: c.date >= statusMonthEnd ? fc : null,
+      tipo: c.tipo,
+      origem,
+      ...(marco ? { fechamentoId: marco.id, linhaBaseFechamento: marco.linhaBase } : {}),
     }
   })
+}
+
+/** Só os pontos de fim de mês (os pontos de fechamento ficam de fora das contas mensais). */
+export function pontosMensais(points: SCurvePoint[]): SCurvePoint[] {
+  return points.filter((p) => p.tipo === 'mes')
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +405,8 @@ export function indexSeries(points: SCurvePoint[]): IndexPoint[] {
 }
 
 /** Valores do mês (não acumulados) a partir da curva acumulada. */
-export function monthlyIncrements(points: SCurvePoint[]): SCurvePoint[] {
+export function monthlyIncrements(allPoints: SCurvePoint[]): SCurvePoint[] {
+  const points = pontosMensais(allPoints) // os pontos de fechamento não são fins de mês: ficam fora das contas mensais
   return points.map((p, i) => {
     const prev = points[i - 1]
     const diff = (cur: number | null, before: number | null | undefined) => (cur === null ? null : cur - (before ?? 0))

@@ -16,7 +16,7 @@ import { TETO_DIAS } from './calendar'
 import { MINUTOS_NO_DIA_CORRIDO, type CalendariosCompilados } from './calendarioTrabalho'
 import { computeEvm, computePackageEvm, plannedFraction } from './evm'
 import { fmtBRLCents } from './format'
-import { NUMERO_MAX_LINHA_BASE, dataHoraIsoValida, dataIsoValida } from './linhasBase'
+import { NUMERO_MAX_LINHA_BASE, dataHoraIsoValida, dataIsoValida, dataLocalDeIso } from './linhasBase'
 
 /** Limites do histórico e da leitura (G4, RNF-04.2 e seção 08 do plano). */
 export const LIMITES_FECHAMENTO = {
@@ -493,4 +493,25 @@ export function erroDeTextosFechamento(t: { autor?: string; observacao?: string 
   if (observacao.length > LIMITES_FECHAMENTO.observacao) return `A observação passa de ${LIMITES_FECHAMENTO.observacao} caracteres.`
   if (CONTROLE.test(autor) || CONTROLE.test(observacao)) return 'Os textos não podem ter caracteres de controle.'
   return undefined
+}
+
+/**
+ * Notas sobre a linha de base dos fechamentos (E-9): "fechado contra a LB0 de dd/mm/aaaa" quando a LB do fechamento difere da LB do valor agregado em vigor
+ * (o PV da curva é o da LB em vigor, mas o EV e o AC são os gravados) ou quando ela foi sobrescrita depois.
+ */
+export function notasDaLinhaBaseDosFechamentos(
+  efetivosDaObra: readonly CabecalhoFechamento[],
+  linhaBaseAtiva: number,
+  infos: readonly { numero: number; salvaEm?: string }[],
+): string[] {
+  const notas: string[] = []
+  for (const c of efetivosDaObra) {
+    const atual = infos.find((i) => i.numero === c.linhaBase)
+    const sobrescrita = c.linhaBaseSalvaEm !== undefined && atual?.salvaEm !== undefined && atual.salvaEm !== c.linhaBaseSalvaEm
+    if (c.linhaBase === linhaBaseAtiva && !sobrescrita) continue
+    const quando = c.linhaBaseSalvaEm ? ` de ${dataLocalDeIso(c.linhaBaseSalvaEm)}` : ''
+    const depois = sobrescrita && atual?.salvaEm ? `; a LB${c.linhaBase} atual é de ${dataLocalDeIso(atual.salvaEm)}` : ''
+    notas.push(`Fechamento de ${dmy(c.dataStatus)}: fechado contra a LB${c.linhaBase}${quando}${depois}.${c.linhaBase !== linhaBaseAtiva ? ` O PV da curva é o da LB${linhaBaseAtiva}.` : ''}`)
+  }
+  return notas
 }

@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 // Fechamento da data de status e retificação (ciclo 00007, E3): fechar, recarregar, retificar com motivo, recusa da data repetida e
 // a obra salva na estrutura 2 do IndexedDB que abre igual na 3 (P-5). Números do Aurora conferidos à mão no plano.
 import type { Page } from '@playwright/test'
@@ -49,7 +50,7 @@ async function fecharPelaTela(page: Page) {
   const dialogo = page.getByRole('dialog', { name: /Fechar data de status/ })
   await expect(dialogo.getByTestId('previa-fechamento')).toContainText('19.113.000,00')
   await dialogo.getByRole('button', { name: 'Fechar data de status' }).click()
-  await expect(toast(page, 'Data de status fechada')).toBeVisible()
+  await expect(toast(page, 'Data de status fechada').last()).toBeVisible() // pode haver o aviso de um fechamento anterior ainda na tela
   await expect(dialogo).toBeHidden()
 }
 
@@ -183,4 +184,67 @@ test('P-5: a obra salva na estrutura 2 do IndexedDB abre igual na 3 (obra, índi
   expect(await chavesDeRecorte(page)).toEqual(['SP|nao-desonerado|2026-09']) // o recorte da estrutura 2 continua lá
   await fecharPelaTela(page)
   await expect.poll(() => contarFechamentos(page)).toBe(1)
+})
+
+test('3 fechamentos com avanços diferentes: a tabela da Curva S mostra o EV e o AC gravados nos pontos de fechamento, com o trecho interpolado, a comparação e o JSON', async ({ page }) => {
+  const reprogramar = async (data: string) => {
+    await page.goto('/#/eap')
+    await page.getByRole('button', { name: 'Reprogramar' }).locator('..').locator('input[type=date]').fill(data)
+    await page.getByRole('button', { name: 'Reprogramar' }).click()
+    await expect(toast(page, 'Data de status alterada').last()).toBeVisible()
+  }
+  // 1º fechamento (23/10): o estado do Aurora
+  await page.goto('/#/evm')
+  await fecharPelaTela(page)
+  // 2º (30/10): o relato do Mestre Tião aprovado (104 de 40% para 75%)
+  await reprogramar('2026-10-30')
+  await page.goto('/#/apontamento') // só o hash muda: nada recarrega e o estado segue na tela
+  await page.getByRole('button', { name: 'Aprovar e Atualizar EAP' }).click()
+  await expect(toast(page, 'EAP atualizada: [UID 104] 03.01.02').last()).toBeVisible()
+  await page.goto('/#/evm')
+  await fecharPelaTela(page)
+  // 3º (06/11): a 302 vai a 90%
+  await reprogramar('2026-11-06')
+  await page.getByRole('row').filter({ has: page.getByText('02.02', { exact: true }) }).getByLabel('Percentual concluído').fill('90')
+  await page.getByRole('row').filter({ has: page.getByText('02.02', { exact: true }) }).getByLabel('Percentual concluído').press('Tab')
+  await page.goto('/#/evm')
+  await fecharPelaTela(page)
+  await expect.poll(() => contarFechamentos(page)).toBe(3)
+
+  // Tabela da Curva S: os pontos de fechamento trazem EXATAMENTE o EV gravado (R$ 6.448.200,00; 6.507.000,00; 6.771.000,00)
+  await page.getByRole('button', { name: 'Tabela', exact: true }).click()
+  const gravados = page.getByTestId('ev-gravado')
+  await expect(gravados).toHaveCount(3)
+  const textos = (await gravados.allTextContents()).map((t) => t.replace(/\s/g, ' '))
+  expect(textos).toEqual(['R$ 6.448.200,00', 'R$ 6.507.000,00', 'R$ 6.771.000,00'])
+  await expect(page.getByTestId('origem-fechamento')).toHaveCount(3)
+  await expect(page.getByText('Interpolado entre fechamentos').first()).toBeVisible()
+  await expect(page.getByTestId('aviso-curva')).toContainText('Antes do 1º fechamento (23/10/2026): reconstruído linearmente.')
+  // Gráfico: a legenda diz o que é o pontilhado curto e o ponto de fechamento
+  await page.getByRole('button', { name: 'Gráfico', exact: true }).click()
+  await expect(page.getByTestId('legenda-curva')).toContainText('Pontilhado curto: interpolado entre fechamentos')
+  await expect(page.getByTestId('legenda-curva')).toContainText('Ponto de fechamento: EV e AC gravados')
+
+  // Tendência e entrega: a tabela traz os 3 fechamentos e a nota dos índices
+  await expect(page.getByTestId('tabela-entrega').getByRole('row')).toHaveCount(4)
+  await expect(page.getByTestId('nota-indices')).toContainText('Índices dos fechamentos calculados contra a linha de base vigente em cada fechamento.')
+
+  // Comparar o 1º com o 3º: a 104 e a 302 avançaram
+  await page.getByLabel('Fechamento A').selectOption({ index: 1 })
+  await page.getByLabel('Fechamento B').selectOption({ index: 3 })
+  await page.getByTestId('comparar').click()
+  const comparacao = page.getByTestId('resultado-comparacao')
+  await expect(comparacao).toBeVisible()
+  await expect(page.getByTestId('categoria-avancaram')).toContainText('Avançaram (2)')
+  await expect(page.getByTestId('categoria-avancaram')).toContainText('40% → 75%')
+  await expect(page.getByTestId('categoria-avancaram')).toContainText('78% → 90%')
+
+  // Exportar o histórico (JSON): as LBs e os 3 fechamentos
+  const baixando = page.waitForEvent('download')
+  await page.getByTestId('exportar-historico').click()
+  const download = await baixando
+  expect(download.suggestedFilename()).toBe('Edificio_Residencial_Aurora_12_Pavimentos_historico_2026-11-06.json')
+  const arquivo = JSON.parse(await readFile((await download.path())!, 'utf-8')) as { formato: string; versao: number; linhasBase: unknown[]; fechamentos: { cabecalho: { dataStatus: string }; tarefas: unknown[] }[] }
+  expect([arquivo.formato, arquivo.versao, arquivo.linhasBase.length]).toEqual(['cronoai-historico', 1, 1])
+  expect(arquivo.fechamentos.map((f) => [f.cabecalho.dataStatus, f.tarefas.length])).toEqual([['2026-10-23', 20], ['2026-10-30', 20], ['2026-11-06', 20]])
 })

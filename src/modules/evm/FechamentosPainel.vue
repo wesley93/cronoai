@@ -1,16 +1,19 @@
 <script setup lang="ts">
 // Painel "Fechamentos" do EVM (ciclo 00007, SPEC-04): fechar a data de status, a lista imutável com retificações, e as faixas de aviso.
 import { computed, ref } from 'vue'
-import { History, Lock } from '@lucide/vue'
+import { Download, History, Lock } from '@lucide/vue'
 import SectionCard from '@/components/common/SectionCard.vue'
 import { LIMITES_FECHAMENTO, dmy } from '@/lib/fechamentos'
+import { downloadText } from '@/lib/download'
 import { fmtBRLCents, fmtIndex } from '@/lib/format'
 import { dataLocalDeIso } from '@/lib/linhasBase'
 import { useProjectStore } from '@/stores/useProjectStore'
+import { useUiStore } from '@/stores/ui'
 import FecharDataStatusDialog from './FecharDataStatusDialog.vue'
 import RetificarFechamentoDialog from './RetificarFechamentoDialog.vue'
 
 const project = useProjectStore()
+const ui = useUiStore()
 const fechando = ref(false)
 const retificando = ref<string>()
 
@@ -29,6 +32,17 @@ const notaDaLinhaBase = (c: { linhaBase: number; linhaBaseSalvaEm?: string }) =>
   const mudou = c.linhaBaseSalvaEm !== undefined && atual?.salvaEm !== undefined && atual.salvaEm !== c.linhaBaseSalvaEm
   return `fechado contra a LB${c.linhaBase}${salva}${mudou ? `; a LB${c.linhaBase} atual é de ${dataLocalDeIso(atual!.salvaEm!)}` : ''}`
 }
+/** Exporta o histórico (JSON): as linhas de base e todos os fechamentos e retificações. Só saída: nada é enviado pela rede. */
+async function exportarHistorico() {
+  const r = await project.exportarHistorico()
+  if (!r.ok) {
+    ui.notify('error', 'Histórico não exportado', r.erro)
+    return
+  }
+  downloadText(r.nomeArquivo, r.texto, 'application/json')
+  ui.notify('success', 'Histórico exportado', `${r.nomeArquivo} · linhas de base e fechamentos desta obra.`)
+  for (const a of r.avisos) ui.notify('warning', 'Atenção na exportação do histórico', a)
+}
 const persistencia = computed(() =>
   project.persistenciaFechamento === 'concedido' ? 'concedido pelo navegador' : project.persistenciaFechamento === 'negado' ? 'negado pelo navegador' : project.persistenciaFechamento === 'indisponivel' ? 'indisponível neste navegador' : '',
 )
@@ -37,6 +51,7 @@ const persistencia = computed(() =>
 <template>
   <SectionCard title="Fechamentos da data de status" subtitle="Registro imutável da obra em cada data: a Curva S usa o EV e o AC gravados, não uma reconstrução" :icon="Lock" body-class="p-0">
     <template #actions>
+      <button class="btn-secondary" :disabled="!project.fechamentos.length" data-testid="exportar-historico" @click="exportarHistorico"><Download class="h-3.5 w-3.5" /> Exportar histórico (JSON)</button>
       <button class="btn-primary" :disabled="!project.fechamentosCarregados" data-testid="abrir-fechar" @click="fechando = true">
         <History class="h-3.5 w-3.5" /> Fechar data de status ({{ dmy(project.state.meta.statusDate) }})
       </button>

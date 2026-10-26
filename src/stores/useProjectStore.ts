@@ -66,7 +66,9 @@ import {
 } from '@/lib/calendarioTrabalho'
 import { computeSchedule, optsDaObra, withBaseline } from '@/lib/cpm'
 import { NUMERO_MAX_LINHA_BASE, avisoTarefasSemLinhaBase, dataLocalDeIso, linhaBaseAtivaEfetiva, linhaBaseDoCronograma, projetarLinhaBase, rotuloLinhaBase, validarTextosLinhaBase } from '@/lib/linhasBase'
-import { computeEvm, computePackageEvm, computeSCurve, eacVariants, forecastFinishBySpi, plannedFraction } from '@/lib/evm'
+import { computeEvm, computePackageEvm, computeSCurve, eacVariants, forecastFinishBySpi, plannedFraction, type HistoricoCurva } from '@/lib/evm'
+import { compararFechamentos, type ResultadoComparacao } from '@/lib/comparacaoFechamentos'
+import { montarExportacaoHistorico } from '@/lib/exportacaoHistorico'
 import { interpretReport } from '@/lib/fieldAi'
 import { MAX_CALENDAR_DAYS, buildMspdiXml, buildTaskXml, lagParaMspdi, parseMspdiXml, validateMspdi, type MspdiValidation } from '@/lib/msProjectXmlParser'
 import {
@@ -134,9 +136,11 @@ import {
   erroDeTextosFechamento,
   hojeLocalIso,
   lerDetalheFechamento as lerDetalheDoRegistro,
+  notasDaLinhaBaseDosFechamentos,
   proximaSequencia,
   retificar,
   serializarDetalhe,
+  serieDosFechamentos,
   validarCabecalhosFechamento,
   type AlteracaoTarefa,
   type EntradaCaptura,
@@ -800,7 +804,9 @@ export const useProjectStore = defineStore('project', () => {
   /** Aviso da D-8: folhas sem custo na LB do valor agregado (BAC, PV e EV zerados; o custo real continua contando). */
   const avisoSemLinhaBase = computed(() => avisoTarefasSemLinhaBase(state.tasks, linhaBaseAtiva.value))
   const packageEvm = computed(() => tentar(() => computePackageEvm(tarefasDoValorAgregado.value, calendariosPv.value, state.meta.statusDate), () => []))
-  const sCurve = computed(() => (calculo.value.erro ? [] : tentar(() => computeSCurve(tarefasDoValorAgregado.value, calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth), () => [])))
+  /** O que a Curva S usa no lugar da reconstrução: os fechamentos efetivos, o detalhe do 1º (âncora) e, na curva de um pacote, o pacote (D-25, D-30). */
+  const historicoDaCurva = (wbs?: string): HistoricoCurva => ({ fechamentos: fechamentosEfetivos.value, ancora: detalheAncora.value, wbs })
+  const sCurve = computed(() => (calculo.value.erro ? [] : tentar(() => computeSCurve(tarefasDoValorAgregado.value, calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth, historicoDaCurva()), () => [])))
   const delay = computed(() => calculo.value.atraso)
   /**
    * Obra com "não mover o restante" e tarefa iniciada cujo restante termina ANTES da data de status: o cálculo é a política do
@@ -830,7 +836,7 @@ export const useProjectStore = defineStore('project', () => {
     return wbs ? tarefasDoValorAgregado.value.filter((t) => t.wbs === wbs || t.wbs.startsWith(wbs + '.')) : tarefasDoValorAgregado.value
   }
   function sCurveFor(wbs?: string) {
-    return wbs ? tentar(() => computeSCurve(tasksOf(wbs), calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth), () => []) : sCurve.value
+    return wbs ? tentar(() => computeSCurve(tasksOf(wbs), calendariosPv.value, state.meta.statusDate, schedule.value, fmtMonth, historicoDaCurva(wbs)), () => []) : sCurve.value
   }
   function evmFor(wbs?: string) {
     return wbs ? tentar(() => computeEvm(tasksOf(wbs), calendariosPv.value, state.meta.statusDate), () => computeEvm([], calendariosPv.value, state.meta.statusDate)) : evm.value
@@ -2742,6 +2748,61 @@ export const useProjectStore = defineStore('project', () => {
     return { ok: true, avisos }
   }
 
+  /** Aviso fixo da curva: sem fechamentos (D-29) ou antes do 1º fechamento (D-28), o histórico é a reconstrução linear de antes. */
+  const avisoCurva = computed(() => {
+    if (!fechamentos.value.length) return 'Histórico reconstruído linearmente: esta obra ainda não tem fechamentos.'
+    const primeiro = fechamentosEfetivos.value[0]
+    return `Antes do 1º fechamento (${dmy(primeiro.dataStatus)}): reconstruído linearmente.`
+  })
+
+  /** Notas da E-9: fechamentos fechados contra uma linha de base diferente da do valor agregado em vigor, ou sobrescrita depois. */
+  const notasDaCurva = computed(() => notasDaLinhaBaseDosFechamentos(fechamentosEfetivos.value, linhaBaseAtiva.value, state.linhasBase))
+
+  /** Série dos fechamentos efetivos (RF-04.4): SPI, CPI, entrega prevista e atraso gravados. */
+  const serieFechamentos = computed(() => serieDosFechamentos(fechamentosEfetivos.value))
+
+  /** Compara dois fechamentos (RF-04.6), o mais antigo contra o mais novo, lendo o detalhe dos dois sob demanda. */
+  async function compararFechamentosPorId(idA: string, idB: string): Promise<{ ok: true; resultado: ResultadoComparacao } | { ok: false; erro: string }> {
+    if (idA === idB) return { ok: false, erro: 'Escolha dois fechamentos diferentes.' }
+    const ca = fechamentos.value.find((c) => c.id === idA)
+    const cb = fechamentos.value.find((c) => c.id === idB)
+    if (!ca || !cb) return { ok: false, erro: 'Fechamento não encontrado nesta obra.' }
+    const [da, db] = [await lerDetalhe(idA), await lerDetalhe(idB)]
+    if (!da || !db) return { ok: false, erro: 'O detalhe de um dos fechamentos está ilegível: a comparação não foi feita.' }
+    const [antigo, novo] = ca.dataStatus < cb.dataStatus || (ca.dataStatus === cb.dataStatus && ca.sequencia <= cb.sequencia) ? [{ cabecalho: ca, detalhe: da }, { cabecalho: cb, detalhe: db }] : [{ cabecalho: cb, detalhe: db }, { cabecalho: ca, detalhe: da }]
+    return { ok: true, resultado: compararFechamentos(antigo, novo, baseCalendar.value) }
+  }
+
+  /**
+   * Histórico da obra para o arquivo JSON (RNF-04.2): as linhas de base e TODOS os fechamentos e retificações legíveis, com o detalhe. Detalhe ilegível fica de fora, com aviso.
+   * É só saída: não grava nada, não envia nada.
+   */
+  async function exportarHistorico(): Promise<{ ok: true; nomeArquivo: string; texto: string; avisos: string[] } | { ok: false; erro: string }> {
+    if (!armazenamento || !obraAtivaId.value) return { ok: false, erro: 'As obras ainda não foram carregadas.' }
+    if (!fechamentosCarregados.value) return { ok: false, erro: 'Os fechamentos desta obra ainda não foram lidos (ou não puderam ser).' }
+    if (!fechamentos.value.length) return { ok: false, erro: 'Esta obra ainda não tem fechamentos para exportar.' }
+    const obra = obraAtivaId.value
+    const lidos: { cabecalho: CabecalhoFechamento; detalhe: DetalheFechamento }[] = []
+    let ignorados = 0
+    for (const cabecalho of fechamentos.value) {
+      const detalhe = await lerDetalhe(cabecalho.id)
+      if (obra !== obraAtivaId.value) return { ok: false, erro: ERRO_OBRA_MUDOU }
+      if (detalhe) lidos.push({ cabecalho, detalhe })
+      else ignorados++
+    }
+    const { nomeArquivo, texto } = montarExportacaoHistorico({
+      exportadoEm: agora(),
+      obra: { nome: state.meta.name, uf: state.meta.uf, municipio: state.meta.municipio },
+      dataStatus: state.meta.statusDate,
+      linhasBase: state.linhasBase,
+      fechamentos: lidos,
+    })
+    const avisos: string[] = []
+    if (ignorados) avisos.push(`${ignorados} fechamento(s) com detalhe ilegível ficaram de fora do arquivo.`)
+    if (fechamentosIlegiveis.value) avisos.push(`${fechamentosIlegiveis.value} fechamento(s) ilegível(is) não entram no arquivo (os registros continuam no navegador).`)
+    return { ok: true, nomeArquivo, texto, avisos }
+  }
+
   /**
    * Faixa da D-14: a obra mudou depois do fechamento efetivo da data de status atual (EV, AC, BAC ou PV diferentes dos gravados, na mesma linha de base).
    * O fechamento é imutável e a Curva S o mostra; os KPIs mostram o estado vivo.
@@ -2765,6 +2826,11 @@ export const useProjectStore = defineStore('project', () => {
     detalheAncora,
     persistenciaFechamento,
     avisoObraMudouDepoisDoFechamento,
+    avisoCurva,
+    notasDaCurva,
+    serieFechamentos,
+    compararFechamentosPorId,
+    exportarHistorico,
     previaFechamento,
     fecharDataDeStatus,
     retificarFechamento,

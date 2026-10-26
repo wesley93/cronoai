@@ -5,10 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { CabecalhoFechamento } from '@/types/fechamento'
 import fixtureLinhasBase from '@/lib/__fixtures__/mspdi-linhas-base.xml?raw'
+import { computeSCurve } from '@/lib/evm'
 import { useUiStore } from './ui'
 import { criarArmazenamentoMemoria, usarArmazenamento, type ArmazenamentoMemoria } from './armazenamentoObras'
 import { useProjectStore } from './useProjectStore'
 
+/** set/26 sem fechamentos depois de avançar a 302 a 90% (medido; antes, com o fechamento, o EV era 5.408.856,76). */
+const SET_SEM_FECHAMENTO_EV = 5396674.208144797
 const MSG_JA_EXISTE = "Já existe fechamento em 23/10/2026: use 'Retificar'."
 const MSG_ANTERIOR = "A data de status não pode ser anterior ao último fechamento (23/10/2026). Para corrigir um fechamento, use 'Retificar'."
 const MSG_OBRA_MUDOU = 'A obra ativa mudou durante a operação. Nada foi gravado: refaça na obra desejada.'
@@ -591,5 +594,158 @@ describe('guardas de obra no fechamento, provadas por mutação', () => {
     expect(store.obraAtivaId).toBe(idB)
     expect(store.fechamentos).toEqual([]) // a lista da B
     expect(store.state.log.some((l) => l.title === 'Data de status fechada')).toBe(false)
+  })
+})
+
+describe('Curva S, tendência, comparação e exportação pelos fechamentos (ciclo 00007, E4)', () => {
+  // Curva S do Aurora na base 00006 (C-1, medida antes de qualquer mudança do ciclo): [rótulo, PV, EV, AC] dos meses já executados
+  const C1_PASSADO: [string, number, number, number][] = [
+    ['mai/26', 755000, 702727.2727272727, 737309.0909090909],
+    ['jun/26', 1931333.3333333333, 1764117.6470588236, 1843900],
+    ['jul/26', 3266250, 2951136.3636363633, 3105127.2727272725],
+    ['ago/26', 4500000, 4072727.272727273, 4316445.454545455],
+    ['set/26', 6004333.333333334, 5408856.76392573, 5765547.214854112],
+  ]
+  const ponto = (store: ReturnType<typeof useProjectStore>, rotulo: string) => store.sCurve.find((p) => p.label === rotulo)!
+
+  it('CS-4 (ação): sem fechamentos a curva é a de hoje, com origem "reconstruido" e o aviso fixo', async () => {
+    const { store } = await abrir()
+    expect(store.sCurve.filter((p) => p.ev !== null).every((p) => p.origem === 'reconstruido' && p.tipo === 'mes')).toBe(true)
+    expect(store.avisoCurva).toBe('Histórico reconstruído linearmente: esta obra ainda não tem fechamentos.')
+    expect(store.sCurve).toHaveLength(14)
+  })
+
+  it('CS-3 (continuidade): fechar o Aurora em 23/10 não muda nenhum valor da curva; mai–set seguem reconstruídos e "out/26 ●" é o fechamento', async () => {
+    const { store } = await abrir()
+    const antes = store.sCurve.map((p) => [p.label, p.pv, p.ev, p.ac, p.forecast])
+    await fechar(store)
+    expect(store.sCurve).toHaveLength(14) // o fechamento é a data de status: vira o ponto do mês, sem ponto novo
+    expect(store.sCurve.map((p) => [p.label, p.pv, p.ev, p.ac, p.forecast])).toEqual(antes) // idêntico, número por número
+    for (const [rotulo, pv, ev, ac] of C1_PASSADO) {
+      const p = ponto(store, rotulo)
+      expect([p.pv, p.ev, p.ac]).toEqual([pv, ev, ac])
+      expect(p.origem).toBe('reconstruido')
+    }
+    const out = ponto(store, 'out/26 ●')
+    expect([out.pv, out.ev, out.ac, out.origem, out.linhaBaseFechamento]).toEqual([7259250, 6448200, 6896900, 'fechamento', 0])
+    expect(store.avisoCurva).toBe('Antes do 1º fechamento (23/10/2026): reconstruído linearmente.')
+  })
+
+  it('CS-3b (passado parado): depois de avançar a 302 e fechar de novo, mai–set continuam os de antes; sem fechamentos eles mudariam', async () => {
+    const { store } = await abrir()
+    await fechar(store)
+    store.setStatusDate('2026-10-30')
+    store.updateTask(302, { percentComplete: 90 })
+    await fechar(store)
+    for (const [rotulo, pv, ev, ac] of C1_PASSADO) {
+      const p = ponto(store, rotulo)
+      expect([p.pv, p.ev, p.ac, p.origem]).toEqual([pv, ev, ac, 'reconstruido']) // âncora no 1º fechamento
+    }
+    // Antes → depois: a reconstrução SEM fechamentos (a da base) refaria o passado com o avanço novo da 302
+    const base = computeSCurve(store.tarefasDoValorAgregado, store.calendariosPv, store.state.meta.statusDate, store.schedule, (iso) => iso.slice(0, 7))
+    const setBase = base.find((p) => p.date === '2026-09-30')!
+    expect(setBase.ev).not.toBeCloseTo(C1_PASSADO[4][2], 2)
+    expect(setBase.ev).toBeCloseTo(SET_SEM_FECHAMENTO_EV, 2) // antes (com fechamento): 5.408.856,76; depois (sem): o valor do avanço novo
+    // os pontos de fechamento mostram o gravado
+    expect(store.sCurve.filter((p) => p.origem === 'fechamento').map((p) => [p.label, p.ev])).toEqual([['23/10 ◆', 6448200], ['out/26 ●', 6712200]]) // 6.448.200 + 12 p.p. de R$ 2.200.000 da 302
+  })
+
+  it('CS-5: o efetivo é a retificação (EV 6.456.600,00 e AC 6.899.900,00 no ponto); o cabeçalho adulterado fica fora da curva, com aviso', async () => {
+    const { adaptador, store } = await abrir()
+    const f1 = await fechar(store)
+    await store.retificarFechamento({ fechamentoId: f1.id, alteracoes: [{ uid: 104, pct: 45, custoReal: 75000 }], motivo: 'Medição revisada em campo' })
+    await store.salvarAgora()
+    adaptador.fechamentos.set('x-adulterado', { ...structuredClone(adaptador.fechamentos.get(f1.id) as CabecalhoFechamento), id: 'x-adulterado', sequencia: 9, totais: { ...(adaptador.fechamentos.get(f1.id) as CabecalhoFechamento).totais, ev: 'x' } })
+    const reaberta = await reabrir(adaptador)
+    const out = reaberta.sCurve.find((p) => p.label === 'out/26 ●')!
+    expect([out.ev, out.ac, out.origem]).toEqual([6456600, 6899900, 'fechamento'])
+    expect(reaberta.fechamentosIlegiveis).toBe(1)
+    expect(reaberta.avisoFechamentos).toContain('1 fechamento(s) ilegível(is) ignorado(s)')
+    expect(reaberta.fechamentos.some((c) => c.id === 'x-adulterado')).toBe(false)
+    // os meses de antes vêm da âncora (a retificação, que é o 1º efetivo): o passado acompanha a correção, e só nele
+    expect(reaberta.detalheAncora?.tarefas.find((t) => t[0] === 104)?.[2]).toBe(45)
+  })
+
+  it('CS-6 e E-9: LB1 do valor agregado e o fechamento feito com a LB0: o PV é o da LB1, o EV e o AC são os gravados, e a nota diz contra qual LB foi fechado', async () => {
+    const { store } = await abrir()
+    await fechar(store) // com a LB0
+    store.salvarLinhaBase({ numero: 1, nome: 'Replanejamento', motivo: 'Teste' })
+    store.definirLinhaBaseAtiva(1)
+    const out = ponto(store, 'out/26 ●')
+    expect(out.pv).toBeCloseTo(6496233.415233416, 2) // o PV da curva é o da LB1 (regra do CronoAI)
+    expect([out.ev, out.ac, out.origem, out.linhaBaseFechamento]).toEqual([6448200, 6896900, 'fechamento', 0])
+    expect(store.notasDaCurva).toEqual(['Fechamento de 23/10/2026: fechado contra a LB0 de 27/04/2026. O PV da curva é o da LB1.'])
+    store.definirLinhaBaseAtiva(0)
+    expect(store.notasDaCurva).toEqual([]) // a LB0 em vigor e não sobrescrita: sem nota
+    // sobrescrever a LB0 depois do fechamento também gera a nota
+    vi.setSystemTime(new Date('2026-11-30T15:00:00.000Z'))
+    store.salvarLinhaBase({ numero: 0, nome: 'LB0 nova', motivo: 'Replanejamento', confirmarSobrescrita: true })
+    expect(store.notasDaCurva).toEqual(['Fechamento de 23/10/2026: fechado contra a LB0 de 27/04/2026; a LB0 atual é de 30/11/2026.'])
+  })
+
+  it('a curva por pacote usa o porPacote dos fechamentos: o pacote 01 no ponto do fechamento tem EV 2.150.000,00 e AC 2.239.900,00', async () => {
+    const { store } = await abrir()
+    await fechar(store)
+    const p01 = store.sCurveFor('01').find((p) => p.origem === 'fechamento')!
+    expect([p01.ev, p01.ac]).toEqual([2150000, 2239900])
+    const p03 = store.sCurveFor('03').find((p) => p.origem === 'fechamento')!
+    expect(p03.ev).toBeCloseTo(store.packageEvm.find((p) => p.wbs === '03')!.ev, 2)
+  })
+
+  it('TE-1 (ação): a série dos fechamentos tem SPI, CPI, entrega e atraso gravados em cada data', async () => {
+    const { store } = await abrir()
+    await fechar(store)
+    store.setStatusDate('2026-10-30')
+    await fechar(store)
+    expect(store.serieFechamentos.map((p) => [p.data, p.entregaPrevista, p.atrasoDiasUteis])).toEqual([['2026-10-23', '2027-06-23', 16], ['2026-10-30', '2027-06-30', 21]]) // uma semana sem avanço empurra o previsto em 5 d.u.
+    expect(store.serieFechamentos[0].spi).toBeCloseTo(0.888274, 6)
+    expect(store.serieFechamentos[0].cpi).toBeCloseTo(0.934942, 6)
+  })
+
+  it('compara dois fechamentos (RF-04.6) do mais antigo para o mais novo, em qualquer ordem dos ids', async () => {
+    const { store } = await abrir()
+    const f1 = await fechar(store)
+    store.setStatusDate('2026-10-30')
+    store.updateTask(104, { percentComplete: 60 })
+    const f2 = await fechar(store)
+    const r = await store.compararFechamentosPorId(f2.id, f1.id)
+    if (!r.ok) throw new Error(r.erro)
+    expect([r.resultado.a.id, r.resultado.b.id]).toEqual([f1.id, f2.id])
+    expect(r.resultado.avancaram.map((i) => [i.uid, i.deltaPct])).toEqual([[104, 20]])
+    expect(r.resultado.totais.ev.delta).toBeCloseTo(33600, 2) // 20 p.p. de R$ 168.000,00
+    expect(await store.compararFechamentosPorId(f1.id, f1.id)).toEqual({ ok: false, erro: 'Escolha dois fechamentos diferentes.' })
+    expect(await store.compararFechamentosPorId(f1.id, 'nao-existe')).toEqual({ ok: false, erro: 'Fechamento não encontrado nesta obra.' })
+  })
+
+  it('EX-1 (ação): exporta as LBs e TODOS os registros gravados (original e retificação); o arquivo traz exatamente o que está no armazenamento', async () => {
+    const { adaptador, store } = await abrir()
+    expect(await store.exportarHistorico()).toEqual({ ok: false, erro: 'Esta obra ainda não tem fechamentos para exportar.' })
+    const f1 = await fechar(store)
+    await store.retificarFechamento({ fechamentoId: f1.id, alteracoes: [{ uid: 104, pct: 45, custoReal: 75000 }], motivo: 'Medição revisada em campo' })
+    const r = await store.exportarHistorico()
+    if (!r.ok) throw new Error(r.erro)
+    expect(r.nomeArquivo).toBe('Edificio_Residencial_Aurora_12_Pavimentos_historico_2026-10-23.json')
+    expect(r.avisos).toEqual([])
+    const arquivo = JSON.parse(r.texto)
+    expect(arquivo.formato).toBe('cronoai-historico')
+    expect(arquivo.linhasBase).toEqual(JSON.parse(JSON.stringify(store.state.linhasBase)))
+    expect(arquivo.fechamentos.map((f: { cabecalho: CabecalhoFechamento }) => [f.cabecalho.sequencia, f.cabecalho.tipo])).toEqual([[1, 'fechamento'], [2, 'retificacao']])
+    for (const f of arquivo.fechamentos as { cabecalho: CabecalhoFechamento; tarefas: unknown[] }[]) {
+      expect(f.cabecalho).toEqual(adaptador.fechamentos.get(f.cabecalho.id))
+      expect(f.tarefas).toEqual(JSON.parse((adaptador.detalhes.get(f.cabecalho.id) as { json: string }).json).tarefas)
+      expect(f.tarefas).toHaveLength(20)
+    }
+  })
+
+  it('a exportação deixa de fora o detalhe ilegível, com aviso', async () => {
+    const { adaptador, store } = await abrir()
+    const f1 = await fechar(store)
+    store.setStatusDate('2026-10-30')
+    const f2 = await fechar(store)
+    adaptador.detalhes.set(f2.id, { id: f2.id, json: '{' }) // o 2º tem o detalhe adulterado (o 1º é a âncora e está bom)
+    const r = await store.exportarHistorico()
+    if (!r.ok) throw new Error(r.erro)
+    expect(r.avisos).toEqual(['1 fechamento(s) com detalhe ilegível ficaram de fora do arquivo.'])
+    expect(JSON.parse(r.texto).fechamentos.map((f: { cabecalho: CabecalhoFechamento }) => f.cabecalho.id)).toEqual([f1.id])
   })
 })

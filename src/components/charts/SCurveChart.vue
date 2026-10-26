@@ -36,13 +36,24 @@ const PALETTE = {
 const c = computed(() => PALETTE[ui.theme])
 const labels = computed(() => props.points.map((p) => p.label))
 const radius = (base: number) => (ctx: { dataIndex: number }) => (ctx.dataIndex === props.selectedIndex ? base + 3 : base)
+const origemDe = (i: number) => props.points[i]?.origem
+// Ponto de fechamento (EV e AC gravados): maior e com anel âmbar; interpolado: pequeno (é uma estimativa). A cor não é a única pista: o rótulo do eixo traz ◆ e a tabela, a coluna Origem
+const raioDoPonto = (base: number) => (ctx: { dataIndex: number }) => {
+  const o = origemDe(ctx.dataIndex)
+  const r = o === 'fechamento' ? base + 2 : o === 'interpolado' ? 2 : base
+  return ctx.dataIndex === props.selectedIndex ? r + 3 : r
+}
+const anelDoPonto = (ctx: { dataIndex: number }) => (origemDe(ctx.dataIndex) === 'fechamento' ? '#f59e0b' : c.value.surface)
+const larguraDoAnel = (ctx: { dataIndex: number }) => (origemDe(ctx.dataIndex) === 'fechamento' ? 3 : 2)
+// Trecho interpolado (estimativa entre fechamentos): pontilhado CURTO, diferente do tracejado longo da tendência (borderDash [6, 5])
+const trechoInterpolado = (ctx: { p1DataIndex: number }) => (['interpolado', 'atual'].includes(origemDe(ctx.p1DataIndex) ?? '') ? [2, 3] : undefined)
 
 const lineData = computed<ChartData<'line'>>(() => ({
   labels: labels.value,
   datasets: [
     { label: 'PV — Planejado (linha de base)', data: props.points.map((p) => p.pv), borderColor: c.value.pv, backgroundColor: c.value.pv + '14', fill: true, borderWidth: 2, pointRadius: radius(0), pointHoverRadius: 5, tension: 0.35 },
-    { label: 'EV — Agregado', data: props.points.map((p) => p.ev), borderColor: c.value.ev, backgroundColor: c.value.ev, borderWidth: 2, pointRadius: radius(3), pointHoverRadius: 6, pointBorderColor: c.value.surface, pointBorderWidth: 2, tension: 0.3 },
-    { label: 'AC — Custo Real', data: props.points.map((p) => p.ac), borderColor: c.value.ac, backgroundColor: c.value.ac, borderWidth: 2, pointStyle: 'rectRot', pointRadius: radius(4), pointHoverRadius: 7, pointBorderColor: c.value.surface, pointBorderWidth: 2, tension: 0.3 },
+    { label: 'EV — Agregado', data: props.points.map((p) => p.ev), borderColor: c.value.ev, backgroundColor: c.value.ev, borderWidth: 2, pointRadius: raioDoPonto(3), pointHoverRadius: 6, pointBorderColor: anelDoPonto, pointBorderWidth: larguraDoAnel, tension: 0.3, segment: { borderDash: trechoInterpolado } },
+    { label: 'AC — Custo Real', data: props.points.map((p) => p.ac), borderColor: c.value.ac, backgroundColor: c.value.ac, borderWidth: 2, pointStyle: 'rectRot', pointRadius: raioDoPonto(4), pointHoverRadius: 7, pointBorderColor: anelDoPonto, pointBorderWidth: larguraDoAnel, tension: 0.3, segment: { borderDash: trechoInterpolado } },
     { label: 'Tendência reprogramada (EV previsto)', data: props.points.map((p) => p.forecast), borderColor: c.value.fc, borderWidth: 2, borderDash: [6, 5], pointRadius: 0, pointHoverRadius: 4, tension: 0.35 },
   ],
 }))
@@ -83,7 +94,7 @@ function baseOptions() {
         callbacks: {
           label: (ctx: { parsed: { y: number | null }; dataset: { label?: string } }) =>
             ctx.parsed.y === null ? '' : ` ${ctx.dataset.label}: ${fmtBRL(ctx.parsed.y)} (${((ctx.parsed.y / Math.max(1, props.bac)) * 100).toFixed(1).replace('.', ',')}% do BAC)`,
-          footer: () => 'Clique para detalhar o mês',
+          footer: (itens: { dataIndex: number }[]) => (origemDe(itens[0]?.dataIndex ?? -1) === 'fechamento' ? 'Fechamento: EV e AC gravados. Clique para detalhar' : 'Clique para detalhar o ponto'),
         },
       },
     },
@@ -101,6 +112,8 @@ function baseOptions() {
     },
   }
 }
+const temFechamento = computed(() => props.points.some((p) => p.origem === 'fechamento'))
+const temInterpolado = computed(() => props.points.some((p) => p.origem === 'interpolado' || p.origem === 'atual'))
 const lineOptions = computed(() => baseOptions() as unknown as ChartOptions<'line'>)
 const barOptions = computed(() => baseOptions() as unknown as ChartOptions<'bar'>)
 </script>
@@ -110,4 +123,10 @@ const barOptions = computed(() => baseOptions() as unknown as ChartOptions<'bar'
     <Line v-if="mode === 'acumulado'" :data="lineData" :options="lineOptions" role="img" aria-label="Curva S físico-financeira acumulada: Planejado, Agregado e Custo Real por mês" />
     <Bar v-else :data="barData" :options="barOptions" role="img" aria-label="Valores mensais de Planejado, Agregado e Custo Real" />
   </div>
+  <!-- Legenda dos traços e marcadores da Curva S de fechamentos (a cor nunca é a única pista) -->
+  <ul v-if="mode === 'acumulado' && (temFechamento || temInterpolado)" class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500" data-testid="legenda-curva">
+    <li v-if="temFechamento"><span class="mr-1 inline-block h-2.5 w-2.5 rounded-full border-2 border-amber-500 align-middle"></span>◆ Ponto de fechamento: EV e AC gravados</li>
+    <li v-if="temInterpolado"><span class="mr-1 inline-block w-5 border-t-2 border-dotted border-zinc-500 align-middle"></span>Pontilhado curto: interpolado entre fechamentos</li>
+    <li><span class="mr-1 inline-block w-5 border-t-2 border-dashed border-zinc-500 align-middle"></span>Tracejado longo: tendência reprogramada</li>
+  </ul>
 </template>
