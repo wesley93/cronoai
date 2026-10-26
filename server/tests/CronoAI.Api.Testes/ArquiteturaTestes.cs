@@ -27,6 +27,13 @@ public sealed partial class ArquiteturaTestes
         "src/CronoAI.Dados/CronoDbContext.cs",
     ];
 
+    // Único arquivo de server/src autorizado a escrever em tabela auditada por SQL: o provisionamento de desenvolvimento (cria empresa
+    // e membros como o migrador, sem trilha; ciclo 00014, seção 3.8). Exceção declarada, como a regra R18.
+    private static readonly string[] _arquivosComEscritaPermitida =
+    [
+        "src/CronoAI.Dados/Rls/ProvisionamentoEmpresa.cs",
+    ];
+
     #endregion
 
     #region Métodos públicos
@@ -175,9 +182,10 @@ public sealed partial class ArquiteturaTestes
     }
 
     [Fact]
-    public void Sem_SQL_de_escrita_em_obra_ou_auditoria_fora_de_migracao()
+    public void Sem_sql_de_escrita_em_tabela_auditada_fora_de_migracao()
     {
         // Mesmo critério da regra R18 (por LINHA, com ou sem schema, aspas e ONLY), aplicado a todo o server/src sem Migrations.
+        // Tabelas auditadas: obra, auditoria, membro_empresa e as 6 do ciclo 00014. Única exceção: Rls/ProvisionamentoEmpresa.cs.
         Assert.Empty(SqlDeEscritaEmEntidadeAuditada(ArquivosDeSrc()));
     }
 
@@ -192,6 +200,13 @@ public sealed partial class ArquiteturaTestes
     [InlineData("    $@\"UPDATE \"\"cronoai\"\".\"\"obra\"\" SET nome = {n}\"")]
     [InlineData("    $\"UPDATE \"cronoai\".\"obra\" SET nome = {n}\"")]
     [InlineData("await db.Database.ExecuteSqlInterpolatedAsync($\"DELETE FROM auditoria\");")]
+    [InlineData("    INSERT INTO cronoai.membro_empresa (empresa_id) VALUES ({e})")]
+    [InlineData("    UPDATE \"acesso_obra\" SET obra_id = {o}")]
+    [InlineData("    DELETE FROM ONLY cronoai.frente")]
+    [InlineData("    MERGE INTO carteira_obra c USING origem x ON c.id = x.id")]
+    [InlineData("    $\"DELETE FROM \\\"cronoai\\\".\\\"acesso_carteira\\\"\"")]
+    [InlineData("    UPDATE cronoai.acesso_frente SET frente_id = {f}")]
+    [InlineData("    DELETE FROM cronoai.carteira WHERE id = {id}")]
     public void Detector_de_SQL_de_escrita_acusa_as_formas_que_escapavam(string linha)
     {
         Assert.Equal(["src/CronoAI.Api/Obras/Qualquer.cs"], SqlDeEscritaEmEntidadeAuditada([("src/CronoAI.Api/Obras/Qualquer.cs", linha)]));
@@ -202,9 +217,57 @@ public sealed partial class ArquiteturaTestes
     [InlineData("// UPDATE cronoai.obra SET nome = 1 (comentário)")]
     [InlineData("    UPDATE obra_arquivada SET x = 1")]
     [InlineData("    UPDATE usuario SET nome_exibicao = null")]
+    [InlineData("    SELECT 1 FROM cronoai.membro_empresa m WHERE m.usuario_id = {u}")]
+    [InlineData("// INSERT INTO cronoai.membro_empresa (comentário)")]
+    [InlineData("    UPDATE carteira_arquivada SET x = 1")]
     public void Detector_de_SQL_de_escrita_nao_acusa_leitura_comentario_e_outras_tabelas(string linha)
     {
         Assert.Empty(SqlDeEscritaEmEntidadeAuditada([("src/CronoAI.Api/Obras/Qualquer.cs", linha)]));
+    }
+
+    [Fact]
+    public void Detector_de_SQL_de_escrita_so_perdoa_o_provisionamento()
+    {
+        const string escrita = "INSERT INTO cronoai.membro_empresa (empresa_id) VALUES ({e})";
+
+        Assert.Empty(SqlDeEscritaEmEntidadeAuditada([("src/CronoAI.Dados/Rls/ProvisionamentoEmpresa.cs", escrita)]));
+        Assert.Equal(["src/CronoAI.Dados/Rls/Outro.cs"], SqlDeEscritaEmEntidadeAuditada([("src/CronoAI.Dados/Rls/Outro.cs", escrita)]));
+
+        // O SQL em linha separada da chamada também é acusado (a regra olha cada linha do SQL).
+        Assert.Equal(
+            ["src/CronoAI.Api/Membros/Qualquer.cs"],
+            SqlDeEscritaEmEntidadeAuditada([("src/CronoAI.Api/Membros/Qualquer.cs", "await db.Database.ExecuteSqlAsync(\n    $\"UPDATE cronoai.acesso_obra SET obra_id = {o}\");")]));
+    }
+
+    [Fact]
+    public void Responsavel_texto_fora_da_lista_branca()
+    {
+        // Nome de pessoa por desenho (Q2) numa trilha append-only: nunca entra. A frente tem lista, e ela não cita o texto.
+        var campos = ListaBrancaAuditoria.Campos(typeof(Frente));
+
+        Assert.DoesNotContain(campos, c => c.Propriedade == nameof(Frente.ResponsavelTexto));
+        Assert.DoesNotContain(campos, c => c.Chave == "responsavel_texto");
+
+        // Controle: o responsável por membro (id, pseudônimo) entra, e a lista não está vazia.
+        Assert.Contains(campos, c => c.Chave == "responsavel_id");
+        Assert.NotEmpty(campos);
+    }
+
+    [Fact]
+    public void Entidades_novas_do_ciclo_00014_sao_auditaveis_com_lista_branca()
+    {
+        Type[] esperadas = [typeof(MembroEmpresa), typeof(AcessoObra), typeof(Frente), typeof(AcessoFrente), typeof(Carteira), typeof(CarteiraObra), typeof(AcessoCarteira)];
+
+        Assert.All(esperadas, tipo =>
+        {
+            Assert.True(typeof(IAuditavel).IsAssignableFrom(tipo), tipo.Name);
+            Assert.True(ListaBrancaAuditoria.Contem(tipo), tipo.Name);
+        });
+
+        // Os quatro vínculos são os ÚNICOS que admitem DELETE físico auditado.
+        Assert.Equal(
+            ["AcessoCarteira", "AcessoFrente", "AcessoObra", "CarteiraObra"],
+            esperadas.Where(t => typeof(IVinculoRemovivel).IsAssignableFrom(t)).Select(t => t.Name).Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -248,8 +311,9 @@ public sealed partial class ArquiteturaTestes
     [Fact]
     public void Entidade_gravavel_de_empresa_e_auditavel_ou_excecao_declarada()
     {
-        // Exceções declaradas até o ciclo 00014, que as torna auditáveis.
-        Type[] excecoes = [typeof(MembroEmpresa), typeof(CronoAI.Dominio.Sessao), typeof(Empresa)];
+        // Exceções declaradas (ciclo 00014): o membro e as tabelas novas passam a ser auditáveis; ficam só a sessão (efêmera, sem valor
+        // de trilha) e a empresa (criada fora da API, pelo provisionamento).
+        Type[] excecoes = [typeof(CronoAI.Dominio.Sessao), typeof(Empresa)];
         using var contexto = CriarContextoDeModelo();
         var tiposDoModelo = contexto.Model.GetEntityTypes().Select(t => t.ClrType).ToList();
 
@@ -313,17 +377,19 @@ public sealed partial class ArquiteturaTestes
     /// <summary>Arquivos com linha de SQL de escrita (não comentário) em obra ou auditoria, com ou sem schema, aspas e ONLY.</summary>
     public static IReadOnlyList<string> SqlDeEscritaEmEntidadeAuditada(IEnumerable<(string Caminho, string Conteudo)> arquivos) =>
         arquivos
+            .Where(a => !_arquivosComEscritaPermitida.Contains(a.Caminho, StringComparer.Ordinal))
             .Where(a => a.Conteudo.Split('\n').Any(linha => !linha.TrimStart().StartsWith("//", StringComparison.Ordinal) && EscritaEmAuditadaRegex().IsMatch(linha)))
             .Select(a => a.Caminho)
             .ToList();
 
-    [GeneratedRegex(@"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)(\s+ONLY)?\s+((?:\\""|""""|"")?cronoai(?:\\""|""""|"")?\s*\.\s*)?(?:\\""|""""|"")?(obra|auditoria)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)(\s+ONLY)?\s+((?:\\""|""""|"")?cronoai(?:\\""|""""|"")?\s*\.\s*)?(?:\\""|""""|"")?(obra|auditoria|membro_empresa|acesso_obra|frente|acesso_frente|carteira|carteira_obra|acesso_carteira)\b", RegexOptions.IgnoreCase)]
     private static partial Regex EscritaEmAuditadaRegex();
 
     [GeneratedRegex(@"\bExecute(?:Update|Delete)(?:Async)?\s*\(")]
     private static partial Regex ExecuteEmMassaRegex();
 
-    [GeneratedRegex(@"\b(?:Obra|Obras|RegistroAuditoria|Auditorias)\b")]
+    // Membros fica de fora de propósito: ConsultasIdentidade (único arquivo com Execute*, só sobre sessao) também LÊ Membros.
+    [GeneratedRegex(@"\b(?:Obra|Obras|RegistroAuditoria|Auditorias|AcessosObra|Frentes|AcessosFrente|Carteiras|CarteirasObras|AcessosCarteira)\b")]
     private static partial Regex EntidadeAuditadaRegex();
 
     /// <summary>

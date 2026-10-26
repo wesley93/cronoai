@@ -1,7 +1,9 @@
 using CronoAI.Api.Desenvolvimento;
 using CronoAI.Api.Testes.Infra;
 using CronoAI.Dados;
+using CronoAI.Dominio;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CronoAI.Api.Testes.Autenticacao;
@@ -37,6 +39,47 @@ public sealed class SementeDesenvolvimentoTestes
         var erro = await Assert.ThrowsAsync<InvalidOperationException>(() => semente.ExecutarAsync(TestContext.Current.CancellationToken));
 
         Assert.Contains("Development", erro.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Semente_recusa_sem_a_string_do_migrador()
+    {
+        // O app não insere membro: sem o migrador a semente falha ruidosamente, ANTES de criar qualquer coisa.
+        var semente = CriarSemente("Development", comMigrador: false);
+
+        var erro = await Assert.ThrowsAsync<InvalidOperationException>(() => semente.ExecutarAsync(TestContext.Current.CancellationToken));
+
+        Assert.Contains("CronoaiMigracao", erro.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(_banco.StringConexaoMigrador, erro.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Semente_cria_perfis_distintos_e_vincula_dev_b_a_uma_obra()
+    {
+        await CriarSemente("Development").ExecutarAsync(TestContext.Current.CancellationToken);
+
+        var devA = (await ConsultaBanco.ObterUsuarioIdAsync(_banco, "urn:cronoai:desenvolvimento", IdsDesenvolvimento.SujeitoDevA))!.Value;
+        var devB = (await ConsultaBanco.ObterUsuarioIdAsync(_banco, "urn:cronoai:desenvolvimento", IdsDesenvolvimento.SujeitoDevB))!.Value;
+        var empresa = IdsDesenvolvimento.EmpresaCompartilhada;
+
+        Assert.Equal(Perfis.Administrador + "|" + EscoposObras.Todas, await _banco.ConsultarComoSuperusuarioAsync($"SELECT perfil || '|' || escopo_obras FROM cronoai.membro_empresa WHERE empresa_id = '{empresa}' AND usuario_id = '{devA}'"));
+        Assert.Equal(Perfis.EngenheiroObra + "|" + EscoposObras.Vinculadas, await _banco.ConsultarComoSuperusuarioAsync($"SELECT perfil || '|' || escopo_obras FROM cronoai.membro_empresa WHERE empresa_id = '{empresa}' AND usuario_id = '{devB}'"));
+
+        // dev-b enxerga exatamente UMA obra (a vinculada); dev-a, todas as da empresa (como app, pelo RLS por obra).
+        await using (var comoDevB = _banco.FabricaApp.Criar(new ContextoSessaoBanco(devB, empresa)))
+        {
+            var obras = await comoDevB.Database.SqlQuery<Guid>($"SELECT id AS \"Value\" FROM cronoai.obra").ToListAsync(TestContext.Current.CancellationToken);
+            Assert.Equal([IdsDesenvolvimento.ObraCompartilhada], obras);
+        }
+
+        await using (var comoDevA = _banco.FabricaApp.Criar(new ContextoSessaoBanco(devA, empresa)))
+        {
+            var obras = await comoDevA.Database.SqlQuery<Guid>($"SELECT id AS \"Value\" FROM cronoai.obra").ToListAsync(TestContext.Current.CancellationToken);
+            Assert.Contains(IdsDesenvolvimento.ObraCompartilhada, obras);
+        }
+
+        // FORCE restaurado depois do provisionamento (o dono segue sujeito ao RLS).
+        Assert.Equal("true|true", await _banco.ConsultarComoSuperusuarioAsync("SELECT string_agg(relforcerowsecurity::text, '|' ORDER BY relname) FROM pg_class WHERE oid IN ('cronoai.empresa'::regclass, 'cronoai.membro_empresa'::regclass)"));
     }
 
     [Fact]
@@ -81,7 +124,7 @@ public sealed class SementeDesenvolvimentoTestes
     public async Task Semente_da_composicao_real_do_host_roda_como_cronoai_app()
     {
         // Composição REAL (Program.cs): a semente e a fábrica vêm do contêiner de DI do host, ligado à string do app.
-        await using var fabrica = new ApiFactory(_banco.StringConexaoApp, "Development");
+        await using var fabrica = new ApiFactory(_banco.StringConexaoApp, "Development") { Configuracoes = { ["ConnectionStrings:CronoaiMigracao"] = _banco.StringConexaoMigrador } };
         var semente = fabrica.Services.GetRequiredService<SementeDesenvolvimento>();
         var fabricaDoHost = fabrica.Services.GetRequiredService<IFabricaCronoDbContext>();
 
@@ -97,10 +140,13 @@ public sealed class SementeDesenvolvimentoTestes
 
     #region Métodos privados
 
-    private SementeDesenvolvimento CriarSemente(string ambiente)
+    private SementeDesenvolvimento CriarSemente(string ambiente, bool comMigrador = true)
     {
         var fabrica = _banco.FabricaApp;
-        return new SementeDesenvolvimento(fabrica, new CronoAI.Dados.Identidade.ConsultasIdentidade(fabrica), new AmbienteFalso(ambiente), TimeProvider.System);
+        var configuracao = new ConfigurationBuilder()
+            .AddInMemoryCollection(comMigrador ? new Dictionary<string, string?> { ["ConnectionStrings:CronoaiMigracao"] = _banco.StringConexaoMigrador } : [])
+            .Build();
+        return new SementeDesenvolvimento(fabrica, new CronoAI.Dados.Identidade.ConsultasIdentidade(fabrica), new AmbienteFalso(ambiente), TimeProvider.System, configuracao);
     }
 
     #endregion

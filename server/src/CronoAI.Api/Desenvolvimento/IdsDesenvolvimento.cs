@@ -11,6 +11,11 @@ public static class IdsDesenvolvimento
 
     public static readonly Guid EmpresaCompartilhada = new("0195f000-0000-7000-8000-0000000000c3");
 
+    /// <summary>Obra fictícia da empresa compartilhada, vinculada ao <c>dev-b</c> (engenheiro de obra).</summary>
+    public static readonly Guid ObraCompartilhada = new("0195f000-0000-7000-8000-0000000000d4");
+
+    public const string NomeObraCompartilhada = "Obra Fictícia do Dev B";
+
     public const string NomeEmpresaA = "Construtora Fictícia A";
 
     public const string NomeEmpresaB = "Construtora Fictícia B";

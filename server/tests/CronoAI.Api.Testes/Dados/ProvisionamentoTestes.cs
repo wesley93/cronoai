@@ -1,0 +1,109 @@
+using CronoAI.Api.Testes.Infra;
+using CronoAI.Dados.Rls;
+using CronoAI.Dominio;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
+
+namespace CronoAI.Api.Testes.Dados;
+
+/// <summary>
+/// <c>ProvisionamentoEmpresa</c> (T35): cria empresa e membros como o MIGRADOR e restaura o <c>FORCE</c>; sem administrador a
+/// transação inteira desfaz (inclusive o <c>NO FORCE</c>); o app continua sem INSERT em <c>membro_empresa</c>.
+/// </summary>
+[Collection(ColecaoBanco.Nome)]
+[Trait("Categoria", "Integracao")]
+public sealed class ProvisionamentoTestes
+{
+    #region Campos
+
+    private readonly BancoPostgresFixture _banco;
+    private readonly DadosTeste _dados;
+
+    #endregion
+
+    #region Construtor
+
+    public ProvisionamentoTestes(BancoPostgresFixture banco)
+    {
+        _banco = banco;
+        _dados = new DadosTeste(banco);
+    }
+
+    #endregion
+
+    #region Métodos públicos
+
+    [Fact]
+    public async Task Provisionamento_restaura_force_e_exige_administrador()
+    {
+        var provisionamento = new ProvisionamentoEmpresa(_banco.FabricaMigrador);
+        var admin = await _dados.CriarUsuarioAsync();
+        var engenheiro = await _dados.CriarUsuarioAsync();
+        var agora = DateTime.UtcNow;
+
+        // Válido: empresa + administrador + engenheiro.
+        var empresa = Empresa.Criar("Empresa Provisionada Ficticia", agora);
+        await provisionamento.ProvisionarAsync(
+            empresa,
+            [
+                MembroEmpresa.Criar(empresa.Id, admin, Perfis.Administrador, EscoposObras.Todas, agora),
+                MembroEmpresa.Criar(empresa.Id, engenheiro, Perfis.EngenheiroObra, EscoposObras.Vinculadas, agora),
+            ],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("1|2", await _banco.ConsultarComoSuperusuarioAsync($"SELECT (SELECT count(*) FROM cronoai.empresa WHERE id = '{empresa.Id}') || '|' || (SELECT count(*) FROM cronoai.membro_empresa WHERE empresa_id = '{empresa.Id}')"));
+        await AfirmarForceAsync();
+
+        // Idempotente: repetir não duplica nem falha.
+        await provisionamento.ProvisionarAsync(
+            empresa,
+            [MembroEmpresa.Criar(empresa.Id, admin, Perfis.Administrador, EscoposObras.Todas, agora)],
+            TestContext.Current.CancellationToken);
+        Assert.Equal("2", await _banco.ConsultarComoSuperusuarioAsync($"SELECT count(*) FROM cronoai.membro_empresa WHERE empresa_id = '{empresa.Id}'"));
+
+        // O papel da aplicação segue SEM INSERT em membro_empresa.
+        await using (var comoApp = _dados.Fabrica.Criar(new CronoAI.Dados.ContextoSessaoBanco(admin, empresa.Id)))
+        {
+            var erro = await Assert.ThrowsAsync<PostgresException>(() => comoApp.Database.ExecuteSqlAsync(
+                $"INSERT INTO cronoai.membro_empresa (empresa_id, usuario_id, perfil, escopo_obras, criado_em, atualizado_em) VALUES ({empresa.Id}, {Guid.NewGuid()}, {"administrador"}, {"todas"}, {agora}, {agora})",
+                TestContext.Current.CancellationToken));
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, erro.SqlState);
+        }
+
+        // Sem administrador: a transação falha NO SET CONSTRAINTS e NADA fica (nem a empresa, nem o NO FORCE).
+        var semAdmin = Empresa.Criar("Empresa Sem Administrador Ficticia", agora);
+        var falha = await Assert.ThrowsAnyAsync<Exception>(() => provisionamento.ProvisionarAsync(
+            semAdmin,
+            [MembroEmpresa.Criar(semAdmin.Id, engenheiro, Perfis.EngenheiroObra, EscoposObras.Vinculadas, agora)],
+            TestContext.Current.CancellationToken));
+        Assert.Equal("ck_empresa_tem_administrador", PostgresDaCadeia(falha).ConstraintName);
+        Assert.Equal("0|0", await _banco.ConsultarComoSuperusuarioAsync($"SELECT (SELECT count(*) FROM cronoai.empresa WHERE id = '{semAdmin.Id}') || '|' || (SELECT count(*) FROM cronoai.membro_empresa WHERE empresa_id = '{semAdmin.Id}')"));
+        await AfirmarForceAsync();
+    }
+
+    #endregion
+
+    #region Métodos privados
+
+    private async Task AfirmarForceAsync()
+    {
+        Assert.Equal(
+            "empresa=true|membro_empresa=true",
+            await _banco.ConsultarComoSuperusuarioAsync("SELECT string_agg(relname || '=' || relforcerowsecurity::text, '|' ORDER BY relname) FROM pg_class WHERE oid IN ('cronoai.empresa'::regclass, 'cronoai.membro_empresa'::regclass)"));
+    }
+
+    private static PostgresException PostgresDaCadeia(Exception erro)
+    {
+        for (var atual = erro; atual is not null; atual = atual.InnerException)
+        {
+            if (atual is PostgresException postgres)
+            {
+                return postgres;
+            }
+        }
+
+        throw new InvalidOperationException("Sem PostgresException na cadeia: " + erro);
+    }
+
+    #endregion
+}

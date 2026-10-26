@@ -47,6 +47,18 @@ public class CronoDbContext : DbContext
 
     public DbSet<Obra> Obras => Set<Obra>();
 
+    public DbSet<AcessoObra> AcessosObra => Set<AcessoObra>();
+
+    public DbSet<Frente> Frentes => Set<Frente>();
+
+    public DbSet<AcessoFrente> AcessosFrente => Set<AcessoFrente>();
+
+    public DbSet<Carteira> Carteiras => Set<Carteira>();
+
+    public DbSet<CarteiraObra> CarteirasObras => Set<CarteiraObra>();
+
+    public DbSet<AcessoCarteira> AcessosCarteira => Set<AcessoCarteira>();
+
     /// <summary>Trilha append-only: só <c>Add</c> (o interceptor) e a leitura de <c>ConsultasAuditoria</c>; teste de arquitetura.</summary>
     public DbSet<RegistroAuditoria> Auditorias => Set<RegistroAuditoria>();
 

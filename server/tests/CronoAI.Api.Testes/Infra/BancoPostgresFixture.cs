@@ -105,10 +105,10 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
     /// Executa uma consulta como superusuário pelo socket local do contêiner (sem expor a conexão aos testes)
     /// e devolve a saída do psql (sem cabeçalho nem alinhamento).
     /// </summary>
-    public async Task<string> ConsultarComoSuperusuarioAsync(string sql)
+    public async Task<string> ConsultarComoSuperusuarioAsync(string sql, string? banco = null)
     {
         var resultado = await _container!.ExecAsync(
-            ["psql", "-U", _usuarioSuper, "-d", _bancoNome, "-At", "-c", sql]);
+            ["psql", "-U", _usuarioSuper, "-d", banco ?? _bancoNome, "-At", "-c", sql]);
         if (resultado.ExitCode != 0)
         {
             throw new InvalidOperationException($"psql falhou (código {resultado.ExitCode}): {Mascarar(resultado.Stderr)}");
@@ -128,11 +128,44 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
     /// Executa um script como superusuário (psql, VERBOSITY=verbose para trazer o SQLSTATE) e devolve o código de saída e
     /// a saída de erro, sem lançar. Serve a testes que precisam de <c>SET LOCAL ROLE</c> dentro de uma transação desfeita.
     /// </summary>
-    public async Task<(long? CodigoSaida, string Saida, string Erro)> ExecutarScriptComoSuperusuarioAsync(string sql)
+    public async Task<(long? CodigoSaida, string Saida, string Erro)> ExecutarScriptComoSuperusuarioAsync(string sql, string? banco = null)
     {
         var resultado = await _container!.ExecAsync(
-            ["psql", "-U", _usuarioSuper, "-d", _bancoNome, "-At", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose", "-c", sql]);
+            ["psql", "-U", _usuarioSuper, "-d", banco ?? _bancoNome, "-At", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose", "-c", sql]);
         return (resultado.ExitCode, resultado.Stdout.Trim(), Mascarar(resultado.Stderr));
+    }
+
+    /// <summary>
+    /// Produz ESTADO como superusuário (fixture, nunca o que se testa): executa o SQL e LANÇA se o psql falhar. Vários comandos
+    /// no mesmo texto rodam na mesma transação implícita (o <c>-c</c> do psql), o que os gatilhos diferidos exigem.
+    /// </summary>
+    public async Task ProduzirEstadoComoSuperusuarioAsync(string sql, string? banco = null)
+    {
+        var (codigo, _, erro) = await ExecutarScriptComoSuperusuarioAsync(sql, banco);
+        if (codigo != 0)
+        {
+            throw new InvalidOperationException($"Estado de teste não produzido (psql código {codigo}): {erro}");
+        }
+    }
+
+    /// <summary>
+    /// Cria um banco ISOLADO (mesmo cluster, mesmos papéis) com o schema <c>cronoai</c> do migrador, para os testes que desfazem e
+    /// refazem migrações sem tocar nos dados dos demais testes da coleção. Devolve as strings do migrador e do app.
+    /// </summary>
+    public async Task<(string Migrador, string App)> CriarBancoIsoladoAsync(string nome)
+    {
+        await ProduzirEstadoComoSuperusuarioAsync($"CREATE DATABASE {nome}");
+        await ProduzirEstadoComoSuperusuarioAsync(
+            $"CREATE SCHEMA cronoai AUTHORIZATION {PapeisBanco.Migrador}; GRANT CONNECT ON DATABASE {nome} TO {PapeisBanco.Migrador}, {PapeisBanco.Aplicacao}",
+            nome);
+        return (MontarStringConexao(PapeisBanco.Migrador, _senhaMigrador, nome), MontarStringConexao(PapeisBanco.Aplicacao, _senhaApp, nome));
+    }
+
+    /// <summary>Descarta o banco isolado (ao fim do teste), fechando antes as conexões do pool.</summary>
+    public async Task DescartarBancoIsoladoAsync(string nome)
+    {
+        NpgsqlConnection.ClearAllPools();
+        await ProduzirEstadoComoSuperusuarioAsync($"DROP DATABASE IF EXISTS {nome} WITH (FORCE)");
     }
 
     /// <summary>Cria um contexto do EF conectado como migrador (DDL).</summary>
@@ -160,13 +193,13 @@ public sealed class BancoPostgresFixture : IAsyncLifetime
         }
     }
 
-    private string MontarStringConexao(string usuario, string senha)
+    private string MontarStringConexao(string usuario, string senha, string? banco = null)
     {
         return new NpgsqlConnectionStringBuilder
         {
             Host = "127.0.0.1",
             Port = _container!.GetMappedPublicPort(5432),
-            Database = _bancoNome,
+            Database = banco ?? _bancoNome,
             Username = usuario,
             Password = senha,
             // TLS desligado só aqui: PostgreSQL descartável em 127.0.0.1, sem TLS. Em produção o TLS é da Infraestrutura.

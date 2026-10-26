@@ -27,6 +27,8 @@
   <ItemGroup>
     <!-- Mesma fonte do bootstrap usado pelo docker-compose: a fixture o executa no contêiner descartável. -->
     <None Include="..\..\db\bootstrap\01-papeis-e-schema.sh" Link="bootstrap\01-papeis-e-schema.sh" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Golden dos predicados de pg_policies: COPIADO da saída real do PostgreSQL (nunca escrito à mão). -->
+    <None Include="Dados\predicados-esperados.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

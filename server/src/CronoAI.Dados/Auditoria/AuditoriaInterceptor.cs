@@ -87,7 +87,9 @@ public sealed class AuditoriaInterceptor : SaveChangesInterceptor
             return;
         }
 
-        if (entradas.Any(e => e.State == EntityState.Deleted))
+        // Só o vínculo (acesso_*, carteira_obra) admite DELETE físico, e o DELETE vira a ação "remover" na trilha. Obra,
+        // frente, carteira e membro nunca são apagados: arquivam-se ou removem-se logicamente (ADR 00009).
+        if (entradas.Any(e => e.State == EntityState.Deleted && e.Entity is not IVinculoRemovivel))
         {
             throw new InvalidOperationException("Entidade auditável não pode ser removida: arquive-a (ADR 00009).");
         }
@@ -126,16 +128,23 @@ public sealed class AuditoriaInterceptor : SaveChangesInterceptor
 
         string acao;
         string? antes = null;
-        string depois;
-        long? versaoDepois;
+        string? depois;
+        long? versaoDepois = null;
 
         if (entrada.State == EntityState.Added)
         {
             acao = AcoesAuditoria.Criar;
             depois = EscreverJson(campos, c => entrada.Property(c.Propriedade).CurrentValue);
 
-            // O default do banco é 1 e só o gatilho de UPDATE soma.
-            versaoDepois = 1;
+            // O default do banco é 1 e só o gatilho de UPDATE soma. Entidade sem contador (vínculo, membro com xmin) fica nula.
+            versaoDepois = TemContador(entrada) ? 1 : null;
+        }
+        else if (entrada.State == EntityState.Deleted)
+        {
+            // Revogação de vínculo: o estado vai em "antes" (lista branca) e não há "depois".
+            acao = AcoesAuditoria.Remover;
+            antes = EscreverJson(campos, c => entrada.Property(c.Propriedade).OriginalValue);
+            depois = null;
         }
         else
         {
@@ -144,17 +153,15 @@ public sealed class AuditoriaInterceptor : SaveChangesInterceptor
             acao = DerivarAcao(entrada);
             antes = EscreverJson(alterados, c => entrada.Property(c.Propriedade).OriginalValue);
             depois = EscreverJson(alterados, c => entrada.Property(c.Propriedade).CurrentValue);
-            versaoDepois = entrada.Metadata.FindProperty(NomeDaVersao) is not null
-                ? (long?)entrada.Property(NomeDaVersao).OriginalValue + 1
-                : null;
+            versaoDepois = TemContador(entrada) ? (long?)entrada.Property(NomeDaVersao).OriginalValue + 1 : null;
         }
 
         return RegistroAuditoria.Criar(
             empresaId,
-            entrada.Entity is Obra obra ? obra.Id : null,
+            ObraDaTrilha(entrada.Entity),
             usuarioId,
             entrada.Metadata.GetTableName() ?? throw new InvalidOperationException($"{tipo.Name} sem tabela."),
-            entrada.Entity.Id,
+            entrada.Entity.EntidadeId,
             acao,
             antes,
             depois,
@@ -168,27 +175,56 @@ public sealed class AuditoriaInterceptor : SaveChangesInterceptor
     private static bool Alterou(PropertyEntry propriedade) =>
         propriedade.IsModified && !Equals(propriedade.OriginalValue, propriedade.CurrentValue);
 
-    // Arquivar e restaurar são só a troca de arquivada_em entre nulo e valor (o domínio garante que nada mais muda).
+    // Só a obra e o que ela agrupa levam obra_id; membro, carteira e vínculos de carteira são trilha da empresa (nulo).
+    private static Guid? ObraDaTrilha(IAuditavel entidade) => entidade switch
+    {
+        Obra obra => obra.Id,
+        IDadoDeObra dadoDeObra => dadoDeObra.ObraId,
+        _ => null,
+    };
+
+    // O contador "versao" (long) existe em obra, frente e carteira. O xmin do membro (uint) não é contador: a trilha não o grava.
+    private static bool TemContador(EntityEntry<IAuditavel> entrada) =>
+        entrada.Metadata.FindProperty(NomeDaVersao)?.ClrType == typeof(long);
+
+    // Arquivar/restaurar (IArquivavel) e remover/reativar (IRemovivelLogicamente) são só a troca da coluna entre nulo e valor
+    // (o domínio garante que nada mais muda nessa escrita).
     private static string DerivarAcao(EntityEntry<IAuditavel> entrada)
     {
-        if (entrada.Entity is Obra)
+        if (entrada.Entity is IArquivavel)
         {
-            var arquivamento = entrada.Property(nameof(Obra.ArquivadaEm));
-            if (arquivamento.IsModified)
+            var acao = AcaoDaTroca(entrada.Property(nameof(IArquivavel.ArquivadaEm)), AcoesAuditoria.Arquivar, AcoesAuditoria.Restaurar);
+            if (acao is not null)
             {
-                if (arquivamento.OriginalValue is null && arquivamento.CurrentValue is not null)
-                {
-                    return AcoesAuditoria.Arquivar;
-                }
+                return acao;
+            }
+        }
 
-                if (arquivamento.OriginalValue is not null && arquivamento.CurrentValue is null)
-                {
-                    return AcoesAuditoria.Restaurar;
-                }
+        if (entrada.Entity is IRemovivelLogicamente)
+        {
+            var acao = AcaoDaTroca(entrada.Property(nameof(IRemovivelLogicamente.RemovidoEm)), AcoesAuditoria.Remover, AcoesAuditoria.Restaurar);
+            if (acao is not null)
+            {
+                return acao;
             }
         }
 
         return AcoesAuditoria.Alterar;
+    }
+
+    private static string? AcaoDaTroca(PropertyEntry propriedade, string quandoPreenche, string quandoLimpa)
+    {
+        if (!propriedade.IsModified)
+        {
+            return null;
+        }
+
+        if (propriedade.OriginalValue is null && propriedade.CurrentValue is not null)
+        {
+            return quandoPreenche;
+        }
+
+        return propriedade.OriginalValue is not null && propriedade.CurrentValue is null ? quandoLimpa : null;
     }
 
     private static string EscreverJson(IEnumerable<CampoAuditado> campos, Func<CampoAuditado, object?> valor)

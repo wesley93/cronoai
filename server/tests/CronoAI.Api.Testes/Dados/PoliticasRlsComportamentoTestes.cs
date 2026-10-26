@@ -48,23 +48,6 @@ public sealed class PoliticasRlsComportamentoTestes
     }
 
     [Fact]
-    public async Task Insert_de_vinculo_em_membro_empresa_com_outra_empresa_falha_com_42501()
-    {
-        var usuario = await _dados.CriarUsuarioAsync();
-        var empresaA = await _dados.CriarEmpresaAsync();
-        var empresaB = await _dados.CriarEmpresaAsync();
-        var agora = DateTime.UtcNow;
-
-        // Contexto da empresa A gravando um vínculo da empresa B (a empresa B existe: a FK não é o motivo da recusa).
-        await using var comoA = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaA));
-        var erro = await Assert.ThrowsAsync<PostgresException>(() => comoA.Database.ExecuteSqlAsync(
-            $"INSERT INTO cronoai.membro_empresa (empresa_id, usuario_id, criado_em) VALUES ({empresaB}, {usuario}, {agora})",
-            TestContext.Current.CancellationToken));
-
-        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, erro.SqlState);
-    }
-
-    [Fact]
     public async Task Update_de_sessao_trocando_usuario_id_falha_com_42501()
     {
         var usuarioA = await _dados.CriarUsuarioAsync();

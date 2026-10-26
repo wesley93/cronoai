@@ -7,7 +7,8 @@ namespace CronoAI.Dados.Rls;
 /// Helper único das migrações para RLS (ADR 00006): <c>ENABLE</c> + <c>FORCE</c> e políticas POR COMANDO,
 /// sempre <c>TO cronoai_app</c> (papel novo nasce sem acesso) e com <c>WITH CHECK</c> explícito. Política para o
 /// migrador é proibida: anularia o <c>FORCE</c>. Este arquivo é o único, fora de <c>Migrations/</c>, autorizado a
-/// montar DDL de RLS (regra R15).
+/// montar DDL de RLS (regra R15). A trilha (<c>auditoria</c>) só admite política de SELECT e de INSERT (append-only,
+/// ADR 00009): criar ou substituir política de UPDATE ou DELETE nela LANÇA, sem depender de regex nem de revisor.
 /// </summary>
 public static class MigrationBuilderRlsExtensoes
 {
@@ -18,6 +19,8 @@ public static class MigrationBuilderRlsExtensoes
 
     /// <summary>Empresa do contexto: idem.</summary>
     public static readonly string ExpressaoEmpresa = Expressao(PapeisBanco.VariavelEmpresa);
+
+    private const string TabelaAuditoria = "auditoria";
 
     #endregion
 
@@ -39,13 +42,63 @@ public static class MigrationBuilderRlsExtensoes
     public static void PoliticaInsert(this MigrationBuilder migrationBuilder, string tabela, string nome, string comCheck) =>
         Criar(migrationBuilder, tabela, nome, "INSERT", $"WITH CHECK ({comCheck})");
 
-    /// <summary>Política de UPDATE, com <c>USING</c> e <c>WITH CHECK</c> explícitos.</summary>
-    public static void PoliticaUpdate(this MigrationBuilder migrationBuilder, string tabela, string nome, string usando, string comCheck) =>
+    /// <summary>Política de UPDATE, com <c>USING</c> e <c>WITH CHECK</c> explícitos. Recusada na trilha.</summary>
+    public static void PoliticaUpdate(this MigrationBuilder migrationBuilder, string tabela, string nome, string usando, string comCheck)
+    {
+        RecusarEscritaNaTrilha(tabela, "UPDATE");
         Criar(migrationBuilder, tabela, nome, "UPDATE", $"USING ({usando}) WITH CHECK ({comCheck})");
+    }
 
-    /// <summary>Política de DELETE (<c>USING</c>).</summary>
-    public static void PoliticaDelete(this MigrationBuilder migrationBuilder, string tabela, string nome, string usando) =>
+    /// <summary>Política de DELETE (<c>USING</c>). Recusada na trilha.</summary>
+    public static void PoliticaDelete(this MigrationBuilder migrationBuilder, string tabela, string nome, string usando)
+    {
+        RecusarEscritaNaTrilha(tabela, "DELETE");
         Criar(migrationBuilder, tabela, nome, "DELETE", $"USING ({usando})");
+    }
+
+    /// <summary>Substitui a política de SELECT (<c>DROP POLICY</c> + <c>CREATE POLICY</c> na mesma migração).</summary>
+    public static void SubstituirPoliticaSelect(this MigrationBuilder migrationBuilder, string tabela, string nome, string usando)
+    {
+        Remover(migrationBuilder, tabela, nome);
+        PoliticaSelect(migrationBuilder, tabela, nome, usando);
+    }
+
+    /// <summary>Substitui a política de INSERT.</summary>
+    public static void SubstituirPoliticaInsert(this MigrationBuilder migrationBuilder, string tabela, string nome, string comCheck)
+    {
+        Remover(migrationBuilder, tabela, nome);
+        PoliticaInsert(migrationBuilder, tabela, nome, comCheck);
+    }
+
+    /// <summary>Substitui a política de UPDATE. Recusada na trilha.</summary>
+    public static void SubstituirPoliticaUpdate(this MigrationBuilder migrationBuilder, string tabela, string nome, string usando, string comCheck)
+    {
+        RecusarEscritaNaTrilha(tabela, "UPDATE");
+        Remover(migrationBuilder, tabela, nome);
+        PoliticaUpdate(migrationBuilder, tabela, nome, usando, comCheck);
+    }
+
+    /// <summary>Substitui a política de DELETE. Recusada na trilha.</summary>
+    public static void SubstituirPoliticaDelete(this MigrationBuilder migrationBuilder, string tabela, string nome, string usando)
+    {
+        RecusarEscritaNaTrilha(tabela, "DELETE");
+        Remover(migrationBuilder, tabela, nome);
+        PoliticaDelete(migrationBuilder, tabela, nome, usando);
+    }
+
+    /// <summary>
+    /// Remove uma política SEM substituta (o comando passa a não ter política: o RLS nega). Recusada na trilha: ali só se
+    /// substitui (SELECT e INSERT), nunca se tira a política.
+    /// </summary>
+    public static void RemoverPolitica(this MigrationBuilder migrationBuilder, string tabela, string nome)
+    {
+        if (string.Equals(tabela, TabelaAuditoria, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("A trilha não admite remover política: só substituir a de SELECT e a de INSERT (append-only, ADR 00009).", nameof(tabela));
+        }
+
+        Remover(migrationBuilder, tabela, nome);
+    }
 
     #endregion
 
@@ -55,6 +108,20 @@ public static class MigrationBuilderRlsExtensoes
         $"(SELECT NULLIF(current_setting('{variavel}', true), '')::uuid)";
 
     private static string Qualificada(string tabela) => $"{PapeisBanco.Schema}.{tabela}";
+
+    private static void RecusarEscritaNaTrilha(string tabela, string comando)
+    {
+        if (string.Equals(tabela, TabelaAuditoria, StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"A trilha é append-only: política de {comando} em auditoria é proibida (ADR 00009).", nameof(tabela));
+        }
+    }
+
+    private static void Remover(MigrationBuilder migrationBuilder, string tabela, string nome)
+    {
+        ArgumentNullException.ThrowIfNull(migrationBuilder);
+        migrationBuilder.Sql($"DROP POLICY {nome} ON {Qualificada(tabela)};");
+    }
 
     private static void Criar(MigrationBuilder migrationBuilder, string tabela, string nome, string comando, string clausula)
     {

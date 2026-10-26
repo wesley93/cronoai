@@ -68,7 +68,7 @@ public sealed class EntidadesTestes
     {
         var empresa = Guid.CreateVersion7();
 
-        var membro = MembroEmpresa.Criar(empresa, Guid.CreateVersion7(), DateTime.UtcNow);
+        var membro = MembroEmpresa.Criar(empresa, Guid.CreateVersion7(), Perfis.Administrador, EscoposObras.Todas, DateTime.UtcNow);
         Assert.IsAssignableFrom<IDadoDeEmpresa>(membro);
 
         Assert.Equal(empresa, membro.EmpresaId);

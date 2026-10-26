@@ -26,6 +26,52 @@ public static class ListaBrancaAuditoria
             new(nameof(Obra.OpcoesCronograma), "opcoes_cronograma", EhJson: true),
             new(nameof(Obra.ArquivadaEm), "arquivada_em"),
         ],
+
+        // Membro: perfil, escopo e remoção lógica. Nunca nome, e-mail, emissor nem sujeito.
+        [typeof(MembroEmpresa)] =
+        [
+            new(nameof(MembroEmpresa.Perfil), "perfil"),
+            new(nameof(MembroEmpresa.EscopoObras), "escopo_obras"),
+            new(nameof(MembroEmpresa.RemovidoEm), "removido_em"),
+        ],
+
+        // Vínculos: só os ids (o "antes" do remover é o próprio vínculo).
+        [typeof(AcessoObra)] =
+        [
+            new(nameof(AcessoObra.ObraId), "obra_id"),
+            new(nameof(AcessoObra.UsuarioId), "usuario_id"),
+        ],
+
+        // ResponsavelTexto fica FORA de propósito: é nome de pessoa por desenho (Q2) e a trilha é append-only, então não
+        // se apaga depois. A troca só desse campo gera linha "alterar" vazia: registra quem e quando, sem o valor.
+        [typeof(Frente)] =
+        [
+            new(nameof(Frente.Nome), "nome"),
+            new(nameof(Frente.ResponsavelId), "responsavel_id"),
+            new(nameof(Frente.ArquivadaEm), "arquivada_em"),
+        ],
+        [typeof(AcessoFrente)] =
+        [
+            new(nameof(AcessoFrente.ObraId), "obra_id"),
+            new(nameof(AcessoFrente.FrenteId), "frente_id"),
+            new(nameof(AcessoFrente.UsuarioId), "usuario_id"),
+        ],
+        [typeof(Carteira)] =
+        [
+            new(nameof(Carteira.Nome), "nome"),
+            new(nameof(Carteira.Tipo), "tipo"),
+            new(nameof(Carteira.ArquivadaEm), "arquivada_em"),
+        ],
+        [typeof(CarteiraObra)] =
+        [
+            new(nameof(CarteiraObra.CarteiraId), "carteira_id"),
+            new(nameof(CarteiraObra.ObraId), "obra_id"),
+        ],
+        [typeof(AcessoCarteira)] =
+        [
+            new(nameof(AcessoCarteira.CarteiraId), "carteira_id"),
+            new(nameof(AcessoCarteira.UsuarioId), "usuario_id"),
+        ],
     };
 
     #endregion

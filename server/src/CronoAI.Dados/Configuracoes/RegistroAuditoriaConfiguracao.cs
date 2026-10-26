@@ -24,7 +24,7 @@ public sealed class RegistroAuditoriaConfiguracao : IEntityTypeConfiguration<Reg
         builder.ToTable("auditoria", t =>
         {
             t.HasCheckConstraint("ck_auditoria_entidade", "entidade ~ '^[a-z_]{1,64}$'");
-            t.HasCheckConstraint("ck_auditoria_acao", "acao IN ('criar', 'alterar', 'arquivar', 'restaurar')");
+            t.HasCheckConstraint("ck_auditoria_acao", "acao IN ('criar', 'alterar', 'arquivar', 'restaurar', 'remover')");
             t.HasCheckConstraint("ck_auditoria_origem", "origem IN ('ui', 'importacao', 'whatsapp', 'api')");
             t.HasCheckConstraint("ck_auditoria_motivo_tamanho", $"motivo IS NULL OR char_length(motivo) <= {RegistroAuditoria.TamanhoMaximoMotivo}");
             t.HasCheckConstraint("ck_auditoria_antes_objeto", "antes IS NULL OR jsonb_typeof(antes) = 'object'");

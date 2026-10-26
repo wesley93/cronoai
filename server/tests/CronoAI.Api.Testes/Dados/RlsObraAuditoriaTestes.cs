@@ -47,7 +47,7 @@ public sealed class RlsObraAuditoriaTestes
             Assert.Empty(await DadosTeste.LerIdsAsync(semContexto, $"SELECT id AS \"Value\" FROM cronoai.obra WHERE id IN ({obraA1.Id}, {obraB.Id})"));
         }
 
-        await using var comoA = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaA));
+        await using var comoA = _dados.Fabrica.Criar(DadosTeste.ComoAdministrador(empresaA));
         var visiveis = await DadosTeste.LerIdsAsync(comoA, $"SELECT id AS \"Value\" FROM cronoai.obra WHERE id IN ({obraA1.Id}, {obraA2.Id}, {obraB.Id})");
         Assert.Equal(new[] { obraA1.Id, obraA2.Id }.Order(), visiveis.Order());
 
@@ -61,7 +61,7 @@ public sealed class RlsObraAuditoriaTestes
 
         // UPDATE SEM WHERE e SEM ler coluna no SET (constante): com WHERE ou com SET que lê coluna o PostgreSQL aplica também a
         // política de SELECT, que mascararia um USING (true). Só as 2 obras de A (com USING "true", seriam todas as do banco).
-        await using var comoA2 = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaA));
+        await using var comoA2 = _dados.Fabrica.Criar(DadosTeste.ComoAdministrador(empresaA));
         var proprias = await comoA2.Database.ExecuteSqlAsync($"UPDATE cronoai.obra SET responsavel_id = NULL", TestContext.Current.CancellationToken);
         Assert.Equal(2, proprias);
         Assert.Equal(1, await _dados.LerVersaoAsync(empresaB, obraB.Id));
@@ -78,7 +78,7 @@ public sealed class RlsObraAuditoriaTestes
         var obraA = await _dados.CriarObraAsync(empresaA, usuarioA);
         var obraB = await _dados.CriarObraAsync(empresaB, usuarioB);
 
-        await using var comoA = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaA));
+        await using var comoA = _dados.Fabrica.Criar(DadosTeste.ComoAdministrador(empresaA));
         var daEmpresa = await DadosTeste.LerIdsAsync(comoA, $"SELECT entidade_id AS \"Value\" FROM cronoai.auditoria WHERE entidade_id IN ({obraA.Id}, {obraB.Id})");
         Assert.Equal([obraA.Id], daEmpresa);
 
@@ -123,7 +123,7 @@ public sealed class RlsObraAuditoriaTestes
         var obraA = await _dados.CriarObraAsync(empresaA, usuarioA);
 
         // Sem WHERE e sem RETURNING (ver o resumo da classe): só o WITH CHECK da política de UPDATE decide.
-        await using var comoA = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaA));
+        await using var comoA = _dados.Fabrica.Criar(DadosTeste.ComoAdministrador(empresaA));
         var erro = await Assert.ThrowsAsync<PostgresException>(() => comoA.Database.ExecuteSqlAsync(
             $"UPDATE cronoai.obra SET empresa_id = {empresaB}",
             TestContext.Current.CancellationToken));
@@ -131,7 +131,7 @@ public sealed class RlsObraAuditoriaTestes
         Assert.Equal(empresaA.ToString("D"), await _banco.ConsultarComoSuperusuarioAsync($"SELECT empresa_id FROM cronoai.obra WHERE id = '{obraA.Id}'"));
 
         // Controle negativo: UPDATE de outra coluna, no mesmo contexto, passa (o harness consegue escrever).
-        await using var comoA2 = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaA));
+        await using var comoA2 = _dados.Fabrica.Criar(DadosTeste.ComoAdministrador(empresaA));
         Assert.True(await comoA2.Database.ExecuteSqlAsync($"UPDATE cronoai.obra SET nome = {"Renomeada " + Guid.NewGuid().ToString("N")}", TestContext.Current.CancellationToken) >= 1);
     }
 

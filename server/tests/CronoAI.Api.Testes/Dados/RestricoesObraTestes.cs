@@ -143,7 +143,7 @@ public sealed class RestricoesObraTestes
         await _dados.InserirObraBrutaAsync(empresaA, empresaA, "Obra Agua " + nome);
 
         // Arquivar a primeira libera o nome.
-        await using var contexto = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresaA));
+        await using var contexto = _dados.Fabrica.Criar(DadosTeste.ComoAdministrador(empresaA));
         await contexto.Database.ExecuteSqlAsync($"UPDATE cronoai.obra SET arquivada_em = {DateTime.UtcNow.AddMinutes(1)} WHERE nome = {nome}", TestContext.Current.CancellationToken);
         await _dados.InserirObraBrutaAsync(empresaA, empresaA, nome);
     }

@@ -40,7 +40,7 @@ public sealed class AppendOnlyTestes
 
         foreach (var sql in new[] { "UPDATE", "DELETE", "TRUNCATE" })
         {
-            await using var comoApp = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresa));
+            await using var comoApp = _dados.Fabrica.Criar(DadosTeste.ComoAdministrador(empresa));
             var erro = await Assert.ThrowsAsync<PostgresException>(() => sql switch
             {
                 "UPDATE" => comoApp.Database.ExecuteSqlAsync($"UPDATE cronoai.auditoria SET motivo = {"x"}", TestContext.Current.CancellationToken),
@@ -54,7 +54,7 @@ public sealed class AppendOnlyTestes
         Assert.Single(await _dados.LerAuditoriaAsync(empresa, obra.Id));
 
         // Controle negativo: no mesmo contexto o app ESCREVE em obra (o teste enxerga um UPDATE permitido).
-        await using var escrita = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresa));
+        await using var escrita = _dados.Fabrica.Criar(DadosTeste.ComoAdministrador(empresa));
         Assert.Equal(1, await escrita.Database.ExecuteSqlAsync($"UPDATE cronoai.obra SET nome = {"Outro " + Guid.NewGuid().ToString("N")}", TestContext.Current.CancellationToken));
     }
 
@@ -164,7 +164,7 @@ public sealed class AppendOnlyTestes
         var (empresa, usuario) = await CriarContextoAsync();
         var obra = await _dados.CriarObraAsync(empresa, usuario);
 
-        await using var comoApp = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresa));
+        await using var comoApp = _dados.Fabrica.Criar(DadosTeste.ComoAdministrador(empresa));
         var erro = await Assert.ThrowsAsync<PostgresException>(() => comoApp.Database.ExecuteSqlAsync($"DELETE FROM cronoai.obra WHERE id = {obra.Id}", TestContext.Current.CancellationToken));
 
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, erro.SqlState);

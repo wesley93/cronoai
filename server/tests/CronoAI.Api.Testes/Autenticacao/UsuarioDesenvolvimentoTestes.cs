@@ -124,7 +124,11 @@ public sealed class UsuarioDesenvolvimentoTestes
 
     #region Métodos privados
 
-    private ApiFactory CriarFabricaDev() => new(_banco.StringConexaoApp, "Development") { Configuracoes = { [Flag] = "true" } };
+    // A semente precisa da string do migrador (o app não insere membro): ela só é lida dentro do comando da semente.
+    private ApiFactory CriarFabricaDev() => new(_banco.StringConexaoApp, "Development")
+    {
+        Configuracoes = { [Flag] = "true", ["ConnectionStrings:CronoaiMigracao"] = _banco.StringConexaoMigrador },
+    };
 
     #endregion
 }

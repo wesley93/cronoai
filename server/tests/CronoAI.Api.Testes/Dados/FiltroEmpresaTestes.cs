@@ -48,8 +48,9 @@ public sealed class FiltroEmpresaTestes
         await using var contexto = _dados.Fabrica.Criar(new ContextoSessaoBanco(usuario, empresaA));
 
         var membros = await contexto.Membros.ToListAsync(TestContext.Current.CancellationToken);
-        var unico = Assert.Single(membros);
-        Assert.Equal(empresaA, unico.EmpresaId);
+        // A empresa também tem o administrador técnico do helper: o que importa é que TODOS são da empresa do contexto.
+        Assert.Contains(membros, m => m.UsuarioId == usuario);
+        Assert.All(membros, m => Assert.Equal(empresaA, m.EmpresaId));
     }
 
     #endregion

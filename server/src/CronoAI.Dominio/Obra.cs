@@ -7,7 +7,7 @@ namespace CronoAI.Dominio;
 /// a trilha de auditoria referencia a obra e é imutável. <see cref="Versao"/> é incrementada por gatilho do banco e
 /// serve de token de concorrência otimista (ADR 00009): o domínio nunca a calcula.
 /// </summary>
-public sealed partial class Obra : IDadoDeEmpresa, IAuditavel
+public sealed partial class Obra : IDadoDeEmpresa, IArquivavel
 {
     #region Campos
 
@@ -71,6 +71,9 @@ public sealed partial class Obra : IDadoDeEmpresa, IAuditavel
     public DateTime? ArquivadaEm { get; private set; }
 
     public bool EstaArquivada => ArquivadaEm is not null;
+
+    // A obra tem Id próprio: ele é o entidade_id da trilha.
+    Guid IAuditavel.EntidadeId => Id;
 
     #endregion
 

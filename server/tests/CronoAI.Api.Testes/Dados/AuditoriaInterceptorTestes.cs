@@ -233,13 +233,12 @@ public sealed class AuditoriaInterceptorTestes
     [Fact]
     public async Task SaveChanges_auditavel_sem_usuario_no_contexto_lanca()
     {
-        var (empresa, usuario) = await CriarContextoAsync();
-        var obra = await _dados.CriarObraAsync(empresa, usuario);
+        var (empresa, _) = await CriarContextoAsync();
 
         // Contexto só com a empresa: a trilha exige o usuário da sessão (nunca do corpo), então não há escrita anônima.
+        // (Com o RLS por obra um contexto sem usuário nem enxerga a obra para alterá-la: a escrita testada é uma criação.)
         await using var banco = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresa));
-        var carregada = await banco.Obras.SingleAsync(o => o.Id == obra.Id, TestContext.Current.CancellationToken);
-        carregada.Alterar(DadosTeste.DadosObraValidos("Sem Usuario " + Guid.NewGuid().ToString("N")[..8]), DateTime.UtcNow);
+        banco.Obras.Add(Obra.Criar(empresa, DadosTeste.DadosObraValidos("Sem Usuario " + Guid.NewGuid().ToString("N")[..8]), DateTime.UtcNow));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => banco.SalvarAuditadoAsync(Metadados(), TestContext.Current.CancellationToken));
     }

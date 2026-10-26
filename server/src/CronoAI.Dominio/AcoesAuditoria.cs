@@ -13,7 +13,10 @@ public static class AcoesAuditoria
 
     public const string Restaurar = "restaurar";
 
-    private static readonly string[] _todas = [Criar, Alterar, Arquivar, Restaurar];
+    /// <summary>Revogar vínculo (DELETE físico auditado) ou remover membro (remoção lógica). <c>aceitar</c> fica para o 00014c.</summary>
+    public const string Remover = "remover";
+
+    private static readonly string[] _todas = [Criar, Alterar, Arquivar, Restaurar, Remover];
 
     #endregion
 

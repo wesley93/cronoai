@@ -23,6 +23,229 @@ namespace CronoAI.Dados.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("CronoAI.Dominio.AcessoCarteira", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CarteiraId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("carteira_id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em");
+
+                    b.Property<Guid>("EmpresaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("empresa_id");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("usuario_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_acesso_carteira");
+
+                    b.HasAlternateKey("CarteiraId", "UsuarioId")
+                        .HasName("ux_acesso_carteira_carteira_usuario");
+
+                    b.HasIndex("EmpresaId", "CarteiraId")
+                        .HasDatabaseName("ix_acesso_carteira_empresa_id_carteira_id");
+
+                    b.HasIndex("EmpresaId", "UsuarioId")
+                        .HasDatabaseName("ix_acesso_carteira_empresa_id_usuario_id");
+
+                    b.HasIndex("UsuarioId", "CarteiraId")
+                        .HasDatabaseName("ix_acesso_carteira_usuario");
+
+                    b.ToTable("acesso_carteira", "cronoai");
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.AcessoFrente", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em");
+
+                    b.Property<Guid>("EmpresaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("empresa_id");
+
+                    b.Property<Guid>("FrenteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("frente_id");
+
+                    b.Property<Guid>("ObraId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("obra_id");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("usuario_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_acesso_frente");
+
+                    b.HasAlternateKey("FrenteId", "UsuarioId")
+                        .HasName("ux_acesso_frente_frente_usuario");
+
+                    b.HasIndex("ObraId", "UsuarioId")
+                        .HasDatabaseName("ix_acesso_frente_obra_id_usuario_id");
+
+                    b.HasIndex("UsuarioId", "FrenteId")
+                        .HasDatabaseName("ix_acesso_frente_usuario");
+
+                    b.HasIndex("EmpresaId", "ObraId", "FrenteId")
+                        .HasDatabaseName("ix_acesso_frente_empresa_id_obra_id_frente_id");
+
+                    b.ToTable("acesso_frente", "cronoai");
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.AcessoObra", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em");
+
+                    b.Property<Guid>("EmpresaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("empresa_id");
+
+                    b.Property<Guid>("ObraId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("obra_id");
+
+                    b.Property<Guid>("UsuarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("usuario_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_acesso_obra");
+
+                    b.HasAlternateKey("ObraId", "UsuarioId")
+                        .HasName("ux_acesso_obra_obra_usuario");
+
+                    b.HasIndex("EmpresaId", "ObraId")
+                        .HasDatabaseName("ix_acesso_obra_empresa_obra");
+
+                    b.HasIndex("EmpresaId", "UsuarioId")
+                        .HasDatabaseName("ix_acesso_obra_empresa_id_usuario_id");
+
+                    b.HasIndex("UsuarioId", "ObraId")
+                        .HasDatabaseName("ix_acesso_obra_usuario");
+
+                    b.ToTable("acesso_obra", "cronoai");
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.Carteira", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime?>("ArquivadaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("arquivada_em");
+
+                    b.Property<DateTime>("AtualizadaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("atualizada_em");
+
+                    b.Property<DateTime>("CriadaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criada_em");
+
+                    b.Property<Guid>("EmpresaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("empresa_id");
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("nome");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("tipo");
+
+                    b.Property<long>("Versao")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L)
+                        .HasColumnName("versao");
+
+                    b.HasKey("Id")
+                        .HasName("pk_carteira");
+
+                    b.HasAlternateKey("EmpresaId", "Id")
+                        .HasName("ux_carteira_empresa_id_id");
+
+                    b.ToTable("carteira", "cronoai", t =>
+                        {
+                            t.HasCheckConstraint("ck_carteira_arquivada_apos_criada", "arquivada_em IS NULL OR arquivada_em >= criada_em");
+
+                            t.HasCheckConstraint("ck_carteira_atualizada_apos_criada", "atualizada_em >= criada_em");
+
+                            t.HasCheckConstraint("ck_carteira_nome_tamanho", "char_length(nome) BETWEEN 1 AND 200");
+
+                            t.HasCheckConstraint("ck_carteira_tipo", "tipo IN ('regional', 'cliente', 'gestor')");
+
+                            t.HasCheckConstraint("ck_carteira_versao_positiva", "versao >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.CarteiraObra", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CarteiraId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("carteira_id");
+
+                    b.Property<DateTime>("CriadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em");
+
+                    b.Property<Guid>("EmpresaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("empresa_id");
+
+                    b.Property<Guid>("ObraId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("obra_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_carteira_obra");
+
+                    b.HasAlternateKey("CarteiraId", "ObraId")
+                        .HasName("ux_carteira_obra_carteira_obra");
+
+                    b.HasIndex("EmpresaId", "CarteiraId")
+                        .HasDatabaseName("ix_carteira_obra_empresa_id_carteira_id");
+
+                    b.HasIndex("EmpresaId", "ObraId")
+                        .HasDatabaseName("ix_carteira_obra_empresa_id_obra_id");
+
+                    b.HasIndex("ObraId", "CarteiraId")
+                        .HasDatabaseName("ix_carteira_obra_obra");
+
+                    b.ToTable("carteira_obra", "cronoai");
+                });
+
             modelBuilder.Entity("CronoAI.Dominio.Empresa", b =>
                 {
                     b.Property<Guid>("Id")
@@ -47,6 +270,80 @@ namespace CronoAI.Dados.Migrations
                         });
                 });
 
+            modelBuilder.Entity("CronoAI.Dominio.Frente", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime?>("ArquivadaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("arquivada_em");
+
+                    b.Property<DateTime>("AtualizadaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("atualizada_em");
+
+                    b.Property<DateTime>("CriadaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criada_em");
+
+                    b.Property<Guid>("EmpresaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("empresa_id");
+
+                    b.Property<string>("Nome")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("nome");
+
+                    b.Property<Guid>("ObraId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("obra_id");
+
+                    b.Property<Guid?>("ResponsavelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("responsavel_id");
+
+                    b.Property<string>("ResponsavelTexto")
+                        .HasColumnType("text")
+                        .HasColumnName("responsavel_texto");
+
+                    b.Property<long>("Versao")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L)
+                        .HasColumnName("versao");
+
+                    b.HasKey("Id")
+                        .HasName("pk_frente");
+
+                    b.HasAlternateKey("EmpresaId", "ObraId", "Id")
+                        .HasName("ux_frente_empresa_obra_id");
+
+                    b.HasIndex("EmpresaId", "ObraId")
+                        .HasDatabaseName("ix_frente_empresa_obra");
+
+                    b.HasIndex("EmpresaId", "ResponsavelId")
+                        .HasDatabaseName("ix_frente_empresa_id_responsavel_id");
+
+                    b.ToTable("frente", "cronoai", t =>
+                        {
+                            t.HasCheckConstraint("ck_frente_arquivada_apos_criada", "arquivada_em IS NULL OR arquivada_em >= criada_em");
+
+                            t.HasCheckConstraint("ck_frente_atualizada_apos_criada", "atualizada_em >= criada_em");
+
+                            t.HasCheckConstraint("ck_frente_nome_tamanho", "char_length(nome) BETWEEN 1 AND 200");
+
+                            t.HasCheckConstraint("ck_frente_responsavel_texto", "responsavel_texto IS NULL OR (char_length(responsavel_texto) BETWEEN 1 AND 120 AND responsavel_texto !~ '[[:cntrl:]]')");
+
+                            t.HasCheckConstraint("ck_frente_responsavel_um_so", "responsavel_id IS NULL OR responsavel_texto IS NULL");
+
+                            t.HasCheckConstraint("ck_frente_versao_positiva", "versao >= 1");
+                        });
+                });
+
             modelBuilder.Entity("CronoAI.Dominio.MembroEmpresa", b =>
                 {
                     b.Property<Guid>("EmpresaId")
@@ -57,9 +354,33 @@ namespace CronoAI.Dados.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("usuario_id");
 
+                    b.Property<DateTime>("AtualizadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("atualizado_em");
+
                     b.Property<DateTime>("CriadoEm")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("criado_em");
+
+                    b.Property<string>("EscopoObras")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("escopo_obras");
+
+                    b.Property<string>("Perfil")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("perfil");
+
+                    b.Property<DateTime?>("RemovidoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("removido_em");
+
+                    b.Property<uint>("Versao")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
 
                     b.HasKey("EmpresaId", "UsuarioId")
                         .HasName("pk_membro_empresa");
@@ -67,7 +388,18 @@ namespace CronoAI.Dados.Migrations
                     b.HasIndex("UsuarioId")
                         .HasDatabaseName("ix_membro_empresa_usuario_id");
 
-                    b.ToTable("membro_empresa", "cronoai");
+                    b.ToTable("membro_empresa", "cronoai", t =>
+                        {
+                            t.HasCheckConstraint("ck_membro_atualizado_apos_criado", "atualizado_em >= criado_em");
+
+                            t.HasCheckConstraint("ck_membro_escopo", "escopo_obras IN ('todas', 'vinculadas', 'carteiras')");
+
+                            t.HasCheckConstraint("ck_membro_perfil", "perfil IN ('administrador', 'engenheiro_planejamento', 'engenheiro_obra', 'suprimentos', 'encarregado', 'gestor_portfolio', 'diretoria')");
+
+                            t.HasCheckConstraint("ck_membro_perfil_escopo", "(perfil = 'administrador' AND escopo_obras = 'todas') OR (perfil IN ('gestor_portfolio', 'diretoria') AND escopo_obras IN ('todas', 'carteiras')) OR (perfil IN ('engenheiro_planejamento', 'engenheiro_obra', 'suprimentos', 'encarregado') AND escopo_obras = 'vinculadas')");
+
+                            t.HasCheckConstraint("ck_membro_removido_apos_criado", "removido_em IS NULL OR removido_em >= criado_em");
+                        });
                 });
 
             modelBuilder.Entity("CronoAI.Dominio.MunicipioReferencia", b =>
@@ -300,7 +632,7 @@ namespace CronoAI.Dados.Migrations
 
                     b.ToTable("auditoria", "cronoai", t =>
                         {
-                            t.HasCheckConstraint("ck_auditoria_acao", "acao IN ('criar', 'alterar', 'arquivar', 'restaurar')");
+                            t.HasCheckConstraint("ck_auditoria_acao", "acao IN ('criar', 'alterar', 'arquivar', 'restaurar', 'remover')");
 
                             t.HasCheckConstraint("ck_auditoria_antes_objeto", "antes IS NULL OR jsonb_typeof(antes) = 'object'");
 
@@ -439,6 +771,107 @@ namespace CronoAI.Dados.Migrations
 
                             t.HasCheckConstraint("ck_usuario_sujeito_tamanho", "char_length(sujeito) BETWEEN 1 AND 255");
                         });
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.AcessoCarteira", b =>
+                {
+                    b.HasOne("CronoAI.Dominio.Carteira", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId", "CarteiraId")
+                        .HasPrincipalKey("EmpresaId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_acesso_carteira_carteira");
+
+                    b.HasOne("CronoAI.Dominio.MembroEmpresa", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId", "UsuarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_acesso_carteira_membro");
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.AcessoFrente", b =>
+                {
+                    b.HasOne("CronoAI.Dominio.AcessoObra", null)
+                        .WithMany()
+                        .HasForeignKey("ObraId", "UsuarioId")
+                        .HasPrincipalKey("ObraId", "UsuarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_acesso_frente_acesso_obra");
+
+                    b.HasOne("CronoAI.Dominio.Frente", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId", "ObraId", "FrenteId")
+                        .HasPrincipalKey("EmpresaId", "ObraId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_acesso_frente_frente");
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.AcessoObra", b =>
+                {
+                    b.HasOne("CronoAI.Dominio.Obra", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId", "ObraId")
+                        .HasPrincipalKey("EmpresaId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_acesso_obra_obra");
+
+                    b.HasOne("CronoAI.Dominio.MembroEmpresa", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId", "UsuarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_acesso_obra_membro");
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.Carteira", b =>
+                {
+                    b.HasOne("CronoAI.Dominio.Empresa", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_carteira_empresa");
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.CarteiraObra", b =>
+                {
+                    b.HasOne("CronoAI.Dominio.Carteira", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId", "CarteiraId")
+                        .HasPrincipalKey("EmpresaId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_carteira_obra_carteira");
+
+                    b.HasOne("CronoAI.Dominio.Obra", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId", "ObraId")
+                        .HasPrincipalKey("EmpresaId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_carteira_obra_obra");
+                });
+
+            modelBuilder.Entity("CronoAI.Dominio.Frente", b =>
+                {
+                    b.HasOne("CronoAI.Dominio.Obra", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId", "ObraId")
+                        .HasPrincipalKey("EmpresaId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_frente_obra");
+
+                    b.HasOne("CronoAI.Dominio.MembroEmpresa", null)
+                        .WithMany()
+                        .HasForeignKey("EmpresaId", "ResponsavelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_frente_responsavel");
                 });
 
             modelBuilder.Entity("CronoAI.Dominio.MembroEmpresa", b =>

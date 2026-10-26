@@ -126,13 +126,23 @@ public sealed class RlsTestes
         var usuario = await _dados.CriarUsuarioAsync();
         var empresa = await _dados.CriarEmpresaComMembrosAsync(usuario);
         await _dados.CriarSessaoAsync(usuario, empresa);
-        await _dados.CriarObraAsync(empresa, usuario);
+        var obra = await _dados.CriarObraAsync(empresa, usuario);
+        await _dados.CriarAcessoObraAsync(empresa, obra.Id, usuario);
+        await _dados.CriarFrenteAsync(empresa, obra.Id);
+        var carteira = await _dados.CriarCarteiraAsync(empresa);
+        await _dados.IncluirObraNaCarteiraAsync(empresa, carteira, obra.Id);
+        await _dados.AtribuirCarteiraAsync(empresa, carteira, usuario);
 
         // Controle negativo: os dados existem (o app, com o contexto da empresa, vê a obra e a trilha dela).
-        await using (var comoApp = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresa)))
+        await using (var comoApp = _dados.Fabrica.Criar(DadosTeste.ComoAdministrador(empresa)))
         {
             Assert.Equal(1, await Contar(comoApp, "obra"));
             Assert.Equal(1, await Contar(comoApp, "auditoria"));
+            Assert.Equal(1, await Contar(comoApp, "acesso_obra"));
+            Assert.Equal(1, await Contar(comoApp, "frente"));
+            Assert.Equal(1, await Contar(comoApp, "carteira"));
+            Assert.Equal(1, await Contar(comoApp, "carteira_obra"));
+            Assert.Equal(1, await Contar(comoApp, "acesso_carteira"));
         }
 
         // Migrador (dono) sem contexto E com as variáveis app.* setadas: as políticas são TO cronoai_app,
@@ -145,6 +155,10 @@ public sealed class RlsTestes
             Assert.Equal(0, await Contar(comoDono, "sessao"));
             Assert.Equal(0, await Contar(comoDono, "obra"));
             Assert.Equal(0, await Contar(comoDono, "auditoria"));
+            foreach (var nova in new[] { "acesso_obra", "frente", "acesso_frente", "carteira", "carteira_obra", "acesso_carteira" })
+            {
+                Assert.Equal(0, await Contar(comoDono, nova));
+            }
         }
     }
 
@@ -162,6 +176,12 @@ public sealed class RlsTestes
             "sessao" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.sessao"),
             "obra" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.obra"),
             "auditoria" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.auditoria"),
+            "acesso_obra" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.acesso_obra"),
+            "frente" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.frente"),
+            "acesso_frente" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.acesso_frente"),
+            "carteira" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.carteira"),
+            "carteira_obra" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.carteira_obra"),
+            "acesso_carteira" => contexto.Database.SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cronoai.acesso_carteira"),
             _ => throw new InvalidOperationException(tabela),
         };
         return (await sql.ToListAsync()).Single();

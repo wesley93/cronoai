@@ -52,6 +52,26 @@ public static class MapeadorErrosObra
     };
 
     /// <summary>
+    /// A falha é uma recusa de política de RLS ou de privilégio (<c>42501</c>) em algum ponto da cadeia? Com o RLS por obra
+    /// (ciclo 00014), a obra que deixou de ser VISÍVEL entre o carregamento e a gravação (vínculo revogado) faz a política de
+    /// INSERT da trilha recusar com 42501, sem nome de constraint nem de tabela (o PostgreSQL não os informa). Quem chama
+    /// decide pelo estado: se a obra não é mais visível é 404; se continua visível, o erro é outro e sobe (500 genérico).
+    /// </summary>
+    public static bool EhRecusaDePolitica(Exception erro)
+    {
+        ArgumentNullException.ThrowIfNull(erro);
+        for (var atual = erro; atual is not null; atual = atual.InnerException)
+        {
+            if (atual is PostgresException { SqlState: PostgresErrorCodes.InsufficientPrivilege })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Classifica a falha do banco: <c>null</c> se não for uma violação conhecida (o chamador relança); senão o resultado
     /// (400 por campo, 404 de obra que sumiu no meio da escrita ou 409 de nome repetido).
     /// </summary>

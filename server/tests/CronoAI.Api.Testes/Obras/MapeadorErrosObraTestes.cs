@@ -25,6 +25,20 @@ public sealed class MapeadorErrosObraTestes
     }
 
     [Fact]
+    public void Recusa_de_politica_e_reconhecida_pela_cadeia_e_nao_vira_resultado()
+    {
+        // 42501 não tem constraint: o mapeador NÃO o traduz sozinho (quem decide é o serviço, pelo estado da obra).
+        var erro = new InvalidOperationException("falha ao salvar", RecusadaPorRls());
+
+        Assert.True(MapeadorErrosObra.EhRecusaDePolitica(erro));
+        Assert.Null(MapeadorErrosObra.Classificar(erro));
+
+        // Controle: violação de check não é recusa de política.
+        Assert.False(MapeadorErrosObra.EhRecusaDePolitica(new InvalidOperationException("x", ViolacaoDeCheck("ck_qualquer_outra"))));
+        Assert.False(MapeadorErrosObra.EhRecusaDePolitica(new InvalidOperationException("sem postgres")));
+    }
+
+    [Fact]
     public void Constraint_desconhecida_nao_e_traduzida()
     {
         Assert.Null(MapeadorErrosObra.Classificar(ViolacaoDeCheck("ck_qualquer_outra")));
@@ -33,6 +47,9 @@ public sealed class MapeadorErrosObraTestes
     #endregion
 
     #region Métodos privados
+
+    private static PostgresException RecusadaPorRls() =>
+        new("mensagem do banco", "ERROR", "ERROR", PostgresErrorCodes.InsufficientPrivilege);
 
     private static PostgresException ViolacaoDeCheck(string constraint) =>
         new("mensagem do banco", "ERROR", "ERROR", PostgresErrorCodes.CheckViolation, constraintName: constraint);

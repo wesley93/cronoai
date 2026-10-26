@@ -30,5 +30,25 @@ public sealed class RlsHelperTestes
         }
     }
 
+    [Fact]
+    public void Helper_recusa_politica_de_escrita_na_auditoria()
+    {
+        var migracao = new MigrationBuilder("Npgsql.EntityFrameworkCore.PostgreSQL");
+
+        // A trilha é append-only (ADR 00009): só SELECT e INSERT. A guarda é do helper, sem depender de regex nem de revisor.
+        Assert.Throws<ArgumentException>(() => migracao.PoliticaUpdate("auditoria", "pol_x", "true", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.PoliticaDelete("auditoria", "pol_x", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.SubstituirPoliticaUpdate("auditoria", "pol_x", "true", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.SubstituirPoliticaDelete("auditoria", "pol_x", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.RemoverPolitica("auditoria", "pol_auditoria_select"));
+
+        // Controle: a mesma chamada em outra tabela passa, e a trilha aceita substituir SELECT e INSERT.
+        Assert.Null(Record.Exception(() => migracao.PoliticaUpdate("obra", "pol_x", "true", "true")));
+        Assert.Null(Record.Exception(() => migracao.PoliticaDelete("acesso_obra", "pol_x", "true")));
+        Assert.Null(Record.Exception(() => migracao.SubstituirPoliticaUpdate("obra", "pol_x", "true", "true")));
+        Assert.Null(Record.Exception(() => migracao.SubstituirPoliticaSelect("auditoria", "pol_auditoria_select", "true")));
+        Assert.Null(Record.Exception(() => migracao.SubstituirPoliticaInsert("auditoria", "pol_auditoria_insert", "true")));
+    }
+
     #endregion
 }

@@ -36,7 +36,7 @@ public sealed class VersaoObraTestes
         Assert.Equal(1L, await _dados.LerVersaoAsync(empresa, id));
 
         // O cliente tenta impor a versão 999: o gatilho soma 1 à versão ANTIGA.
-        await using var contexto = _dados.Fabrica.Criar(ContextoSessaoBanco.DaEmpresa(empresa));
+        await using var contexto = _dados.Fabrica.Criar(DadosTeste.ComoAdministrador(empresa));
         await contexto.Database.ExecuteSqlAsync($"UPDATE cronoai.obra SET versao = 999, nome = {"Renomeada"} WHERE id = {id}", TestContext.Current.CancellationToken);
         Assert.Equal(2L, await _dados.LerVersaoAsync(empresa, id));
 

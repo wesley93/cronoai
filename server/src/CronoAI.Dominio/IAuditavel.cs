@@ -8,8 +8,11 @@ public interface IAuditavel
 {
     #region Propriedades
 
-    /// <summary>Identificador da entidade (uuid); vai para <c>auditoria.entidade_id</c>.</summary>
-    Guid Id { get; }
+    /// <summary>
+    /// Identificador da entidade (uuid); vai para <c>auditoria.entidade_id</c>. Entidade com <c>id</c> próprio devolve o
+    /// <c>Id</c>; <c>membro_empresa</c> devolve o <c>UsuarioId</c> (único dentro da empresa da linha de trilha).
+    /// </summary>
+    Guid EntidadeId { get; }
 
     #endregion
 }

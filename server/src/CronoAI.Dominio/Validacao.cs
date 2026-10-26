@@ -19,6 +19,15 @@ internal static class Validacao
     /// </summary>
     public static ArgumentException Campo(string campo, string mensagem) => new(mensagem, campo);
 
+    /// <summary>Nenhum identificador pode ser <see cref="Guid.Empty"/> (vínculos e entidades de empresa).</summary>
+    public static void IdsObrigatorios(params Guid[] ids)
+    {
+        if (ids.Any(id => id == Guid.Empty))
+        {
+            throw new ArgumentException("Os identificadores são obrigatórios.");
+        }
+    }
+
     public static void Utc(DateTime valor, string parametro)
     {
         if (valor.Kind != DateTimeKind.Utc)

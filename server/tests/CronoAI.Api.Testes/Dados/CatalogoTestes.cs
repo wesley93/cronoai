@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using CronoAI.Api.Testes.Infra;
 using Npgsql;
 
@@ -6,13 +7,19 @@ namespace CronoAI.Api.Testes.Dados;
 /// <summary>Testes de catálogo (pg_catalog), lidos como <c>cronoai_app</c>: FKs, nomes, RLS e políticas.</summary>
 [Collection(ColecaoBanco.Nome)]
 [Trait("Categoria", "Integracao")]
-public sealed class CatalogoTestes
+public sealed partial class CatalogoTestes
 {
     #region Campos
 
     // Tabelas do schema fora do RLS por decisão (ADR 00006): usuario (aceito com condições), o histórico de migrações e as
     // listas nacionais (UF e município: globais, sem empresa, só leitura para a aplicação; ciclo 00013).
     private static readonly string[] _tabelasForaDoRls = ["usuario", "__ef_migrations_history", "uf_referencia", "municipio_referencia"];
+
+    // Tabela, comando, USING e WITH CHECK normalizados em espaços ("<nulo>" quando a política não tem a cláusula).
+    private const string ConsultaDePredicados = @"SELECT tablename || '|' || cmd || '|' ||
+                     regexp_replace(coalesce(qual, '<nulo>'), '[[:space:]]+', ' ', 'g') || '|' ||
+                     regexp_replace(coalesce(with_check, '<nulo>'), '[[:space:]]+', ' ', 'g')
+                FROM pg_policies WHERE schemaname = 'cronoai'";
 
     private readonly BancoPostgresFixture _banco;
 
@@ -87,7 +94,7 @@ public sealed class CatalogoTestes
         }
 
         // As tabelas de dado do ciclo estão de fato presentes e protegidas.
-        foreach (var esperada in new[] { "empresa", "membro_empresa", "sessao", "obra", "auditoria" })
+        foreach (var esperada in new[] { "empresa", "membro_empresa", "sessao", "obra", "auditoria", "acesso_obra", "frente", "acesso_frente", "carteira", "carteira_obra", "acesso_carteira" })
         {
             Assert.Contains($"{esperada}|true|true", tabelas);
         }
@@ -99,17 +106,36 @@ public sealed class CatalogoTestes
         var politicas = await ListarAsync(
             "SELECT tablename || '|' || cmd || '|' || roles::text || '|' || permissive FROM pg_policies WHERE schemaname = 'cronoai' ORDER BY 1");
 
-        // Nenhum "ALL", nenhum papel além do cronoai_app, e exatamente os comandos do plano (sem UPDATE/DELETE em empresa e
-        // membro_empresa; obra sem DELETE; auditoria SÓ com SELECT e INSERT: nenhuma política de UPDATE ou DELETE).
+        // Nenhum "ALL", nenhum papel além do cronoai_app, e exatamente os comandos do plano: membro_empresa SEM INSERT (escalada
+        // fechada) e com UPDATE; obra sem DELETE; frente e carteira sem DELETE; os 4 vínculos sem UPDATE e com DELETE; auditoria SÓ com
+        // SELECT e INSERT (nenhuma política de UPDATE ou DELETE).
         var esperadas = new[]
         {
             "empresa|INSERT|{cronoai_app}|PERMISSIVE",
             "empresa|SELECT|{cronoai_app}|PERMISSIVE",
-            "membro_empresa|INSERT|{cronoai_app}|PERMISSIVE",
             "membro_empresa|SELECT|{cronoai_app}|PERMISSIVE",
+            "membro_empresa|UPDATE|{cronoai_app}|PERMISSIVE",
             "obra|INSERT|{cronoai_app}|PERMISSIVE",
             "obra|SELECT|{cronoai_app}|PERMISSIVE",
             "obra|UPDATE|{cronoai_app}|PERMISSIVE",
+            "acesso_obra|DELETE|{cronoai_app}|PERMISSIVE",
+            "acesso_obra|INSERT|{cronoai_app}|PERMISSIVE",
+            "acesso_obra|SELECT|{cronoai_app}|PERMISSIVE",
+            "frente|INSERT|{cronoai_app}|PERMISSIVE",
+            "frente|SELECT|{cronoai_app}|PERMISSIVE",
+            "frente|UPDATE|{cronoai_app}|PERMISSIVE",
+            "acesso_frente|DELETE|{cronoai_app}|PERMISSIVE",
+            "acesso_frente|INSERT|{cronoai_app}|PERMISSIVE",
+            "acesso_frente|SELECT|{cronoai_app}|PERMISSIVE",
+            "carteira|INSERT|{cronoai_app}|PERMISSIVE",
+            "carteira|SELECT|{cronoai_app}|PERMISSIVE",
+            "carteira|UPDATE|{cronoai_app}|PERMISSIVE",
+            "carteira_obra|DELETE|{cronoai_app}|PERMISSIVE",
+            "carteira_obra|INSERT|{cronoai_app}|PERMISSIVE",
+            "carteira_obra|SELECT|{cronoai_app}|PERMISSIVE",
+            "acesso_carteira|DELETE|{cronoai_app}|PERMISSIVE",
+            "acesso_carteira|INSERT|{cronoai_app}|PERMISSIVE",
+            "acesso_carteira|SELECT|{cronoai_app}|PERMISSIVE",
             "auditoria|INSERT|{cronoai_app}|PERMISSIVE",
             "auditoria|SELECT|{cronoai_app}|PERMISSIVE",
             "sessao|DELETE|{cronoai_app}|PERMISSIVE",
@@ -123,36 +149,45 @@ public sealed class CatalogoTestes
     [Fact]
     public async Task Predicados_das_politicas_sao_os_do_plano()
     {
-        // Texto EXATO (normalizado em espaços) de USING e WITH CHECK em pg_policies. Sem isto, um WITH CHECK (true) nos
-        // INSERT de sessao ou membro_empresa deixaria a suíte verde. U e E são as subconsultas escalares das variáveis de sessão.
-        const string u = "( SELECT (NULLIF(current_setting('app.usuario_id'::text, true), ''::text))::uuid AS \"nullif\")";
-        const string e = "( SELECT (NULLIF(current_setting('app.empresa_id'::text, true), ''::text))::uuid AS \"nullif\")";
-        const string nulo = "<nulo>";
+        // Texto EXATO (normalizado em espaços) de USING e WITH CHECK em pg_policies, de TODAS as políticas. O golden
+        // (predicados-esperados.txt) foi COPIADO da saída real do PostgreSQL, nunca escrito à mão: sem isto, um WITH CHECK (true)
+        // num INSERT deixaria a suíte verde. Mudar uma política exige regerar o arquivo DE PROPÓSITO e revisar o diff.
+        // Formato de cada linha: tabela|comando|USING|WITH CHECK ("<nulo>" quando não há).
+        var atuais = await ListarAsync(ConsultaDePredicados);
 
-        var atuais = await ListarAsync(
-            @"SELECT tablename || '|' || cmd || '|' ||
-                     regexp_replace(coalesce(qual, '<nulo>'), '[[:space:]]+', ' ', 'g') || '|' ||
-                     regexp_replace(coalesce(with_check, '<nulo>'), '[[:space:]]+', ' ', 'g')
-                FROM pg_policies WHERE schemaname = 'cronoai'");
+        var esperados = (await File.ReadAllLinesAsync(Path.Combine(AppContext.BaseDirectory, "Dados", "predicados-esperados.txt"), TestContext.Current.CancellationToken))
+            .Where(l => l.Length > 0)
+            .ToList();
 
-        var esperados = new[]
-        {
-            $"empresa|INSERT|{nulo}|(id = {e})",
-            $"empresa|SELECT|((id = {e}) OR (EXISTS ( SELECT 1 FROM membro_empresa m WHERE ((m.empresa_id = empresa.id) AND (m.usuario_id = {u})))))|{nulo}",
-            $"membro_empresa|INSERT|{nulo}|(empresa_id = {e})",
-            $"membro_empresa|SELECT|((usuario_id = {u}) OR (empresa_id = {e}))|{nulo}",
-            $"obra|INSERT|{nulo}|(empresa_id = {e})",
-            $"obra|SELECT|(empresa_id = {e})|{nulo}",
-            $"obra|UPDATE|(empresa_id = {e})|(empresa_id = {e})",
-            $"auditoria|INSERT|{nulo}|(empresa_id = {e})",
-            $"auditoria|SELECT|(empresa_id = {e})|{nulo}",
-            $"sessao|DELETE|(usuario_id = {u})|{nulo}",
-            $"sessao|INSERT|{nulo}|(usuario_id = {u})",
-            $"sessao|SELECT|(usuario_id = {u})|{nulo}",
-            $"sessao|UPDATE|(usuario_id = {u})|(usuario_id = {u})",
-        };
-
+        Assert.Empty(Diferencas(atuais, esperados));
         Assert.Equal(esperados.OrderBy(x => x, StringComparer.Ordinal), atuais.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task Comparador_de_predicados_detecta_afrouxamento()
+    {
+        // T11: prova que o comparador do teste anterior ENXERGA um predicado afrouxado. Numa transação do superusuário (nunca
+        // confirmada) afrouxa duas políticas e roda a MESMA consulta do catálogo; o comparador deve apontar exatamente as duas.
+        var esperados = (await File.ReadAllLinesAsync(Path.Combine(AppContext.BaseDirectory, "Dados", "predicados-esperados.txt"), TestContext.Current.CancellationToken))
+            .Where(l => l.Length > 0)
+            .ToList();
+
+        var (codigo, saida, erro) = await _banco.ExecutarScriptComoSuperusuarioAsync(
+            ("SET search_path = cronoai; " + ConsultaDePredicados).Replace("SELECT", "BEGIN; ALTER POLICY pol_obra_select ON cronoai.obra USING (true); ALTER POLICY pol_auditoria_insert ON cronoai.auditoria WITH CHECK (true); SELECT", StringComparison.Ordinal));
+        Assert.True(codigo == 0, erro);
+        var mutadas = LinhasDePolitica(saida);
+        Assert.Equal(esperados.Count, mutadas.Count);
+
+        // A mutação é detectada, e SÓ ela.
+        var apontadas = Diferencas(mutadas, esperados).Order(StringComparer.Ordinal).ToList();
+        var primeira = mutadas.Except(esperados, StringComparer.Ordinal).FirstOrDefault(l => !l.StartsWith("obra|SELECT", StringComparison.Ordinal) && !l.StartsWith("auditoria|INSERT", StringComparison.Ordinal)) ?? "";
+        Assert.True(apontadas.SequenceEqual(["auditoria|INSERT", "obra|SELECT"]), string.Join(";", apontadas) + " :: " + primeira[^Math.Min(primeira.Length, 120)..]);
+
+        // (O superusuário não tem o search_path do papel da aplicação: sem o SET o deparse qualificaria as tabelas com "cronoai.".)
+        // Controle negativo: sem a mutação o comparador não aponta nada.
+        var (codigoLimpo, saidaLimpa, erroLimpo) = await _banco.ExecutarScriptComoSuperusuarioAsync("SET search_path = cronoai; " + ConsultaDePredicados);
+        Assert.True(codigoLimpo == 0, erroLimpo);
+        Assert.Empty(Diferencas(LinhasDePolitica(saidaLimpa), esperados));
     }
 
     [Fact]
@@ -171,6 +206,25 @@ public sealed class CatalogoTestes
     #endregion
 
     #region Métodos privados
+
+    // Diferença simétrica entre o catálogo e o golden, devolvida como "tabela|comando" de cada política que mudou.
+    private static List<string> Diferencas(IEnumerable<string> atuais, IEnumerable<string> esperados)
+    {
+        var listaAtual = atuais.ToList();
+        var listaEsperada = esperados.ToList();
+        return listaAtual.Except(listaEsperada, StringComparer.Ordinal)
+            .Concat(listaEsperada.Except(listaAtual, StringComparer.Ordinal))
+            .Select(linha => string.Join('|', linha.Split('|').Take(2)))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    // O psql imprime o resultado de CADA comando do script ("BEGIN", "ALTER POLICY"...): fica só a linha de política.
+    private static List<string> LinhasDePolitica(string saida) =>
+        saida.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => PoliticaRegex().IsMatch(l)).ToList();
+
+    [GeneratedRegex(@"^[a-z_]+\|(SELECT|INSERT|UPDATE|DELETE)\|")]
+    private static partial Regex PoliticaRegex();
 
     private async Task<List<string>> ListarAsync(string sql)
     {

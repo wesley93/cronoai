@@ -271,6 +271,19 @@ public sealed class ServicoObras
 
             return resultado;
         }
+        catch (DbUpdateException erro) when (MapeadorErrosObra.EhRecusaDePolitica(erro))
+        {
+            // 42501 sem nome de constraint: com o RLS por obra, a política de INSERT da trilha recusa a obra que deixou de ser
+            // visível depois do meu carregamento (vínculo revogado no meio). Confere o estado antes de decidir: obra invisível
+            // é obra que sumiu (404, igual ao inexistente); se ela ainda é visível, a recusa é outra coisa e sobe (500 genérico).
+            if (await _banco.Obras.AsNoTracking().AnyAsync(o => o.Id == obra.Id, cancelamento))
+            {
+                throw;
+            }
+
+            _logger.ObraSumiuNoMeioDaEscrita(obra.Id);
+            return ResultadoEscritaObra.NaoEncontrada();
+        }
     }
 
     // Três causas para zero linhas: versão velha (409 com o estado do banco), obra que sumiu ou ficou invisível por RLS
