@@ -1,7 +1,7 @@
 // Conversor MS Project Data Interchange (MSPDI): estado da store <-> arquivo .xml do MS Project.
 // Referência do esquema: https://learn.microsoft.com/office-project/xml-data-interchange/project-xml-data-interchange-schema-reference
 // A ordem dos elementos segue as sequências (xs:sequence) do esquema MSPDI; o validador abaixo confere essa ordem.
-import type { CalendarioObra, IntervaloTrabalho, Lag, LinkType, ProjectMeta, Restricao, ScheduleResult, Task } from '@/types/domain'
+import type { CalendarioObra, DadosLinhaBase, IntervaloTrabalho, Lag, LinhaBaseInfo, LinkType, ProjectMeta, Restricao, ScheduleResult, Task } from '@/types/domain'
 import { WorkCalendar, addCalendarDays, diffCalendarDays } from './calendar'
 import {
   EXPEDIENTE_PADRAO,
@@ -21,6 +21,8 @@ import {
   lerDataHora,
   type CalendariosCompilados,
 } from './calendarioTrabalho'
+import { arredondarBancario } from './format'
+import { NUMERO_MAX_LINHA_BASE, rollupLinhaBase } from './linhasBase'
 import { alteradaDepoisDaImportacao } from './restricoes'
 import { compareWbs, normalizeText, parseFloorRange, rollupSummaries, type SummaryRollup } from './wbs'
 
@@ -203,17 +205,27 @@ interface TaskContext {
   minutosPorDia: number
   /** Data-base (início do projeto): referência dos momentos do cálculo. */
   base: string
+  /** Linhas de base 1 a 10 das tarefas-resumo (rollup das folhas, com a duração em dias úteis do calendário padrão), por número e UID. */
+  lbResumo: Map<number, Map<number, DadosLinhaBase>>
 }
 
 function createContext(input: MspdiExportInput): TaskContext {
   const cals = compilarCalendarios(input.meta.startDate, input.calendarios, input.calendarioPadraoUid)
+  const cal = calendarioDeDias(cals.padrao)
+  const minutosPorDia = input.meta.minutosPorDia ?? DEFAULT_MINUTES_PER_DAY
+  // Só as linhas de base que alguma folha tem: o seed (só a LB0) não paga o rollup
+  const numeros = new Set<number>()
+  for (const t of input.tasks) for (const k of Object.keys(t.linhasBase ?? {})) numeros.add(Number(k))
+  const lbResumo = new Map<number, Map<number, DadosLinhaBase>>()
+  for (const n of [...numeros].sort((a, b) => a - b)) if (n >= 1 && n <= NUMERO_MAX_LINHA_BASE) lbResumo.set(n, rollupLinhaBase(input.tasks, n, cal, minutosPorDia))
   return {
     schedule: input.schedule,
     rollups: rollupSummaries(input.tasks, input.schedule),
-    cal: calendarioDeDias(cals.padrao),
+    cal,
     cals,
-    minutosPorDia: input.meta.minutosPorDia ?? DEFAULT_MINUTES_PER_DAY,
+    minutosPorDia,
     base: input.meta.startDate,
+    lbResumo,
   }
 }
 
@@ -255,6 +267,29 @@ const horaDe = (momento: number): string => `${horaDoMomento(momento)}:00`
  */
 const horaDaData = (data: string | undefined, momento: number, base: string): string =>
   data && momento % MINUTOS_NO_DIA_CORRIDO === 0 && dataDoMomento(base, momento) > data.slice(0, 10) ? '24:00:00' : horaDe(momento)
+
+/**
+ * `<Baseline>` das linhas de base 1 a 10, em ordem crescente de `Number`, só as que existem e só com os campos presentes (LB incompleta é preservada).
+ * Folha: os dados da tarefa; resumo: o rollup das folhas. A data vai no horário padrão (08:00, ou 17:00 no marco; término 17:00): a hora do arquivo não volta (D-4).
+ */
+function baselinesExtras(t: Task, ctx: TaskContext, startTime: string): (XNode | null)[] {
+  const out: (XNode | null)[] = []
+  for (let n = 1; n <= NUMERO_MAX_LINHA_BASE; n++) {
+    const d = t.isSummary ? ctx.lbResumo.get(n)?.get(t.uid) : t.linhasBase?.[String(n)]
+    if (!d || (d.inicio === undefined && d.termino === undefined && d.duracaoMin === undefined && d.custo === undefined)) continue
+    out.push(
+      x('Baseline', [
+        x('Number', n),
+        x('Start', dt(d.inicio, startTime)),
+        x('Finish', dt(d.termino, '17:00:00')),
+        d.duracaoMin !== undefined ? x('Duration', minutosParaDuracao(d.duracaoMin)) : null,
+        d.duracaoMin !== undefined ? x('DurationFormat', 7) : null,
+        d.custo !== undefined ? x('Cost', arredondarBancario(d.custo, 2).toFixed(2)) : null,
+      ]),
+    )
+  }
+  return out
+}
 
 function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
   const s = ctx.schedule.byUid.get(t.uid)
@@ -346,6 +381,7 @@ function taskNode(t: Task, id: number, ctx: TaskContext): XNode {
         bStart && bFinish && x('DurationFormat', 7),
         x('Cost', money(cost)),
       ]),
+    ...baselinesExtras(t, ctx, startTime),
   ])!
 }
 
@@ -399,6 +435,7 @@ export function buildMspdiXml(input: MspdiExportInput): string {
       meta.moveArquivo?.remainingStartsBack !== undefined && x('MoveRemainingStartsBack', meta.moveArquivo.remainingStartsBack),
       meta.moveArquivo?.remainingStartsForward !== undefined && x('MoveRemainingStartsForward', meta.moveArquivo.remainingStartsForward),
       meta.moveArquivo?.completedEndsForward !== undefined && x('MoveCompletedEndsForward', meta.moveArquivo.completedEndsForward),
+      meta.linhaBaseAtiva !== undefined && Number.isInteger(meta.linhaBaseAtiva) && meta.linhaBaseAtiva >= 1 && meta.linhaBaseAtiva <= NUMERO_MAX_LINHA_BASE && x('BaselineForEarnedValue', meta.linhaBaseAtiva),
       x('StatusDate', dt(meta.statusDate, '17:00:00')),
       x('CurrentDate', dt(meta.statusDate, '08:00:00')),
       x('ExtendedAttributes', [
@@ -577,6 +614,8 @@ export function validateMspdi(xml: string, options: { strictOrder?: boolean } = 
 export interface MspdiImportResult {
   meta: Partial<ProjectMeta>
   tasks: Task[]
+  /** Linhas de base (0 a 10) que o arquivo trouxe, com metadados genéricos (o MSPDI não guarda nome, motivo, autor nem data de gravação). */
+  linhasBase: LinhaBaseInfo[]
   calendarios: CalendarioObra[]
   calendarioPadraoUid: number
   warnings: string[]
@@ -932,7 +971,16 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   let duracoesForaDaFaixa = 0
   let nullRows = 0
   let calendarioDeTarefaNaoImportado = 0
-  let otherBaselines = 0
+  // Linhas de base: só números entram nos avisos
+  let lbInterim = 0
+  let lbNumeroInvalido = 0
+  let lbRepetida = 0
+  let lbAlemDoLimite = 0
+  let lbCustoInvalido = 0
+  let lbTrabalho = 0
+  let lb0SemDatas = 0
+  const numerosComDados = new Set<number>()
+  const MAX_BASELINES_POR_TAREFA = NUMERO_MAX_LINHA_BASE + 1
   let baselineNoFinish = 0
   let baselineNoStart = 0
   let manuais = 0
@@ -975,7 +1023,51 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     }
     const name = text(node, 'Name') ?? `Tarefa ${uid}`
     const isSummary = text(node, 'Summary') === '1'
-    const baseline = kids(node, 'Baseline').find((b) => (text(b, 'Number') ?? '0') === '0')
+    // `Interim` = 1 não é linha de base (plano provisório): fica fora, inclusive da LB0
+    const baselineNodes = kids(node, 'Baseline')
+    const baseline = baselineNodes.find((b) => (text(b, 'Number') ?? '0') === '0' && text(b, 'Interim') !== '1')
+    const linhasBase: Record<string, DadosLinhaBase> = {}
+    const vistos = new Set<number>()
+    baselineNodes.forEach((b, i) => {
+      if (i >= MAX_BASELINES_POR_TAREFA) {
+        lbAlemDoLimite++ // no máximo 11 por tarefa (laço limitado, S-4)
+        return
+      }
+      if (text(b, 'Interim') === '1') {
+        lbInterim++
+        return
+      }
+      const n = Number(text(b, 'Number') ?? '0')
+      if (!Number.isInteger(n) || n < 0 || n > NUMERO_MAX_LINHA_BASE) {
+        lbNumeroInvalido++
+        return
+      }
+      if (vistos.has(n)) {
+        lbRepetida++ // vale o primeiro
+        return
+      }
+      vistos.add(n)
+      if (kid(b, 'Work')) lbTrabalho++ // o trabalho (Work) não tem onde morar: entra no aviso único
+      const temDado = ['Start', 'Finish', 'Duration', 'Cost'].some((c) => kid(b, c) !== undefined)
+      if (temDado) numerosComDados.add(n)
+      if (n === 0) return // a LB0 segue nos campos de sempre, abaixo
+      const dados: DadosLinhaBase = {}
+      if (kid(b, 'Start')) {
+        const d = dataSegura(text(b, 'Start'))
+        if (d) dados.inicio = d
+      }
+      if (kid(b, 'Finish')) {
+        const d = dataSegura(text(b, 'Finish'))
+        if (d) dados.termino = d
+      }
+      if (kid(b, 'Duration')) dados.duracaoMin = minutosDe(text(b, 'Duration'))
+      if (kid(b, 'Cost')) {
+        const c = num(b, 'Cost')
+        if (c !== undefined && c >= 0 && c <= 1e12) dados.custo = c
+        else lbCustoInvalido++
+      }
+      if (Object.keys(dados).length) linhasBase[String(n)] = dados
+    })
     const extNodes = kids(node, 'ExtendedAttribute')
     const ext = new Map(extNodes.map((e) => [text(e, 'FieldID') ?? '', text(e, 'Value') ?? '']))
     for (const e of extNodes) {
@@ -984,7 +1076,6 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
       customValues++
       customFields.add(id)
     }
-    if (kids(node, 'Baseline').some((b) => (text(b, 'Number') ?? '0') !== '0')) otherBaselines++
     const calTexto = text(node, 'CalendarUID')
     const calUid = calTexto === undefined || calTexto === '-1' ? undefined : Number(calTexto)
     const calendarioUid = calUid !== undefined && calUid !== uidPadrao && importados.has(calUid) ? calUid : undefined
@@ -1018,6 +1109,8 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     const baselineFinish = dataSegura(text(baseline, 'Finish'))
     if (!isSummary && baseline && baselineStart && !baselineFinish) baselineNoFinish++
     if (!isSummary && baseline && !baselineStart && baselineFinish) baselineNoStart++
+    // LB0 sem nenhuma data (só custo, duração ou trabalho): a store a calcula pelo cronograma (CR-12 só protege a LB0 com uma das datas)
+    if (!isSummary && baseline && !baselineStart && !baselineFinish) lb0SemDatas++
 
     // Restrição explícita do arquivo (ConstraintType 0–7 + ConstraintDate) e prazo final (Deadline)
     const explicita = lerRestricao(num(node, 'ConstraintType'), text(node, 'ConstraintDate'))
@@ -1087,6 +1180,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
       baselineStart,
       baselineFinish,
       baselineDuracaoMin: baseline ? minutosDe(text(baseline, 'Duration')) : undefined,
+      ...(Object.keys(linhasBase).length ? { linhasBase } : {}),
       restricao: efetiva,
       ...(prazoFinal ? { prazoFinal } : {}),
       ...(arquivo ? { arquivo } : {}),
@@ -1095,6 +1189,20 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
     })
   }
 
+  const linhasBase: LinhaBaseInfo[] = [...numerosComDados]
+    .sort((a, b) => a - b)
+    .map((n) => ({ numero: n, nome: `Linha de base ${n} (importada do MS Project)`, motivo: 'Importada do arquivo', origem: 'arquivo' as const }))
+  // LB do valor agregado do arquivo: só vale se a linha de base veio no arquivo
+  const paraValorAgregado = num(project, 'BaselineForEarnedValue')
+  if (paraValorAgregado !== undefined && paraValorAgregado !== 0) {
+    if (Number.isInteger(paraValorAgregado) && paraValorAgregado >= 1 && paraValorAgregado <= NUMERO_MAX_LINHA_BASE && numerosComDados.has(paraValorAgregado)) {
+      meta.linhaBaseAtiva = paraValorAgregado
+    } else if (Number.isInteger(paraValorAgregado) && paraValorAgregado >= 1 && paraValorAgregado <= NUMERO_MAX_LINHA_BASE) {
+      warnings.push(`O arquivo indica a linha de base ${paraValorAgregado} para o valor agregado, mas ela não veio no arquivo: o CronoAI usa a linha de base 0.`)
+    } else {
+      warnings.push(`O arquivo indica uma linha de base para o valor agregado fora de 0 a ${NUMERO_MAX_LINHA_BASE}: o CronoAI usa a linha de base 0.`)
+    }
+  }
   if (!tasks.length) throw new Error('Nenhuma tarefa encontrada no XML.')
   if (inactive) warnings.push(`${inactive} tarefa(s) inativa(s) ignorada(s).`)
   if (lagDesconhecido) warnings.push(`${lagDesconhecido} vínculo(s) com formato de latência desconhecido importados com latência zero.`)
@@ -1103,7 +1211,16 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   if (jornadaInvalida) warnings.push(`MinutesPerDay do arquivo (${minutosDoArquivo}) fora da faixa de 1 a ${MINUTOS_NO_DIA_CORRIDO} minutos inteiros: usada a jornada padrão de ${DEFAULT_MINUTES_PER_DAY} minutos.`)
   if (duracoesForaDaFaixa) warnings.push(`${duracoesForaDaFaixa} duração(ões) negativa(s), acima de 50 anos ou ilegível(is) importada(s) como zero.`)
   if (arredondados) warnings.push(`${arredondados} valor(es) de tempo com segundos arredondado(s) para o minuto (durações guiadas por recurso).`)
-  if (otherBaselines) warnings.push(`Linhas de base 1 a 10 não importadas em ${otherBaselines} tarefa(s): o CronoAI usa só a linha de base 0.`)
+  // Linhas de base 1 a 10 agora são lidas (o aviso antigo de "não importadas" deixou de existir). Só o que não é linha de base ou não cabe:
+  const lbIgnoradas = [
+    lbInterim && `${lbInterim} com plano provisório (Interim)`,
+    lbNumeroInvalido && `${lbNumeroInvalido} com número fora de 0 a ${NUMERO_MAX_LINHA_BASE}`,
+    lbRepetida && `${lbRepetida} repetida(s) na mesma tarefa (vale a primeira)`,
+    lbAlemDoLimite && `${lbAlemDoLimite} além do limite de ${MAX_BASELINES_POR_TAREFA} por tarefa`,
+  ].filter(Boolean)
+  if (lbIgnoradas.length) warnings.push(`Linhas de base ignoradas: ${lbIgnoradas.join('; ')}.`)
+  if (lbCustoInvalido) warnings.push(`${lbCustoInvalido} custo(s) de linha de base inválido(s) ou fora da faixa ignorado(s).`)
+  if (lb0SemDatas) warnings.push(`${lb0SemDatas} tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas da linha de base 0 delas.`)
   // Sem término ou sem início, evm.ts devolve PV zero: a store mantém a LB0 incompleta do arquivo (withBaseline onlyMissing, CR-12).
   if (baselineNoFinish) warnings.push(`${baselineNoFinish} tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.`)
   if (baselineNoStart) warnings.push(`${baselineNoStart} tarefa(s) com linha de base 0 sem início: o término do arquivo é mantido e o valor planejado (PV) delas fica zero.`)
@@ -1119,6 +1236,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   const timephased = doc.getElementsByTagNameNS('*', 'TimephasedData').length
   const notImported = [
     timephased && `${timephased} registro(s) distribuído(s) no tempo (TimephasedData)`,
+    lbTrabalho && `${lbTrabalho} valor(es) de trabalho (Work) das linhas de base`,
     customValues && `${customValues} valor(es) de ${customFields.size} campo(s) personalizado(s)`,
     calendariosNaoImportados > 0 && `${calendariosNaoImportados} calendário(s) de recurso ou sem uso nas tarefas`,
   ].filter(Boolean)
@@ -1136,6 +1254,7 @@ export function parseMspdiXml(xmlText: string): MspdiImportResult {
   return {
     meta,
     tasks,
+    linhasBase,
     calendarios: [calPadrao, ...[...importados.values()].filter((c) => c.uid !== uidPadrao)],
     calendarioPadraoUid: uidPadrao,
     warnings,

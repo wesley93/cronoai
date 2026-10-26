@@ -1691,6 +1691,13 @@ export const useProjectStore = defineStore('project', () => {
     // Tarefa manual alterada no CronoAI sai com as datas calculadas (a não alterada sai com as do arquivo)
     const manuais = tarefasManuaisAlteradas(state.tasks)
     const avisos = manuais ? [`${manuais} tarefa(s) manual(is) exportada(s) com datas do CronoAI: foram alteradas depois da importação.`] : []
+    // Linhas de base: o MSPDI não tem nome, motivo, autor nem data de gravação, e as de arquivo perdem a hora e o trabalho (Work)
+    if (state.linhasBase.some((i) => i.numero >= 1)) {
+      avisos.push('Os nomes, motivos e autores das linhas de base não vão ao .xml (o MSPDI não tem esses campos): ao reimportar, elas voltam com o nome "(importada do MS Project)".')
+    }
+    if (state.linhasBase.some((i) => i.origem === 'arquivo')) {
+      avisos.push('As datas das linhas de base vão com o horário padrão (08:00 e 17:00).', 'O trabalho (Work) das linhas de base não volta ao .xml.')
+    }
     return { filename: `${safe}_${state.meta.statusDate}.xml`, xml, validation, avisos }
   }
 
@@ -1698,7 +1705,8 @@ export const useProjectStore = defineStore('project', () => {
   function importXml(text: string): string[] {
     const result = parseMspdiXml(text)
     // Jornada, HonorConstraints e Move* são do arquivo: o que o arquivo novo não traz não fica do arquivo anterior
-    const { honorConstraintsArquivo: _honor, moveArquivo: _move, minutosPorDia: _jornada, feriadosNacionaisAplicados: _feriados, ...daObra } = state.meta
+    // A LB do valor agregado também é do arquivo: as linhas de base da obra são substituídas pelas dele
+    const { honorConstraintsArquivo: _honor, moveArquivo: _move, minutosPorDia: _jornada, feriadosNacionaisAplicados: _feriados, linhaBaseAtiva: _lbAtiva, ...daObra } = state.meta
     const meta = {
       ...daObra,
       ...Object.fromEntries(Object.entries(result.meta).filter(([, v]) => v !== undefined && v !== '')),
@@ -1713,8 +1721,14 @@ export const useProjectStore = defineStore('project', () => {
     const erroHorizonte = verificarCalculo(tasks, meta, result.calendarios, result.calendarioPadraoUid, state.feriados)
     if (erroHorizonte) throw new Error(`Arquivo não importado: ${erroHorizonte}`)
     const uids = new Set(tasks.map((t) => t.uid))
+    // Linhas de base do arquivo (0 a 10). A LB0 que o arquivo não trouxe e o CronoAI calculou (`baselineFor`, só nas que faltam) ganha os metadados dela
+    const linhasBase = [...result.linhasBase]
+    if (!linhasBase.some((i) => i.numero === 0) && tasks.some((t) => !t.isSummary && t.baselineStart !== undefined)) {
+      linhasBase.unshift({ numero: 0, nome: 'Linha de base 0', motivo: 'Calculada na importação: o arquivo não trazia a linha de base 0', salvaEm: agora(), dataStatus: meta.statusDate, origem: 'cronoai' })
+    }
     state.meta = meta
     state.tasks = tasks
+    state.linhasBase = linhasBase
     state.calendarios = result.calendarios
     state.calendarioPadraoUid = result.calendarioPadraoUid
     state.materials = state.materials.filter((m) => uids.has(m.taskUid))

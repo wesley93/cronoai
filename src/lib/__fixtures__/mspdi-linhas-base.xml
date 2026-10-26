@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Fixture fictícia do ciclo 00007 (linhas de base 1 a 10): nenhuma obra real. Casos: LB0 completa, LB1 só custo, LB2 só duração,
+     LB3 só início, Interim na LB4, Number 11, Number 2 repetido, Work na LB5, LB0 sem datas (só custo) e BaselineForEarnedValue 3. -->
+<Project xmlns="http://schemas.microsoft.com/project">
+  <SaveVersion>14</SaveVersion>
+  <Title>Obra fictícia de linhas de base</Title>
+  <StartDate>2026-03-02T08:00:00</StartDate>
+  <MinutesPerDay>480</MinutesPerDay>
+  <BaselineForEarnedValue>3</BaselineForEarnedValue>
+  <StatusDate>2026-03-06T17:00:00</StatusDate>
+  <Tasks>
+    <Task>
+      <UID>1</UID><ID>1</ID><Name>Pacote</Name><WBS>1</WBS><OutlineNumber>1</OutlineNumber><OutlineLevel>1</OutlineLevel>
+      <Start>2026-03-02T08:00:00</Start><Finish>2026-03-13T17:00:00</Finish><Duration>PT80H0M0S</Duration><Summary>1</Summary>
+    </Task>
+    <Task>
+      <UID>2</UID><ID>2</ID><Name>Alvenaria</Name><WBS>1.1</WBS><OutlineNumber>1.1</OutlineNumber><OutlineLevel>2</OutlineLevel>
+      <Start>2026-03-02T08:00:00</Start><Finish>2026-03-06T17:00:00</Finish><Duration>PT40H0M0S</Duration><Summary>0</Summary><Cost>1000.00</Cost>
+      <Baseline><Number>0</Number><Start>2026-03-02T09:00:00</Start><Finish>2026-03-06T17:00:00</Finish><Duration>PT40H0M0S</Duration><DurationFormat>7</DurationFormat><Cost>1000.00</Cost></Baseline>
+      <Baseline><Number>1</Number><Cost>900.00</Cost></Baseline>
+      <Baseline><Number>2</Number><Duration>PT24H0M0S</Duration></Baseline>
+      <Baseline><Number>3</Number><Start>2026-03-09T08:00:00</Start></Baseline>
+      <Baseline><Number>4</Number><Interim>1</Interim><Start>2026-03-10T08:00:00</Start><Cost>1.00</Cost></Baseline>
+      <Baseline><Number>11</Number><Cost>5.00</Cost></Baseline>
+      <Baseline><Number>2</Number><Duration>PT8H0M0S</Duration></Baseline>
+      <Baseline><Number>5</Number><Work>PT16H0M0S</Work><Cost>77.00</Cost></Baseline>
+    </Task>
+    <Task>
+      <UID>3</UID><ID>3</ID><Name>Reboco</Name><WBS>1.2</WBS><OutlineNumber>1.2</OutlineNumber><OutlineLevel>2</OutlineLevel>
+      <Start>2026-03-09T08:00:00</Start><Finish>2026-03-13T17:00:00</Finish><Duration>PT40H0M0S</Duration><Summary>0</Summary><Cost>500.00</Cost>
+      <Baseline><Number>0</Number><Cost>500.00</Cost></Baseline>
+      <Baseline><Number>1</Number><Start>2026-03-09T08:00:00</Start><Finish>2026-03-13T17:00:00</Finish><Duration>PT40H0M0S</Duration><DurationFormat>7</DurationFormat><Cost>550.00</Cost></Baseline>
+    </Task>
+  </Tasks>
+</Project>

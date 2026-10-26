@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { CalendarioObra, ConfigFeriadosObra, ProjectMeta, Task } from '@/types/domain'
 import { buildSeedState, useProjectStore } from '@/stores/useProjectStore'
 import fixtureCalendarios from './__fixtures__/mspdi-calendarios-restricoes.xml?raw'
+import fixtureLinhasBase from './__fixtures__/mspdi-linhas-base.xml?raw'
 import { addCalendarDays } from './calendar'
 import { calendarioPadrao, compilarCalendarios, copiarCalendario, diasParaMinutos } from './calendarioTrabalho'
 import { calendariosParaExportar, configFeriadosPadrao, criarFeriadosPorAno } from './feriadosObra'
@@ -343,13 +344,14 @@ describe('parseMspdiXml: avisos do que o import não preserva', () => {
     expect(r.tasks.find((t) => t.uid === 104)?.baselineFinish).toBe(seed.tasks.find((t) => t.uid === 104)?.baselineFinish)
   })
 
-  it('C-5: linhas de base 1 a 10 não importadas avisam; a LB0 é lida como antes', () => {
+  it('C-5: as linhas de base 1 a 10 agora são lidas (ciclo 00007): o aviso antigo "não importadas" deixou de existir; a LB0 é lida como antes', () => {
     const lb = (n: number) => `<Baseline><Number>${n}</Number><Start>2026-03-0${n + 2}T08:00:00</Start><Finish>2026-03-0${n + 3}T17:00:00</Finish></Baseline>`
     const r = parseMspdiXml(projeto({ tasks: tarefa(1, { extra: lb(0) + lb(1) + lb(2) }) }))
     expect(r.tasks[0].baselineStart).toBe('2026-03-02')
     expect(r.tasks[0].baselineFinish).toBe('2026-03-03')
-    expect(r.warnings).toContain('Linhas de base 1 a 10 não importadas em 1 tarefa(s): o CronoAI usa só a linha de base 0.')
-    expect(r.warnings.join(' ')).not.toMatch(/linha de base 0 sem/)
+    // Antes: aviso "Linhas de base 1 a 10 não importadas em 1 tarefa(s)…" e LB1/LB2 descartadas. Depois: lidas, sem aviso
+    expect(r.tasks[0].linhasBase).toEqual({ '1': { inicio: '2026-03-03', termino: '2026-03-04' }, '2': { inicio: '2026-03-04', termino: '2026-03-05' } })
+    expect(r.warnings.join(' ')).not.toMatch(/não importadas em|linha de base 0 sem/)
   })
 
   it('C-6: durações exatas em minutos: tempo corrido vira duração corrida; 1 h e 12 h não viram marco nem são arredondadas', () => {
@@ -1045,5 +1047,126 @@ describe('exportação do seed igual à da base 00006 (ciclo 00007, C-4 e M-3)',
     const xml = exp.xml.replace(/<(CreationDate|LastSaved)>[^<]*<\/\1>/g, '<$1>X</$1>')
     expect(xml.length).toBe(79670)
     expect(createHash('sha256').update(xml).digest('hex')).toBe('a401d3a80ff304e097d8f7e1bc44312464c1055f91d95f45b0100c342c09e18e')
+  })
+})
+
+describe('linhas de base 1 a 10 no MSPDI (ciclo 00007, E2)', () => {
+  const sem = (r: ReturnType<typeof parseMspdiXml>) => r.warnings.join(' | ')
+
+  it('MS-4 a MS-6: a fixture é lida por campo presente; Interim, Number 11 e Number repetido ficam fora, com contagem; Work e LB0 sem datas avisam', () => {
+    const r = parseMspdiXml(fixtureLinhasBase)
+    const t2 = r.tasks.find((t) => t.uid === 2)!
+    // LB0 completa (a hora 09:00 do arquivo não volta: só a data, como sempre)
+    expect([t2.baselineStart, t2.baselineFinish, t2.baselineDuracaoMin, t2.bac]).toEqual(['2026-03-02', '2026-03-06', 2400, 1000])
+    // LB1 só custo, LB2 só duração (a repetida fica fora: vale a primeira), LB3 só início, LB5 custo (o Work não tem onde morar)
+    expect(t2.linhasBase).toEqual({ '1': { custo: 900 }, '2': { duracaoMin: 1440 }, '3': { inicio: '2026-03-09' }, '5': { custo: 77 } })
+    const t3 = r.tasks.find((t) => t.uid === 3)!
+    expect(t3.linhasBase).toEqual({ '1': { inicio: '2026-03-09', termino: '2026-03-13', duracaoMin: 2400, custo: 550 } })
+    expect(r.linhasBase.map((i) => [i.numero, i.nome, i.motivo, i.origem])).toEqual([
+      [0, 'Linha de base 0 (importada do MS Project)', 'Importada do arquivo', 'arquivo'],
+      [1, 'Linha de base 1 (importada do MS Project)', 'Importada do arquivo', 'arquivo'],
+      [2, 'Linha de base 2 (importada do MS Project)', 'Importada do arquivo', 'arquivo'],
+      [3, 'Linha de base 3 (importada do MS Project)', 'Importada do arquivo', 'arquivo'],
+      [5, 'Linha de base 5 (importada do MS Project)', 'Importada do arquivo', 'arquivo'],
+    ])
+    expect(r.warnings).toContain('Linhas de base ignoradas: 1 com plano provisório (Interim); 1 com número fora de 0 a 10; 1 repetida(s) na mesma tarefa (vale a primeira).')
+    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas da linha de base 0 delas.')
+    expect(r.warnings.find((w) => w.startsWith('Não importado do MS Project'))).toContain('1 valor(es) de trabalho (Work) das linhas de base')
+    expect(sem(r)).not.toMatch(/não importadas em/)
+  })
+
+  it('MS-3: BaselineForEarnedValue 3 vira a LB do valor agregado quando a LB3 veio no arquivo; LB ausente vale 0, com aviso', () => {
+    expect(parseMspdiXml(fixtureLinhasBase).meta.linhaBaseAtiva).toBe(3)
+    const ausente = parseMspdiXml(fixtureLinhasBase.replace('<BaselineForEarnedValue>3<', '<BaselineForEarnedValue>7<'))
+    expect(ausente.meta.linhaBaseAtiva).toBeUndefined()
+    expect(ausente.warnings).toContain('O arquivo indica a linha de base 7 para o valor agregado, mas ela não veio no arquivo: o CronoAI usa a linha de base 0.')
+    const fora = parseMspdiXml(fixtureLinhasBase.replace('<BaselineForEarnedValue>3<', '<BaselineForEarnedValue>11<'))
+    expect(fora.meta.linhaBaseAtiva).toBeUndefined()
+    expect(fora.warnings).toContain('O arquivo indica uma linha de base para o valor agregado fora de 0 a 10: o CronoAI usa a linha de base 0.')
+    const zero = parseMspdiXml(fixtureLinhasBase.replace('<BaselineForEarnedValue>3<', '<BaselineForEarnedValue>0<'))
+    expect(zero.meta.linhaBaseAtiva).toBeUndefined()
+    expect(zero.warnings.join(' ')).not.toMatch(/valor agregado/)
+  })
+
+  it('MS-6: LB0 só com custo (sem datas) avisa; LB0 só com uma data segue com o aviso de PV zero e sem o novo; resumo não conta', () => {
+    const soCusto = '<Baseline><Number>0</Number><Cost>10.00</Cost></Baseline>'
+    const r = parseMspdiXml(projeto({ tasks: tarefa(1, { extra: soCusto }) + tarefa(2, { extra: '<Baseline><Number>0</Number><Start>2026-03-02T08:00:00</Start></Baseline>' }) }))
+    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas da linha de base 0 delas.')
+    expect(r.warnings).toContain('1 tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.')
+    const resumo = parseMspdiXml(projeto({ tasks: tarefa(1, { extra: '<Summary>1</Summary>' + soCusto }) + tarefa(2) }))
+    expect(sem(resumo)).not.toMatch(/sem datas no arquivo/)
+  })
+
+  it('MS-4: Interim não vira a LB0 nem outra LB; custo negativo ou absurdo é ignorado com aviso', () => {
+    const xml = projeto({
+      tasks: tarefa(1, {
+        extra:
+          '<Baseline><Number>0</Number><Interim>1</Interim><Start>2026-03-09T08:00:00</Start><Finish>2026-03-10T17:00:00</Finish></Baseline>' +
+          '<Baseline><Number>1</Number><Cost>-5</Cost></Baseline><Baseline><Number>2</Number><Cost>1e15</Cost><Duration>PT8H0M0S</Duration></Baseline>',
+      }),
+    })
+    const r = parseMspdiXml(xml)
+    expect(r.tasks[0].baselineStart).toBeUndefined() // o Interim não é a LB0
+    expect(r.tasks[0].linhasBase).toEqual({ '2': { duracaoMin: 480 } })
+    expect(r.warnings).toContain('2 custo(s) de linha de base inválido(s) ou fora da faixa ignorado(s).')
+    expect(r.warnings).toContain('Linhas de base ignoradas: 1 com plano provisório (Interim).')
+  })
+
+  it('S-4: 50 <Baseline> numa tarefa: só os 11 primeiros são lidos, o resto fica fora com aviso; o texto do arquivo não vai ao aviso', () => {
+    const muitas = Array.from({ length: 50 }, (_, i) => `<Baseline><Number>${i % 11}</Number><Cost>${i + 1}.00</Cost></Baseline>`).join('')
+    const r = parseMspdiXml(projeto({ tasks: tarefa(1, { extra: muitas }) }))
+    expect(Object.keys(r.tasks[0].linhasBase ?? {})).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'])
+    expect(r.warnings).toContain('Linhas de base ignoradas: 39 além do limite de 11 por tarefa.')
+    // Nome e motivo das LB importadas são genéricos: nada do arquivo entra
+    expect(r.linhasBase.every((i) => /^Linha de base \d+ \(importada do MS Project\)$/.test(i.nome))).toBe(true)
+  })
+
+  it('MS-1: a exportação traz <Baseline> 0, 1 e 3 em ordem crescente, só com os campos presentes, e passa em validateMspdi com strictOrder', () => {
+    const lb1 = { inicio: '2026-03-02', termino: '2026-03-06', duracaoMin: 2400, custo: 900 }
+    const tasks = seed.tasks.map((t) =>
+      t.uid === 104 ? { ...t, linhasBase: { '3': { inicio: '2026-03-09' }, '1': lb1 } } : t.uid === 105 ? { ...t, linhasBase: { '1': { inicio: '2026-03-09', termino: '2026-03-13', duracaoMin: 2400, custo: 1100 } } } : t,
+    )
+    const xml = buildMspdiXml({ ...input, tasks })
+    expect(validateMspdi(xml, { strictOrder: true }).errors).toEqual([])
+    const doc = new DOMParser().parseFromString(xml, 'application/xml')
+    const el = Array.from(doc.getElementsByTagName('Task')).find((t) => t.getElementsByTagName('UID')[0]?.textContent === '104')!
+    const bases = Array.from(el.children).filter((c) => c.localName === 'Baseline')
+    expect(bases.map((b) => b.getElementsByTagName('Number')[0].textContent)).toEqual(['0', '1', '3'])
+    expect(Array.from(bases[1].children).map((c) => [c.localName, c.textContent])).toEqual([
+      ['Number', '1'], ['Start', '2026-03-02T08:00:00'], ['Finish', '2026-03-06T17:00:00'], ['Duration', 'PT40H0M0S'], ['DurationFormat', '7'], ['Cost', '900.00'],
+    ])
+    expect(Array.from(bases[2].children).map((c) => [c.localName, c.textContent])).toEqual([['Number', '3'], ['Start', '2026-03-09T08:00:00']]) // LB3 só início: nada de Finish nem Cost
+    // Resumo: rollup das folhas, com a duração do rollup (E-6): 03.01 tem a 104 (02 a 06/03) e a 105 (09 a 13/03): 10 d.u. = 4.800 min
+    const resumo = Array.from(doc.getElementsByTagName('Task')).find((t) => t.getElementsByTagName('WBS')[0]?.textContent === '03.01')!
+    const lbResumo = Array.from(resumo.children).filter((c) => c.localName === 'Baseline' && c.getElementsByTagName('Number')[0].textContent === '1')[0]
+    expect(Array.from(lbResumo.children).map((c) => [c.localName, c.textContent])).toEqual([
+      ['Number', '1'], ['Start', '2026-03-02T08:00:00'], ['Finish', '2026-03-13T17:00:00'], ['Duration', 'PT80H0M0S'], ['DurationFormat', '7'], ['Cost', '2000.00'],
+    ])
+    expect(xml).not.toContain('BaselineForEarnedValue') // sem LB do valor agregado, nada é gravado
+  })
+
+  it('MS-2 e MS-3: ida e volta das linhas de base parciais, do BaselineForEarnedValue e da LB0 intacta', () => {
+    const lbs: Record<number, Task['linhasBase']> = {
+      104: { '1': { custo: 900 }, '2': { duracaoMin: 1440 }, '3': { inicio: '2026-03-09' }, '10': { termino: '2026-04-30', custo: 12.34 } },
+      105: { '1': { inicio: '2026-03-09', termino: '2026-03-13', duracaoMin: 2400, custo: 1100 } },
+    }
+    const tasks = seed.tasks.map((t) => (lbs[t.uid] ? { ...t, linhasBase: lbs[t.uid] } : t))
+    const meta = { ...seed.meta, linhaBaseAtiva: 3 }
+    const xml = buildMspdiXml({ ...input, meta, tasks })
+    expect(validateMspdi(xml, { strictOrder: true }).errors).toEqual([])
+    expect(xml).toMatch(/<BaselineForEarnedValue>3<\/BaselineForEarnedValue>/)
+    const volta = parseMspdiXml(xml)
+    for (const uid of [104, 105]) expect(volta.tasks.find((t) => t.uid === uid)!.linhasBase).toEqual(lbs[uid]) // campos presentes iguais; ausentes ausentes
+    expect(volta.tasks.find((t) => t.uid === 103)!.linhasBase).toBeUndefined()
+    expect(volta.meta.linhaBaseAtiva).toBe(3)
+    expect(volta.linhasBase.map((i) => i.numero)).toEqual([0, 1, 2, 3, 10])
+    // A LB0 volta como sempre (datas e duração)
+    const original = seed.tasks.find((t) => t.uid === 104)!
+    const t104 = volta.tasks.find((t) => t.uid === 104)!
+    expect([t104.baselineStart, t104.baselineFinish, t104.baselineDuracaoMin]).toEqual([original.baselineStart, original.baselineFinish, original.baselineDuracaoMin])
+  })
+
+  it('LB do valor agregado fora de 1 a 10 no meta não é gravada', () => {
+    for (const ativa of [0, 11, 1.5, -1]) expect(buildMspdiXml({ ...input, meta: { ...seed.meta, linhaBaseAtiva: ativa } })).not.toContain('BaselineForEarnedValue')
   })
 })

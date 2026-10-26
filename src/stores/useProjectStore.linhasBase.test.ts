@@ -3,6 +3,7 @@
 // Valores esperados medidos no código de produção e conferidos à mão no plano (Aurora, data de status 2026-10-23).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import fixtureLinhasBase from '@/lib/__fixtures__/mspdi-linhas-base.xml?raw'
 import { useProjectStore } from './useProjectStore'
 
 const NOME = 'Replanejamento'
@@ -214,5 +215,60 @@ describe('useProjectStore · linhas de base (ciclo 00007, E1)', () => {
       const t = store.taskByUid.get(c.uid)!
       expect(t.linhasBase?.['2']).toEqual({ inicio: t.baselineStart, termino: t.baselineFinish, duracaoMin: t.baselineDuracaoMin, custo: t.bac })
     }
+  })
+})
+
+describe('useProjectStore · linhas de base no MSPDI (ciclo 00007, E2)', () => {
+  let store: ReturnType<typeof useProjectStore>
+  beforeEach(() => {
+    store = nova()
+  })
+
+  it('teste 31: importar o arquivo traz as LBs do arquivo, a LB do valor agregado e o aviso das tarefas sem custo na LB3', () => {
+    const avisos = store.importXml(fixtureLinhasBase)
+    expect(avisos.some((a) => a.startsWith('Linhas de base ignoradas:'))).toBe(true)
+    expect(store.state.linhasBase.map((i) => [i.numero, i.origem])).toEqual([[0, 'arquivo'], [1, 'arquivo'], [2, 'arquivo'], [3, 'arquivo'], [5, 'arquivo']])
+    expect(store.state.meta.linhaBaseAtiva).toBe(3)
+    expect(store.linhaBaseAtiva).toBe(3)
+    expect(store.taskByUid.get(2)!.linhasBase).toEqual({ '1': { custo: 900 }, '2': { duracaoMin: 1440 }, '3': { inicio: '2026-03-09' }, '5': { custo: 77 } })
+    // as duas folhas ficam sem custo na LB3 (a 2 só tem início; a 3 não tem LB3): BAC, PV e EV zero, e o aviso
+    expect(store.evm.bac).toBe(0)
+    expect(store.avisoSemLinhaBase).toBe('2 tarefa(s) sem a linha de base 3: o PV, o EV e o orçamento (BAC) delas são zero; o custo real continua contando.')
+  })
+
+  it('importar outro arquivo substitui as linhas de base e não herda a LB do valor agregado do anterior; a LB0 calculada ganha os metadados', () => {
+    store.importXml(fixtureLinhasBase)
+    expect(store.state.meta.linhaBaseAtiva).toBe(3)
+    // arquivo sem nenhuma linha de base: o CronoAI calcula a LB0 (como sempre) e cria os metadados dela
+    store.importXml(fixtureLinhasBase.replace(/<Baseline>[\s\S]*?<\/Baseline>/g, '').replace('<BaselineForEarnedValue>3</BaselineForEarnedValue>', ''))
+    expect(store.state.meta.linhaBaseAtiva).toBeUndefined()
+    expect(store.state.linhasBase).toEqual([
+      expect.objectContaining({ numero: 0, nome: 'Linha de base 0', motivo: 'Calculada na importação: o arquivo não trazia a linha de base 0', origem: 'cronoai' }),
+    ])
+    expect(store.state.tasks.filter((t) => !t.isSummary).every((t) => t.linhasBase === undefined && t.baselineStart !== undefined)).toBe(true)
+  })
+
+  it('teste 68: com LB do arquivo, a exportação avisa o horário padrão e o Work; o seed não ganha aviso novo; LB salva no CronoAI avisa os nomes', () => {
+    expect(store.exportXml().avisos).toEqual([]) // seed: nenhum aviso novo
+    store.salvarLinhaBase({ numero: 1, nome: 'Replanejamento', motivo: 'Teste' })
+    expect(store.exportXml().avisos).toEqual(['Os nomes, motivos e autores das linhas de base não vão ao .xml (o MSPDI não tem esses campos): ao reimportar, elas voltam com o nome "(importada do MS Project)".'])
+    store.importXml(fixtureLinhasBase)
+    const avisos = store.exportXml().avisos
+    expect(avisos).toContain('As datas das linhas de base vão com o horário padrão (08:00 e 17:00).')
+    expect(avisos).toContain('O trabalho (Work) das linhas de base não volta ao .xml.')
+  })
+
+  it('exportar e reimportar preserva as LBs salvas e a LB do valor agregado, com o nome "(importada do MS Project)"; o PV da LB1 volta igual', () => {
+    store.salvarLinhaBase({ numero: 1, nome: 'Replanejamento', motivo: 'Teste' })
+    store.definirLinhaBaseAtiva(1)
+    const pv = store.evm.pv
+    const { xml, validation } = store.exportXml()
+    expect(validation.errors).toEqual([])
+    expect(xml).toMatch(/<BaselineForEarnedValue>1<\/BaselineForEarnedValue>/)
+    store.importXml(xml)
+    expect(store.state.linhasBase.map((i) => [i.numero, i.nome])).toEqual([[0, 'Linha de base 0 (importada do MS Project)'], [1, 'Linha de base 1 (importada do MS Project)']])
+    expect(store.state.meta.linhaBaseAtiva).toBe(1)
+    expect(store.evm.pv).toBeCloseTo(pv, 2)
+    expect(store.evm.spi).toBeCloseTo(0.992606, 6)
   })
 })

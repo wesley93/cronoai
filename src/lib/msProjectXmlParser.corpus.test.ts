@@ -61,6 +61,13 @@ interface Estatico {
   lb1a10: number // elementos Baseline com Number != 0
   timephased: number // elementos TimephasedData (qualquer nível)
   tarefasLb1a10: number // tarefas com ao menos uma Baseline Number != 0
+  lb1a10Custo: number // elementos Baseline 1–10 (fora Interim) com Cost
+  lb1a10Duracao: number // idem com Duration
+  lb1a10Inicio: number // idem com Start
+  lb1a10Termino: number // idem com Finish
+  trabalhoLb: number // elementos Baseline 0–10 (fora Interim) com Work
+  lb0SemDatas: number // folhas com Baseline 0 (fora Interim) sem Start e sem Finish
+  interim: number // elementos Baseline com Interim = 1
   lb0SemTermino: number // tarefas com Baseline 0 só com início
   lb0SemInicio: number // tarefas com Baseline 0 só com término
   elapsed: number // folhas com DurationFormat em tempo corrido e duração > 0
@@ -138,6 +145,8 @@ function lerEstatico(xml: string): Estatico {
   const lagOutroFormato = tarefas
     .flatMap((t) => kids(t, 'PredecessorLink'))
     .filter((l) => Number(txt(l, 'LinkLag') ?? 0) !== 0 && !['7', '39', '19', '20', '51', '52'].includes(txt(l, 'LagFormat') ?? '7')).length
+  const lbs110 = tarefas.flatMap((t) => kids(t, 'Baseline')).filter((b) => (txt(b, 'Number') ?? '0') !== '0' && txt(b, 'Interim') !== '1')
+  const lbsTodas = tarefas.flatMap((t) => kids(t, 'Baseline')).filter((b) => txt(b, 'Interim') !== '1')
   return {
     uids: tarefas.map((t) => Number(txt(t, 'UID'))),
     vinculos: tarefas.flatMap((t) => kids(t, 'PredecessorLink').map((l) => `${txt(l, 'PredecessorUID')}>${txt(t, 'UID')}:${txt(l, 'Type') ?? '1'}`)),
@@ -148,6 +157,13 @@ function lerEstatico(xml: string): Estatico {
     lb1a10: tarefas.reduce((a, t) => a + kids(t, 'Baseline').filter((b) => (txt(b, 'Number') ?? '0') !== '0').length, 0),
     timephased: doc.getElementsByTagName('TimephasedData').length,
     tarefasLb1a10: tarefas.filter((t) => kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') !== '0')).length,
+    lb1a10Custo: lbs110.filter((b) => txt(b, 'Cost')).length,
+    lb1a10Duracao: lbs110.filter((b) => txt(b, 'Duration')).length,
+    lb1a10Inicio: lbs110.filter((b) => txt(b, 'Start')).length,
+    lb1a10Termino: lbs110.filter((b) => txt(b, 'Finish')).length,
+    trabalhoLb: lbsTodas.filter((b) => txt(b, 'Work')).length,
+    lb0SemDatas: folhas.filter((t) => kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') === '0' && txt(b, 'Interim') !== '1') && !kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') === '0' && txt(b, 'Interim') !== '1' && (txt(b, 'Start') || txt(b, 'Finish')))).length,
+    interim: tarefas.flatMap((t) => kids(t, 'Baseline')).filter((b) => txt(b, 'Interim') === '1').length,
     lb0SemTermino: tarefas.filter((t) => kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') === '0' && txt(b, 'Start') && !txt(b, 'Finish'))).length,
     lb0SemInicio: tarefas.filter((t) => kids(t, 'Baseline').some((b) => (txt(b, 'Number') ?? '0') === '0' && !txt(b, 'Start') && txt(b, 'Finish'))).length,
     elapsed: folhas.filter((t) => ELAPSED.includes(txt(t, 'DurationFormat') ?? '') && dias(t).m > 0).length,
@@ -198,6 +214,8 @@ interface Linha {
   lb0Arquivo: number
   lb0Lida: number
   lb1a10: number
+  /** Campos de LB 1–10 lidos pelo import (custo, duração, início e término) nas folhas e resumos; no ciclo 00007, 400 de 470 elementos. */
+  lb1a10Lidos: number
   timephased: number
   est: Estatico
   idaVoltaOk: boolean
@@ -229,16 +247,16 @@ function somar(ls: Linha[], campo: keyof Linha): number {
 }
 
 function relatorioMd(): string {
-  const cab = '| Versão | SaveVersion | Arquivos | Importados | Recusados | Tarefas lidas | Vínculos lidos/arquivo | % > 0 lido/arquivo | Início real lido/arquivo | Término real lido/arquivo | LB0 lida/arquivo | LB 1–10 | TimephasedData |'
+  const cab = '| Versão | SaveVersion | Arquivos | Importados | Recusados | Tarefas lidas | Vínculos lidos/arquivo | % > 0 lido/arquivo | Início real lido/arquivo | Término real lido/arquivo | LB0 lida/arquivo | LB 1–10 lidas/elementos | TimephasedData |'
   const sep2 = '|' + ' --- |'.repeat(13)
   const linhaVersao = (nome: string, ls: Linha[]) => {
     const saves = [...new Set(ls.map((l) => l.saveVersion))].sort().join('/')
     const imp = ls.filter((l) => l.resultado === 'importado')
-    return `| ${nome} | ${saves} | ${ls.length} | ${imp.length} | ${ls.length - imp.length} | ${somar(ls, 'tarefasLidas')} | ${somar(ls, 'vinculosLidos')}/${somar(imp, 'vinculosArquivo')} | ${somar(ls, 'pctLido')}/${somar(imp, 'pctArquivo')} | ${somar(ls, 'inicioRealLido')}/${somar(imp, 'inicioRealArquivo')} | ${somar(ls, 'terminoRealLido')}/${somar(imp, 'terminoRealArquivo')} | ${somar(ls, 'lb0Lida')}/${somar(imp, 'lb0Arquivo')} | ${somar(ls, 'lb1a10')} | ${somar(ls, 'timephased')} |`
+    return `| ${nome} | ${saves} | ${ls.length} | ${imp.length} | ${ls.length - imp.length} | ${somar(ls, 'tarefasLidas')} | ${somar(ls, 'vinculosLidos')}/${somar(imp, 'vinculosArquivo')} | ${somar(ls, 'pctLido')}/${somar(imp, 'pctArquivo')} | ${somar(ls, 'inicioRealLido')}/${somar(imp, 'inicioRealArquivo')} | ${somar(ls, 'terminoRealLido')}/${somar(imp, 'terminoRealArquivo')} | ${somar(ls, 'lb0Lida')}/${somar(imp, 'lb0Arquivo')} | ${somar(ls, 'lb1a10Lidos')}/${somar(ls, 'lb1a10')} | ${somar(ls, 'timephased')} |`
   }
   const porVersao = VERSOES.map((v) => linhaVersao(v, linhas.filter((l) => l.versao === v))).join('\n')
   const porArquivo = linhas
-    .map((l) => `| ${l.arquivo} | ${l.versao} | ${l.saveVersion} | ${l.kb} | ${l.resultado} | ${l.tarefasLidas}/${l.tarefasArquivo} | ${l.vinculosLidos}/${l.vinculosArquivo} | ${l.lb0Lida}/${l.lb0Arquivo} | ${l.lb1a10} | ${l.timephased} | ${l.idaVoltaOk ? 'ok' : '—'} | ${l.avisos.length} | ${l.ms} |`)
+    .map((l) => `| ${l.arquivo} | ${l.versao} | ${l.saveVersion} | ${l.kb} | ${l.resultado} | ${l.tarefasLidas}/${l.tarefasArquivo} | ${l.vinculosLidos}/${l.vinculosArquivo} | ${l.lb0Lida}/${l.lb0Arquivo} | ${l.lb1a10Lidos}/${l.lb1a10} | ${l.timephased} | ${l.idaVoltaOk ? 'ok' : '—'} | ${l.avisos.length} | ${l.ms} |`)
     .join('\n')
   return [
     '# Relatório de caracterização do corpus MSPDI (gerado pelo teste de corpus)',
@@ -254,7 +272,7 @@ function relatorioMd(): string {
     '',
     '## Por arquivo',
     '',
-    '| Arquivo | Versão | SaveVersion | KB | Resultado | Tarefas lidas/arquivo | Vínculos lidos/arquivo | LB0 lida/arquivo | LB 1–10 | TimephasedData | Ida e volta | Avisos | ms |',
+    '| Arquivo | Versão | SaveVersion | KB | Resultado | Tarefas lidas/arquivo | Vínculos lidos/arquivo | LB0 lida/arquivo | LB 1–10 lidas/elementos | TimephasedData | Ida e volta | Avisos | ms |',
     '|' + ' --- |'.repeat(13),
     porArquivo,
     '',
@@ -313,7 +331,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
         tarefasArquivo: est.uids.length, tarefasLidas: 0, vinculosArquivo: est.vinculos.length, vinculosLidos: 0,
         pctArquivo: est.pct, pctLido: 0, inicioRealArquivo: est.inicioReal, inicioRealLido: 0,
         terminoRealArquivo: est.terminoReal, terminoRealLido: 0, lb0Arquivo: est.lb0, lb0Lida: 0,
-        lb1a10: est.lb1a10, timephased: est.timephased, est, idaVoltaOk: false, resultado: 'recusado', uidsUnicos: true, avisos: [], ms: 0,
+        lb1a10: est.lb1a10, lb1a10Lidos: 0, timephased: est.timephased, est, idaVoltaOk: false, resultado: 'recusado', uidsUnicos: true, avisos: [], ms: 0,
       }
       linhas.push(linha)
 
@@ -342,6 +360,14 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       linha.inicioRealLido = r.tasks.filter((t) => !t.isSummary && t.actualStart).length
       linha.terminoRealLido = r.tasks.filter((t) => !t.isSummary && t.actualFinish).length
       linha.lb0Lida = r.tasks.filter((t) => t.baselineStart).length
+      const lbLidas = r.tasks.flatMap((t) => Object.values(t.linhasBase ?? {})).filter((d): d is NonNullable<typeof d> => d !== undefined)
+      const lbCampos = {
+        custo: lbLidas.filter((d) => d.custo !== undefined).length,
+        duracao: lbLidas.filter((d) => d.duracaoMin !== undefined).length,
+        inicio: lbLidas.filter((d) => d.inicio !== undefined).length,
+        termino: lbLidas.filter((d) => d.termino !== undefined).length,
+      }
+      linha.lb1a10Lidos = lbCampos.custo + lbCampos.duracao + lbCampos.inicio + lbCampos.termino
 
       expect(linha.uidsUnicos).toBe(true)
       expect([...uids].sort((a, b) => a - b)).toEqual([...est.uids].sort((a, b) => a - b)) // nenhum UID perdido nem criado
@@ -350,6 +376,8 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       expect(linha.inicioRealLido).toBe(est.inicioReal)
       expect(linha.terminoRealLido).toBe(est.terminoReal)
       expect(linha.lb0Lida).toBe(est.lb0)
+      // Ciclo 00007: as LB 1–10 são lidas por campo presente (antes: 470 elementos descartados com aviso); nenhum campo se perde
+      expect(lbCampos).toEqual({ custo: est.lb1a10Custo, duracao: est.lb1a10Duracao, inicio: est.lb1a10Inicio, termino: est.lb1a10Termino })
 
       // Sem descarte silencioso (AC-4): categoria presente no arquivo => aviso com o número do arquivo; ausente => sem aviso
       const w = r.warnings
@@ -357,7 +385,10 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
         if (n > 0) expect(w).toContain(texto)
         else expect(w.filter((a) => prefixo.test(a))).toEqual([])
       }
-      confere(est.tarefasLb1a10, `Linhas de base 1 a 10 não importadas em ${est.tarefasLb1a10} tarefa(s): o CronoAI usa só a linha de base 0.`, /^Linhas de base 1 a 10/)
+      // Antes do ciclo 00007: "Linhas de base 1 a 10 não importadas em N tarefa(s)" (470 em 7 arquivos). Depois: o aviso deixou de existir
+      expect(w.filter((a) => /^Linhas de base 1 a 10 não importadas/.test(a))).toEqual([])
+      expect(w.filter((a) => /^Linhas de base ignoradas/.test(a))).toEqual([]) // o corpus não tem Interim, Number fora de 0–10 nem repetido
+      confere(est.lb0SemDatas, `${est.lb0SemDatas} tarefa(s) com linha de base 0 sem datas no arquivo (só custo, duração ou trabalho): o CronoAI calculou as datas da linha de base 0 delas.`, /sem datas no arquivo/)
       confere(est.lb0SemTermino, `${est.lb0SemTermino} tarefa(s) com linha de base 0 sem término: o valor planejado (PV) delas fica zero.`, /linha de base 0 sem término/)
       confere(est.lb0SemInicio, `${est.lb0SemInicio} tarefa(s) com linha de base 0 sem início: o término do arquivo é mantido e o valor planejado (PV) delas fica zero.`, /linha de base 0 sem início/)
       // E3: duração e lag exatos em minutos e calendário por tarefa lidos. Antes: tempo corrido (5), meio dia (4), fração (20),
@@ -375,6 +406,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       expect(extrasDe(r)).toEqual(est.extras)
       const informativo = [
         est.timephased && `${est.timephased} registro(s) distribuído(s) no tempo (TimephasedData)`,
+        est.trabalhoLb && `${est.trabalhoLb} valor(es) de trabalho (Work) das linhas de base`,
         est.valoresPersonalizados && `${est.valoresPersonalizados} valor(es) de ${est.camposPersonalizados} campo(s) personalizado(s)`,
         est.calendariosNaoImportados > 0 && `${est.calendariosNaoImportados} calendário(s) de recurso ou sem uso nas tarefas`,
       ].filter(Boolean)
@@ -403,6 +435,8 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       expect(back.meta.honorConstraintsArquivo).toBe(r.meta.honorConstraintsArquivo)
       expect(back.meta.opcoesCronograma).toEqual(r.meta.opcoesCronograma)
       expect(back.meta.moveArquivo).toEqual(r.meta.moveArquivo)
+      expect(back.meta.linhaBaseAtiva).toBe(r.meta.linhaBaseAtiva) // o corpus tem BaselineForEarnedValue 0
+      expect(back.linhasBase.map((i) => i.numero)).toEqual(r.linhasBase.map((i) => i.numero))
       // Calendários: UID, nome, semana com horários e exceções iguais antes e depois (o padrão é o primeiro da lista nos dois lados)
       expect(back.calendarioPadraoUid).toBe(r.calendarioPadraoUid)
       expect(back.calendarios).toEqual(r.calendarios)
@@ -434,6 +468,7 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
           ['Manual e Active', [b.arquivo?.manual, b.arquivo?.ativa], [t.arquivo?.manual, t.arquivo?.ativa]],
           ['início da LB0', b.baselineStart, t.baselineStart],
           ['término da LB0', b.baselineFinish, t.baselineFinish],
+          ['LB 1–10 (data, minutos e custo)', b.linhasBase, t.linhasBase],
         ]
         for (const [campo, depois, antes] of campos) if (JSON.stringify(depois) !== JSON.stringify(antes)) diferencas.push(`uid ${t.uid}: ${campo}`)
       }
@@ -530,7 +565,9 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
       expect(somar(imp, 'inicioRealLido')).toBe(38)
       expect(somar(imp, 'terminoRealLido')).toBe(11)
       expect(somar(imp, 'lb0Lida')).toBe(11)
-      expect(somar(imp, 'lb1a10')).toBe(470)
+      expect(somar(imp, 'lb1a10')).toBe(470) // elementos Baseline 1–10 no arquivo (70 só com Work)
+      expect(somar(imp, 'lb1a10Lidos')).toBe(400) // ciclo 00007, antes: 0 lidos (custo 70, duração 110, início 110 e término 110 agora são lidos)
+      expect(somar(imp, 'lb1a10Lidos')).toBe(imp.reduce((a, l) => a + l.est.lb1a10Custo + l.est.lb1a10Duracao + l.est.lb1a10Inicio + l.est.lb1a10Termino, 0))
       expect(somar(linhas, 'timephased')).toBe(10222)
       expect(imp.filter((l) => l.uidsUnicos)).toHaveLength(95)
     })
@@ -547,7 +584,10 @@ describe.skipIf(!REF_DIR)('corpus MSPDI do MPXJ (local, CRONOAI_REF_DIR)', () =>
         const achados = imp.flatMap((l) => l.avisos.map((a) => a.match(re)?.[1])).filter((n): n is string => n !== undefined)
         return { total: achados.reduce((a, n) => a + Number(n), 0), arquivos: achados.length }
       }
-      expect(soma(/^Linhas de base 1 a 10 não importadas em (\d+) tarefa/)).toEqual({ total: 470, arquivos: 7 })
+      expect(soma(/^Linhas de base 1 a 10 não importadas em (\d+) tarefa/)).toEqual({ total: 0, arquivos: 0 }) // antes (ciclo 00003): 470 tarefas em 7 arquivos
+      expect(soma(/^Linhas de base ignoradas: (\d+)/)).toEqual({ total: 0, arquivos: 0 }) // novo: nenhum Interim, número inválido ou repetido no corpus
+      expect(soma(/(\d+) tarefa\(s\) com linha de base 0 sem datas no arquivo/)).toEqual({ total: 25, arquivos: 7 }) // novo (Inviolável 2): antes, calculada sem aviso
+      expect(soma(/(\d+) valor\(es\) de trabalho \(Work\) das linhas de base/)).toEqual({ total: 77, arquivos: 7 }) // novo: o Work não tem onde morar
       expect(soma(/^(\d+) tarefa\(s\) com linha de base 0 sem término/)).toEqual({ total: 11, arquivos: 7 })
       expect(soma(/^(\d+) tarefa\(s\) com linha de base 0 sem início/)).toEqual({ total: 12, arquivos: 8 })
       // E3 (ciclo 00004), antes → depois: duração e lag exatos em minutos, calendário por tarefa, semana e jornada lidos.
