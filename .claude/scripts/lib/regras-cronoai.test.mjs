@@ -60,6 +60,7 @@ const ACUSA = [
   ['R15 FORCE ROW LEVEL SECURITY fora do helper', IDENTIDADE, 'sql = "ALTER TABLE x FORCE ROW LEVEL SECURITY";', ['R15']],
   ['R15 DML em Migrations fora do helper', MIGRACAO, 'migrationBuilder.Sql("UPDATE cronoai.empresa SET nome = \'x\' WHERE id = 1");', ['R15']],
   ['R15 INSERT em Migrations', MIGRACAO, 'migrationBuilder.Sql("INSERT INTO cronoai.empresa VALUES (1)");', ['R15']],
+  ['R15 MERGE em Migrations', MIGRACAO, 'migrationBuilder.Sql("MERGE INTO cronoai.empresa e USING x ON e.id = x.id WHEN MATCHED THEN DELETE");', ['R15']],
   ['R16 IgnoreQueryFilters fora da lista', API, 'db.Membros.IgnoreQueryFilters(["Empresa"])', ['R16']],
   ['R17 new NpgsqlConnection', API, 'await using var c = new NpgsqlConnection(cs);', ['R17']],
   ['R17 NpgsqlDataSource', IDENTIDADE, 'var fonte = NpgsqlDataSource.Create(cs);', ['R17']],
@@ -495,3 +496,42 @@ test('backend R19 por instrução: a migração PerfisPermissoes real alerta no 
   assert.deepEqual(porInstrucao.map((x) => x.n).filter((n) => n < 600).length, 4)
   assert.equal(linhas.flatMap((l) => regrasBackend(MIGRACAO_PERFIS, l.texto)).filter((x) => x.id === 'R19').length, 2)
 })
+
+// ---------------------------------------------------------------------------------------------------------------
+// Rodada 03 do ciclo 00014 (sonda do arquiteto): argumento nomeado, caixa, DROP CONSTRAINT bruto e helper que emite NO FORCE.
+// ---------------------------------------------------------------------------------------------------------------
+const R19_RODADA3_ACUSA = [
+  ['H2 argumento nomeado tabela: em uma linha', ['migrationBuilder.SubstituirPoliticaSelect(tabela: "auditoria", nome: "pol", usando: u);']],
+  ['H3 argumento nomeado em várias linhas, tabela fora da 1a posição', ['migrationBuilder.SubstituirPoliticaInsert(', '    nome: "pol_auditoria_insert",', '    tabela: "auditoria",', '    comCheck: c);']],
+  ['H3 RemoverPolitica com tabela nomeada em várias linhas', ['migrationBuilder.RemoverPolitica(', '    nome: "pol",', '    tabela: "auditoria");']],
+  ['H4 Auditoria com maiúscula', ['migrationBuilder.PoliticaDelete("Auditoria", "pol", "true");']],
+  ['H4 AUDITORIA em várias linhas', ['migrationBuilder.SubstituirPoliticaSelect(', '    "AUDITORIA", "pol", u);']],
+  ['H5 ExecutarDmlComRls da auditoria em uma linha', ['migrationBuilder.ExecutarDmlComRls("auditoria", "DELETE FROM cronoai.auditoria WHERE empresa_id = x");']],
+  ['H5 ExecutarDmlComRls da auditoria em várias linhas', ['migrationBuilder.ExecutarDmlComRls(', '    "auditoria",', '    "DELETE FROM cronoai.auditoria WHERE empresa_id = x");']],
+  ['S6 DROP CONSTRAINT por SQL bruto em uma linha', ['migrationBuilder.Sql("ALTER TABLE cronoai.auditoria DROP CONSTRAINT ck_auditoria_acao;");']],
+  ['H9 DROP CONSTRAINT por SQL bruto em várias linhas', ['migrationBuilder.Sql(@"ALTER TABLE cronoai.auditoria', '    DROP CONSTRAINT ck_x;");']],
+  ['H9 DROP CONSTRAINT em bloco de texto bruto', ['migrationBuilder.Sql(', '    """', '    ALTER TABLE cronoai.auditoria', '    DROP CONSTRAINT ck_x;', '    """);']],
+]
+
+for (const [nome, trechos] of R19_RODADA3_ACUSA) {
+  test(`backend R19 (rodada 03) acusa: ${nome}`, () => {
+    const porLinha = trechos.flatMap((texto) => regrasBackend(MIGRACAO_PERFIS, texto)).filter((x) => x.id === 'R19').length
+    const porInstrucao = r19PorInstrucao(MIGRACAO_PERFIS, lin(...trechos)).length
+
+    assert.ok(porLinha + porInstrucao >= 1, `esperava R19 em: ${trechos.join(' | ')}`)
+  })
+}
+
+const R19_RODADA3_NAO_ACUSA = [
+  ['helper de outra tabela com argumento nomeado', ['migrationBuilder.SubstituirPoliticaSelect(tabela: "obra", nome: "pol_auditoria_x", usando: u);']],
+  ['ExecutarDmlComRls de membro_empresa', ['migrationBuilder.ExecutarDmlComRls("membro_empresa", "UPDATE cronoai.membro_empresa SET perfil = 1");']],
+  ['DROP CONSTRAINT de outra tabela', ['migrationBuilder.Sql("ALTER TABLE cronoai.obra DROP CONSTRAINT ck_obra_x;");']],
+]
+
+for (const [nome, trechos] of R19_RODADA3_NAO_ACUSA) {
+  test(`backend R19 (rodada 03) não acusa: ${nome}`, () => {
+    const porLinha = trechos.flatMap((texto) => regrasBackend(MIGRACAO_PERFIS, texto)).filter((x) => x.id === 'R19').length
+
+    assert.equal(porLinha + r19PorInstrucao(MIGRACAO_PERFIS, lin(...trechos)).length, 0)
+  })
+}

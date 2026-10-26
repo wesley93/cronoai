@@ -408,7 +408,7 @@ const VITE_SEGREDO = /\bVITE_\w*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|SENHA|PRIVATE|
 const ARQ_SERVER_CS = /^server\/src\/.*\.cs$/
 const SQL_BRUTO = /\b(FromSqlRaw|ExecuteSqlRaw|ExecuteSqlRawAsync|SqlQueryRaw)\b/
 const DDL = /\b(CREATE|ALTER|DROP)\s+(TABLE|INDEX|POLICY|ROLE|SCHEMA)\b|\b(ENABLE|NO\s+FORCE|FORCE)\s+ROW\s+LEVEL\s+SECURITY\b/i
-const DML = /\b(INSERT\s+INTO|UPDATE\s+[\w."]+\s+SET|DELETE\s+FROM)\b/i
+const DML = /\b(INSERT\s+INTO|UPDATE\s+[\w."]+\s+SET|DELETE\s+FROM|MERGE\s+INTO)\b/i
 const CONEXAO_CRUA = /\bNpgsql(Connection|DataSource)\b/
 // R18: escrita em massa do EF e SQL de escrita nas entidades auditadas (ADR 00009)
 const EXECUTE_EM_MASSA = /\bExecute(Update|Delete)(Async)?\s*\(/
@@ -429,10 +429,13 @@ const EXECUTE_PERMITIDO = '/CronoAI.Dados/Identidade/ConsultasIdentidade.cs'
 // R19: migração que desliga ou afrouxa as garantias da trilha (alerta; revisão humana decide)
 // Helpers de política (Rls/MigrationBuilderRlsExtensoes) citando a trilha: o helper esconde o SQL, então a regra por texto não o vê.
 // Criar, substituir ou remover política da "auditoria" por helper é revisão humana obrigatória (o helper já RECUSA UPDATE/DELETE).
-const HELPER_DA_TRILHA = /\b(?:Substituir)?Politica(?:Select|Insert|Update|Delete)\s*\(\s*"auditoria"|\bRemoverPolitica\s*\(\s*"auditoria"/
+// A tabela pode estar em QUALQUER argumento (posicional ou nomeado, na mesma linha ou nas seguintes) e em qualquer caixa (o helper
+// emite o identificador sem aspas e o PostgreSQL o põe em minúsculas; o helper também recusa maiúsculas). ExecutarDmlComRls emite
+// NO FORCE na tabela, por isso entra aqui.
+const HELPER_DA_TRILHA = /\b(?:(?:Substituir)?Politica(?:Select|Insert|Update|Delete)|RemoverPolitica|ExecutarDmlComRls)\s*\([^;]*"auditoria"/i
 // Troca da CHECK de ação da trilha (DROP/ADD): mexe no conjunto de ações aceitas pelo append-only.
-const CHECK_DA_TRILHA = /\b(?:Drop|Add)CheckConstraint\s*\([^;]*"auditoria"/
-const AFROUXA_TRILHA = /\b(DISABLE\s+TRIGGER|DROP\s+TRIGGER|DROP\s+POLICY|ALTER\s+POLICY|CREATE\s+POLICY|DISABLE\s+ROW\s+LEVEL\s+SECURITY|ENABLE\s+(REPLICA\s+)?TRIGGER|CASCADE|CREATE\s+OR\s+REPLACE\s+FUNCTION|OWNER\s+TO|GRANT|NO\s+FORCE)\b/i
+const CHECK_DA_TRILHA = /\b(?:Drop|Add)CheckConstraint\s*\([^;]*"auditoria"/i
+const AFROUXA_TRILHA = /\b(DISABLE\s+TRIGGER|DROP\s+TRIGGER|DROP\s+POLICY|ALTER\s+POLICY|CREATE\s+POLICY|DISABLE\s+ROW\s+LEVEL\s+SECURITY|ENABLE\s+(REPLICA\s+)?TRIGGER|CASCADE|CREATE\s+OR\s+REPLACE\s+FUNCTION|OWNER\s+TO|GRANT|NO\s+FORCE|DROP\s+CONSTRAINT)\b/i
 
 /**
  * Regras R14 a R19 sobre UMA linha de código C# de server/src. Devolve [{ id, regra, mensagem, severidade? }]
@@ -588,7 +591,7 @@ export function aplicarRegras({ arquivos, removidos = new Set(), novas }) {
   for (const a of arquivos) {
     if (removidos.has(a)) continue
     for (const x of r19PorInstrucao(a, novas.get(a) ?? [])) {
-      achados.push(achado('R19', 'alerta', 'migração mexe nas garantias da trilha', a, x.n, 'Instrução de migração (em várias linhas) que cita auditoria com DISABLE/DROP TRIGGER, ENABLE TRIGGER sem ALWAYS, DISABLE ROW LEVEL SECURITY, POLICY, CASCADE, CREATE OR REPLACE FUNCTION, OWNER TO, GRANT ou NO FORCE: confirme que o append-only continua valendo em três camadas (ADR 00009).', null))
+      achados.push(achado('R19', 'alerta', 'migração mexe nas garantias da trilha', a, x.n, 'Instrução de migração (em várias linhas) que cita auditoria (inclusive por helper Politica*/SubstituirPolitica*/RemoverPolitica/ExecutarDmlComRls ou por Drop/AddCheckConstraint) com DISABLE/DROP TRIGGER, DROP CONSTRAINT, ENABLE TRIGGER sem ALWAYS, DISABLE ROW LEVEL SECURITY, POLICY, CASCADE, CREATE OR REPLACE FUNCTION, OWNER TO, GRANT ou NO FORCE: confirme que o append-only continua valendo em três camadas (ADR 00009).', null))
     }
   }
 

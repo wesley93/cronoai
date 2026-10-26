@@ -50,5 +50,31 @@ public sealed class RlsHelperTestes
         Assert.Null(Record.Exception(() => migracao.SubstituirPoliticaInsert("auditoria", "pol_auditoria_insert", "true")));
     }
 
+    [Theory]
+    [InlineData("Auditoria")]
+    [InlineData("AUDITORIA")]
+    [InlineData("\"auditoria\"")]
+    [InlineData("cronoai.auditoria")]
+    [InlineData("auditoria ")]
+    [InlineData("")]
+    [InlineData("1obra")]
+    public void Helper_recusa_nome_de_tabela_fora_de_minusculas(string tabela)
+    {
+        // O identificador vai sem aspas ao SQL e o PostgreSQL o põe em minúsculas: "Auditoria" é a trilha e escaparia da guarda
+        // Ordinal. Todo caminho que monta SQL com a tabela recusa o nome fora de ^[a-z_][a-z0-9_]*$.
+        var migracao = new MigrationBuilder("Npgsql.EntityFrameworkCore.PostgreSQL");
+
+        Assert.Throws<ArgumentException>(() => migracao.PoliticaUpdate(tabela, "pol_x", "true", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.PoliticaDelete(tabela, "pol_x", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.SubstituirPoliticaUpdate(tabela, "pol_x", "true", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.SubstituirPoliticaDelete(tabela, "pol_x", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.PoliticaSelect(tabela, "pol_x", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.PoliticaInsert(tabela, "pol_x", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.SubstituirPoliticaSelect(tabela, "pol_x", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.SubstituirPoliticaInsert(tabela, "pol_x", "true"));
+        Assert.Throws<ArgumentException>(() => migracao.RemoverPolitica(tabela, "pol_x"));
+        Assert.Throws<ArgumentException>(() => migracao.HabilitarRlsForcado(tabela));
+    }
+
     #endregion
 }

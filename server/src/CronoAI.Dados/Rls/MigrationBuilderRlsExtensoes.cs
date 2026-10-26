@@ -92,6 +92,7 @@ public static class MigrationBuilderRlsExtensoes
     /// </summary>
     public static void RemoverPolitica(this MigrationBuilder migrationBuilder, string tabela, string nome)
     {
+        ValidarNomeDeTabela(tabela);
         if (string.Equals(tabela, TabelaAuditoria, StringComparison.Ordinal))
         {
             throw new ArgumentException("A trilha não admite remover política: só substituir a de SELECT e a de INSERT (append-only, ADR 00009).", nameof(tabela));
@@ -107,10 +108,35 @@ public static class MigrationBuilderRlsExtensoes
     private static string Expressao(string variavel) =>
         $"(SELECT NULLIF(current_setting('{variavel}', true), '')::uuid)";
 
-    private static string Qualificada(string tabela) => $"{PapeisBanco.Schema}.{tabela}";
+    private static string Qualificada(string tabela)
+    {
+        ValidarNomeDeTabela(tabela);
+        return $"{PapeisBanco.Schema}.{tabela}";
+    }
+
+    // O identificador vai SEM aspas ao SQL, e o PostgreSQL o converte para minúsculas: "Auditoria" seria a trilha e escaparia da
+    // comparação Ordinal dos guardas abaixo. Por isso só se aceita nome de tabela já em minúsculas, sem aspas, ponto nem espaço.
+    private static void ValidarNomeDeTabela(string tabela)
+    {
+        if (string.IsNullOrEmpty(tabela) || !NomeDeTabelaValido(tabela))
+        {
+            throw new ArgumentException("Nome de tabela inválido: só minúsculas, dígitos e sublinhado (o identificador não leva aspas).", nameof(tabela));
+        }
+    }
+
+    private static bool NomeDeTabelaValido(string tabela)
+    {
+        if (!(tabela[0] is >= 'a' and <= 'z' or '_'))
+        {
+            return false;
+        }
+
+        return tabela.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '_');
+    }
 
     private static void RecusarEscritaNaTrilha(string tabela, string comando)
     {
+        ValidarNomeDeTabela(tabela);
         if (string.Equals(tabela, TabelaAuditoria, StringComparison.Ordinal))
         {
             throw new ArgumentException($"A trilha é append-only: política de {comando} em auditoria é proibida (ADR 00009).", nameof(tabela));

@@ -149,7 +149,7 @@ public sealed class ServicoObras
             }
         }
 
-        // Ordem das recusas: 404 → 409 de versão → 409 de arquivada → 403 de campo (acima). Quem edita a obra mas não o cadastro
+        // Ordem das recusas: 404 → 409 de versão → 409 de arquivada → 400 de responsável (só se ele mudou, acima) → 403 de campo. Quem edita a obra mas não o cadastro
         // (engenheiro de planejamento) pode reenviar o cadastro IGUAL ao atual; mudar nome, UF, município, responsável ou SINAPI é
         // 403 com os NOMES dos campos. Só quem vê todas as obras (administrador) renomeia: o 409 de nome repetido não revela obra
         // fora do alcance (oráculo de existência).
