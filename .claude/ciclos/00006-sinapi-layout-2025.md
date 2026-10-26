@@ -33,7 +33,7 @@ inicio: 2026-10-25
   - revisar no PR as decisões acima, em especial a mudança no Inviolável 7 do `CLAUDE.md` (desvio 11);
   - rodar `npm run sinapi:recorte -- --ajuda` num Node 22 antes do merge;
   - levar a **Orçamento/Custos**, **Segurança da Informação** e **Contabilidade/Tributário + Jurídico** os itens da última seção.
-- **Estado:** validadores aprovados na rodada 04 (5972cbb): `testes` (gates verdes; mutações M1, M2 e M3 derrubam um teste cada; reprovação só documental, fechada por este registro e pela emenda 02), `arquiteto`, `especialista-obra` e `seguranca` APROVADOS. Ajuste de concordância em a8c25dc. Auditoria independente: r01 (ed7744b) REPROVADO, 5 Baixos sem efeito em número entregue → 13bd3f1 e este registro; reauditoria: A PREENCHER.
+- **Estado:** validadores aprovados na rodada 04 (5972cbb): `testes` (gates verdes; mutações M1, M2 e M3 derrubam um teste cada; reprovação só documental, fechada por este registro e pela emenda 02), `arquiteto`, `especialista-obra` e `seguranca` APROVADOS. Ajuste de concordância em a8c25dc. Auditoria independente: r01 (ed7744b) REPROVADO, 5 Baixos → 13bd3f1 e registro; reauditoria r02 (56aac3e) com os 5 fechados e os gates verdes no HEAD; achado 6 só no registro, corrigido. **Estado: aprovado**; falta o CI do PR.
 
 ## Pedido
 "Pode fazer todas as fases" → PLANO-FASE-1 §3.6, ciclo 00006.
@@ -70,7 +70,7 @@ inicio: 2026-10-25
 | 02 (80efda4) | REPROVADO só por documentação: N-8 e a emenda da EO-2 | REPROVADO: R-1b (lote gera tarefa de outro recorte); imprecisões 1 e 2; resíduo do R-3 | REPROVADO: V-1 (custo alterado troca a equipe); V-3; ponto 7 (`custo_unitario`) | APROVADO: 1 Baixo (atributos quadráticos), 1 Info (guarda da obra) | — |
 | 03 (39391f8) | REPROVADO: mutação do R-3 sobrevivente (M1 e M3); BAC do `custo_unitario` não afirmado; N-8; emenda 02 | APROVADO: sem pendência de código; registros antes da entrega | APROVADO: recomendação R3-1 (modelo CSV); R3-2 e R3-3 | APROVADO: 3 Info | — |
 | 04 (5972cbb) | APROVADO no código: 925 testes; M1, M2 e M3 mortas; reprovação só documental | APROVADO: 2 baixos (concordância, corrigida em a8c25dc; registro dos tetos e do modelo) | APROVADO: tetos com folga; T-1 (verba > R$ 10 mi) registrado | APROVADO: sem Infinity/NaN; linhas `#` sem injeção | auditoria r01 (ed7744b): REPROVADO, 5 Baixos |
-| 05 (13bd3f1) | gates do dev: 933 passaram, 54 pulados; M-3 reexecutado pelo orquestrador | — | — | — | reauditoria: A PREENCHER |
+| 05 (13bd3f1) | gates reexecutados pela auditoria r02 no HEAD (933, E2E 33, referência 42, corpus 419); o `testes` não foi acionado nesta rodada: decidido pelo orquestrador que a reexecução completa da auditoria cobre a evidência no HEAD (a rodada 05 só mexeu em testes e no arredondamento, com 0 efeito na planilha) | — | — | — | reauditoria r02 (56aac3e): 5 achados da r01 fechados; gates verdes no HEAD; achado 6 só no registro, corrigido |
 
 ### Testes, antes → depois
 | Ponto | Vitest | E2E | Fonte |
@@ -102,13 +102,13 @@ inicio: 2026-10-25
 
 | Item | Requisito | Verificação | Obrig. | Estado | Evidência |
 |---|---|---|---|---|---|
-| G-LINT / G-TIPOS | eslint e vue-tsc (com `scripts/**/*.ts`) | `npm run lint`, `npm run typecheck` | sim | PASS | EXIT 0 em r01, r02 e r03 (`testes`); r04 (5972cbb): EXIT 0 nos dois |
-| G-COV | Suíte completa e cobertura ≥ 80% | `npm run test:coverage` | sim | PASS | r03: 912 passaram, 54 pulados; 98,17 / 93,03 / 99,28 / 98,17. O S-1 do parser falhou 2 de 4 vezes em r01 e r02 (ver Pendências); r04 (5972cbb): 925 passaram, 54 pulados (979); 98,18 / 93,11 / 99,28 / 98,18 |
-| G-E2E | E2E | `CI=1 npm run e2e`, porta 4173 livre | sim | PASS | `33 passed (1.7m)` (`testes` r03); r04 (5972cbb): `33 passed (1.9m)` |
-| G-BUILD | Build de produção | `npm run build` | sim | PASS | EXIT 0 (`testes` r03); r04 (5972cbb): EXIT 0 |
-| G-REF / AC-6 / N-1 / N-2 | Planilha 09/2026: CP-1 a CP-8, tabela 4.2, CR-11 | `CRONOAI_REF_DIR=… vitest run scripts/sinapi/referencia-2026-09.test.ts` | sim | PASS | `42 passed (42)` em r01, r02 e r03; custo ± 0,005; 104094 com custo 0 em AP, GO, MG e SC. Nenhum conteúdo da planilha no repositório além das 3 composições da fixture; r04 (5972cbb): `42 passed (42)`; nenhum valor esperado mudou (só o timeout de 120 s) |
-| G-CORPUS / M-3 corpus | Corpus MSPDI (Inviolável 2) | `…msProjectXmlParser.corpus.test.ts` | sim | PASS | `419 passed (419)`; r04 (5972cbb): `419 passed (419)` |
-| G-REGRAS / S-4 | `validar-regras`; sem `v-html` | `validar-regras.mjs --base feat/00005-premissas-calendarios --commits` | sim | PASS | 73 arquivos, 0 bloqueia, 0 alerta; r04 (5972cbb): 74 arquivos, 0 bloqueia, 0 alerta |
+| G-LINT / G-TIPOS | eslint e vue-tsc (com `scripts/**/*.ts`) | `npm run lint`, `npm run typecheck` | sim | PASS | EXIT 0 em r01, r02 e r03 (`testes`); r04 (5972cbb): EXIT 0 nos dois; auditoria r02 (56aac3e): EXIT 0 nos dois |
+| G-COV | Suíte completa e cobertura ≥ 80% | `npm run test:coverage` | sim | PASS | r03: 912 passaram, 54 pulados; 98,17 / 93,03 / 99,28 / 98,17. O S-1 do parser falhou 2 de 4 vezes em r01 e r02 (ver Pendências); r04 (5972cbb): 925 passaram, 54 pulados (979); 98,18 / 93,11 / 99,28 / 98,18; auditoria r02 (56aac3e): 933 passaram, 54 pulados (987); 98,18 / 93,14 / 99,28 / 98,18 |
+| G-E2E | E2E | `CI=1 npm run e2e`, porta 4173 livre | sim | PASS | `33 passed (1.7m)` (`testes` r03); r04 (5972cbb): `33 passed (1.9m)`; auditoria r02 (56aac3e): `33 passed (1.9m)` |
+| G-BUILD | Build de produção | `npm run build` | sim | PASS | EXIT 0 (`testes` r03); r04 (5972cbb): EXIT 0; auditoria r02 (56aac3e): EXIT 0 |
+| G-REF / AC-6 / N-1 / N-2 | Planilha 09/2026: CP-1 a CP-8, tabela 4.2, CR-11 | `CRONOAI_REF_DIR=… vitest run scripts/sinapi/referencia-2026-09.test.ts` | sim | PASS | `42 passed (42)` em r01, r02 e r03; custo ± 0,005; 104094 com custo 0 em AP, GO, MG e SC. Nenhum conteúdo da planilha no repositório além das 3 composições da fixture; r04 (5972cbb): `42 passed (42)`; nenhum valor esperado mudou (só o timeout de 120 s); auditoria r02 (56aac3e): `42 passed (42)` |
+| G-CORPUS / M-3 corpus | Corpus MSPDI (Inviolável 2) | `…msProjectXmlParser.corpus.test.ts` | sim | PASS | `419 passed (419)`; r04 (5972cbb): `419 passed (419)`; auditoria r02 (56aac3e): `419 passed (419)` |
+| G-REGRAS / S-4 | `validar-regras`; sem `v-html` | `validar-regras.mjs --base feat/00005-premissas-calendarios --commits` | sim | PASS | 73 arquivos, 0 bloqueia, 0 alerta; r04 (5972cbb): 74 arquivos, 0 bloqueia, 0 alerta; auditoria r02 (56aac3e): 75 arquivos, 0 bloqueia, 0 alerta |
 | G-CLASSIF | Faixa | `classificar-diff.mjs` | sim | PASS | Faixa 3 (T2, T3, T4, T5); `seguranca` e `especialista-obra` obrigatórios |
 | S-5 | 0 dependências novas | `auditar-dependencias.mjs` | sim | PASS | "nenhuma mudança no package.json" (só o script `sinapi:recorte`) |
 | AC-1 | RUP = coeficiente publicado | `sinapiRup.test.ts` | sim | PASS | 1,279 / 0,639; 1,8305384 / 1,7058427 / 4,7714472 (`testes` r01) |
@@ -148,7 +148,7 @@ inicio: 2026-10-25
 | R-4 | `mainTrade` intocado e dívida registrada | `git diff` em `scenarios.ts`; `divida-conhecida.md:28` | sim | PASS | `scenarios.ts` sem diff |
 | V-1 | Integrações | `npm run dev` (:5183), texto da página | não | PASS no conteúdo | Orquestrador, 011e278, por texto: cartão SINAPI "Não configurada", 5 cartões da Fase 2 sem campo; console sem erros. Temas, 1440 px e celular não conferidos (captura preta) |
 | V-2 | Calculadora sem recorte | idem | não | PASS no conteúdo | Fórmula "(1.850 m² × 0,82) / (6 × 8 h) = 31,6 → 32 dias úteis (de 8 h)", término pelo CPM e aviso ilustrativo. Mão de obra em R$ inteiro → corrigida em 80efda4. Com recorte: não conferida na tela (E2E cobre) |
-| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | A PREENCHER | A PREENCHER |
+| AUD | Auditoria independente | `revisor` MODO AUDITAR | sim | PASS | r01 (ed7744b): REPROVADO, 5 Baixos, sem efeito em número entregue. r02 delta (56aac3e): os 5 achados fechados (13bd3f1 e registro); gates no HEAD: lint e tipos EXIT 0; 933 passaram, 54 pulados (987); cobertura 98,18 / 93,14 / 99,28 / 98,18; build EXIT 0; referência 42/42; corpus 419/419; validar-regras 75 arquivos, 0/0; E2E 33 passed; M-3 SHA `a401d3a8…e18e` igual à base; arredondamento antigo × novo: 0 de 7.447 pares e 0 equipes (1 a 1.000) mudam na planilha 09/2026. Achado 6 (só documental: "registrado no PR" e formatação em Desvios) corrigido no commit deste texto; a r02 aprovou condicionado a essa correção. EVIDENCIAS-CONFERIDAS 40 de 45; MUT-R3 (feita pelo `testes` na r04), FILA, R-2, V-1 e V-2 como limitação (exigem alterar código ou olhar a tela) |
 
 ## Números que mudaram de propósito (antes → depois)
 Todos fixados em teste, com o antes no próprio teste (Inviolável 1). Só valem para obra com recorte, salvo o BAC com centavos e as horas por dia, que valem também para o catálogo.
@@ -194,7 +194,8 @@ Todos fixados em teste, com o antes no próprio teste (Inviolável 1). Só valem
 
 ## Desvios do plano
 
-- **Teste existente alterado (`useProjectStore.horizonte.test.ts:244`, do ciclo 00005):** a quantidade que estoura o horizonte de 50 anos passou de 1e12 para 1e9 (5972cbb), porque 1e12 agora cai no teto `LIMITES_LINHA` antes de chegar ao horizonte. Antes → depois: 1e12 → 1e9; as asserções (`/horizonte de 50 anos/`, sem tarefa criada, planilha mantida) não mudaram. Registrado também no PR.
+- **Teste existente alterado (`useProjectStore.horizonte.test.ts:244`, do ciclo 00005):** a quantidade que estoura o horizonte de 50 anos passou de 1e12 para 1e9 (5972cbb), porque 1e12 agora cai no teto `LIMITES_LINHA` antes de chegar ao horizonte. Antes → depois: 1e12 → 1e9; as asserções (`/horizonte de 50 anos/`, sem tarefa criada, planilha mantida) não mudaram. Vai no PR (pendente até a entrega).
+
 Avaliação do `arquiteto` r01 para os desvios 1 a 13; os demais vêm das rodadas 02 a 04.
 
 | # | Desvio | Avaliação |
@@ -298,7 +299,8 @@ Avaliação do `arquiteto` r01 para os desvios 1 a 13; os demais vêm das rodada
 | auditoria r01 | 3: `premissas.ts` e o teste de horizonte alterado sem registro em Desvios | corrigido neste registro |
 | auditoria r01 | 4: N-8 citando PR inexistente; M-3 com evidência anterior a mudanças de código | corrigido neste registro (N-8 "PR pendente"; M-3 reexecutado no HEAD 13bd3f1) |
 | auditoria r01 | 5: `arredondarProporcao` não arredonda meio para cima em ponto flutuante (0,145 → 0,14) | corrigido (13bd3f1): `toPrecision(12)`; 0,145 → 0,15, 1,005 → 1,01, 0,29/2 com equipe 7 → 2 ajudantes; 0 de 7.447 pares mudam na planilha 09/2026 |
-| reauditoria | A PREENCHER | A PREENCHER |
+| reauditoria r02 | 6: linha do horizonte em Desvios afirmava "Registrado também no PR" (PR inexistente) e a frase seguinte virava continuação do item da lista | corrigido neste registro: "vai no PR (pendente até a entrega)" e linha em branco |
+| reauditoria r02 (processo) | A rodada 05 não passou pelo agente `testes` | registrado: a auditoria r02 reexecutou todos os gates no HEAD; decisão do orquestrador |
 
 ## Pendências registradas
 - **Node 22 não verificado.** Só há o Node 26.12.1. O type stripping exige o 22.6 ou mais novo (com `--experimental-strip-types`). Rodar `npm run sinapi:recorte -- --ajuda` num Node 22 antes do merge.
@@ -309,7 +311,7 @@ Avaliação do `arquiteto` r01 para os desvios 1 a 13; os demais vêm das rodada
 - **V-1 e V-2 visuais.** Feitas pelo orquestrador pelo texto da página, não por imagem (captura preta). Temas claro e escuro, 1440 px, celular e a calculadora com recorte não conferidos na tela.
 - **P-5 (rollback):** só por argumento.
 - **`realpathSync` e nomes 8.3** (`seguranca` r01 #4): registrado.
-- **Rodada 05 e auditoria:** r01 da auditoria com 5 Baixos, corrigidos em 13bd3f1 e neste registro; reauditoria: A PREENCHER.
+- **Rodada 05 e auditoria:** fechadas; ver a linha AUD.
 - **Antes do PR:** PR empilhado em `feat/00005-premissas-calendarios` se o 00005 não tiver entrado na `master`. Recomendar exportar o `.xml` das obras antes de atualizar (o app do 00005 recusa o esquema 5).
 
 ## Validação de outras áreas (não substitui o parecer delas)
