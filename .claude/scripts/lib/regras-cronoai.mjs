@@ -430,6 +430,8 @@ const EXECUTE_PERMITIDO = '/CronoAI.Dados/Identidade/ConsultasIdentidade.cs'
 // Helpers de política (Rls/MigrationBuilderRlsExtensoes) citando a trilha: o helper esconde o SQL, então a regra por texto não o vê.
 // Criar, substituir ou remover política da "auditoria" por helper é revisão humana obrigatória (o helper já RECUSA UPDATE/DELETE).
 const HELPER_DA_TRILHA = /\b(?:Substituir)?Politica(?:Select|Insert|Update|Delete)\s*\(\s*"auditoria"|\bRemoverPolitica\s*\(\s*"auditoria"/
+// Troca da CHECK de ação da trilha (DROP/ADD): mexe no conjunto de ações aceitas pelo append-only.
+const CHECK_DA_TRILHA = /\b(?:Drop|Add)CheckConstraint\s*\([^;]*"auditoria"/
 const AFROUXA_TRILHA = /\b(DISABLE\s+TRIGGER|DROP\s+TRIGGER|DROP\s+POLICY|ALTER\s+POLICY|CREATE\s+POLICY|DISABLE\s+ROW\s+LEVEL\s+SECURITY|ENABLE\s+(REPLICA\s+)?TRIGGER|CASCADE|CREATE\s+OR\s+REPLACE\s+FUNCTION|OWNER\s+TO|GRANT|NO\s+FORCE)\b/i
 
 /**
@@ -471,7 +473,7 @@ export function regrasBackend(arquivo, texto) {
     achados.push({ id: 'R18', regra: 'escrita fora do SaveChanges', mensagem: 'SQL de escrita em tabela auditada (obra, auditoria, membro_empresa, acesso_obra, frente, acesso_frente, carteira, carteira_obra, acesso_carteira): a trilha só é gravada pelo SaveChanges auditado, a trilha é append-only e o papel da aplicação não insere membro (ADR 00009 e 00010). Única exceção: Rls/ProvisionamentoEmpresa.cs.' })
   }
   // R19: alerta (e não bloqueio) porque o Down() legítimo remove a tabela; a revisão humana decide
-  if (emMigracao && (HELPER_DA_TRILHA.test(texto) || (/auditoria/i.test(texto) && AFROUXA_TRILHA.test(texto)))) {
+  if (emMigracao && (HELPER_DA_TRILHA.test(texto) || CHECK_DA_TRILHA.test(texto) || (/auditoria/i.test(texto) && AFROUXA_TRILHA.test(texto)))) {
     achados.push({ id: 'R19', severidade: 'alerta', regra: 'migração mexe nas garantias da trilha', mensagem: 'Migração que cita auditoria (inclusive pelos helpers Politica*/SubstituirPolitica*/RemoverPolitica) com DISABLE/DROP TRIGGER, ENABLE TRIGGER sem ALWAYS, DISABLE ROW LEVEL SECURITY, CREATE/DROP/ALTER POLICY, CASCADE, CREATE OR REPLACE FUNCTION, OWNER TO, GRANT ou NO FORCE: confirme que o append-only continua valendo em três camadas (REVOKE, RLS só com SELECT e INSERT, gatilho de instrução com ENABLE ALWAYS) (ADR 00009).' })
   }
   return achados
@@ -489,7 +491,9 @@ export function r19PorInstrucao(arquivo, linhas) {
   const fecha = () => {
     const texto = instrucao.map((l) => l.texto).join(' ')
     const jaAcusada = instrucao.some((l) => regrasBackend(arquivo, l.texto).some((x) => x.id === 'R19'))
-    if (instrucao.length > 1 && !jaAcusada && /auditoria/i.test(texto) && AFROUXA_TRILHA.test(texto)) achados.push({ n: instrucao[0].n })
+    // Chamada de helper/CHECK com a tabela na linha seguinte (R-1 da rodada 02 do ciclo 00014) também é acusada.
+    const mexe = HELPER_DA_TRILHA.test(texto) || CHECK_DA_TRILHA.test(texto) || (/auditoria/i.test(texto) && AFROUXA_TRILHA.test(texto))
+    if (instrucao.length > 1 && !jaAcusada && mexe) achados.push({ n: instrucao[0].n })
     instrucao = []
   }
   for (const l of linhas) {

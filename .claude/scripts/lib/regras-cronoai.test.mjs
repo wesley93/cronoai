@@ -439,3 +439,59 @@ test('backend R19 ampliada: a migração PerfisPermissoes real alerta (conferido
   assert.ok(achados.filter((x) => x.id === 'R19').length >= 2)
   assert.deepEqual(achados.filter((x) => x.id === 'R18'), [])
 })
+
+// ---------------------------------------------------------------------------------------------------------------
+// R-1 da rodada 02 do ciclo 00014: helper e CHECK da trilha com "auditoria" na linha seguinte.
+// ---------------------------------------------------------------------------------------------------------------
+test('backend R19 por instrução: helper da trilha com a tabela na linha seguinte é acusado na linha em que a chamada começa', () => {
+  const achados = r19PorInstrucao(MIGRACAO_PERFIS, lin(
+    'migrationBuilder.SubstituirPoliticaSelect(',
+    '    "auditoria",',
+    '    "pol_auditoria_select",',
+    '    $"empresa_id = {e}");',
+  ))
+
+  assert.deepEqual(achados, [{ n: 10 }])
+})
+
+test('backend R19 por instrução: RemoverPolitica e PoliticaDelete da trilha em várias linhas também são acusados', () => {
+  assert.equal(r19PorInstrucao(MIGRACAO_PERFIS, lin('migrationBuilder.RemoverPolitica(', '    "auditoria", "pol_x");')).length, 1)
+  assert.equal(r19PorInstrucao(MIGRACAO_PERFIS, lin('migrationBuilder.PoliticaDelete(', '    "auditoria",', '    "pol_x", "true");')).length, 1)
+})
+
+test('backend R19 por instrução: helper de outra tabela em várias linhas não é acusado', () => {
+  assert.deepEqual(r19PorInstrucao(MIGRACAO_PERFIS, lin('migrationBuilder.SubstituirPoliticaSelect(', '    "obra",', '    "pol_obra_select", usando);')), [])
+})
+
+test('backend R19: DROP/ADD da CHECK da trilha é acusado em uma linha e em várias', () => {
+  const umaLinha = 'migrationBuilder.AddCheckConstraint(name: "ck_auditoria_acao", schema: "cronoai", table: "auditoria", sql: "acao IN (1)");'
+  assert.equal(regrasBackend(MIGRACAO_PERFIS, umaLinha).filter((x) => x.id === 'R19').length, 1)
+
+  const achados = r19PorInstrucao(MIGRACAO_PERFIS, lin(
+    'migrationBuilder.DropCheckConstraint(',
+    '    name: "ck_auditoria_acao",',
+    '    schema: "cronoai",',
+    '    table: "auditoria");',
+  ))
+  assert.deepEqual(achados, [{ n: 10 }])
+})
+
+test('backend R19: CHECK de outra tabela não é acusada', () => {
+  assert.deepEqual(r19PorInstrucao(MIGRACAO_PERFIS, lin('migrationBuilder.DropCheckConstraint(', '    name: "ck_obra_x",', '    table: "obra");')), [])
+})
+
+test('backend R19 por instrução: a migração PerfisPermissoes real alerta no Up (helpers e CHECK) e isso é esperado e conferido', async () => {
+  // Esperado e conferido por humano (ciclo 00014): o Up substitui as políticas de SELECT/INSERT da trilha e troca a CHECK de ação
+  // (acrescenta "remover"). O Down restaura. As três camadas do append-only são provadas por testes de banco e pelo bloco DO.
+  const { readFileSync } = await import('node:fs')
+  const { raizRepo } = await import('./regras-cronoai.mjs')
+  const linhas = readFileSync(`${raizRepo()}/${MIGRACAO_PERFIS}`, 'utf8').split('\n').map((texto, i) => ({ n: i + 1, texto }))
+
+  const porInstrucao = r19PorInstrucao(MIGRACAO_PERFIS, linhas)
+
+  // Por instrução (várias linhas): Up = 2 helpers (SELECT, INSERT) + DROP e ADD da CHECK; Down = DROP e ADD da CHECK. Por linha (já
+  // existia): as 2 restaurações de política do Down. Total no validar-regras: 8 alertas, todos esperados e conferidos.
+  assert.equal(porInstrucao.length, 6, `esperava 6 alertas por instrução, veio ${porInstrucao.map((x) => x.n)}`)
+  assert.deepEqual(porInstrucao.map((x) => x.n).filter((n) => n < 600).length, 4)
+  assert.equal(linhas.flatMap((l) => regrasBackend(MIGRACAO_PERFIS, l.texto)).filter((x) => x.id === 'R19').length, 2)
+})
