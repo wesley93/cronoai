@@ -33,7 +33,7 @@ inicio: 2026-10-25
   - revisar no PR as decisões acima, em especial a mudança no Inviolável 7 do `CLAUDE.md` (desvio 11);
   - rodar `npm run sinapi:recorte -- --ajuda` num Node 22 antes do merge;
   - levar a **Orçamento/Custos**, **Segurança da Informação** e **Contabilidade/Tributário + Jurídico** os itens da última seção.
-- **Estado:** validadores aprovados na rodada 04 (5972cbb): `testes` (gates verdes; mutações M1, M2 e M3 derrubam um teste cada; reprovação só documental, fechada por este registro e pela emenda 02), `arquiteto`, `especialista-obra` e `seguranca` APROVADOS. Ajuste de concordância em a8c25dc. Auditoria independente: A PREENCHER.
+- **Estado:** validadores aprovados na rodada 04 (5972cbb): `testes` (gates verdes; mutações M1, M2 e M3 derrubam um teste cada; reprovação só documental, fechada por este registro e pela emenda 02), `arquiteto`, `especialista-obra` e `seguranca` APROVADOS. Ajuste de concordância em a8c25dc. Auditoria independente: r01 (ed7744b) REPROVADO, 5 Baixos sem efeito em número entregue → 13bd3f1 e este registro; reauditoria: A PREENCHER.
 
 ## Pedido
 "Pode fazer todas as fases" → PLANO-FASE-1 §3.6, ciclo 00006.
@@ -60,6 +60,8 @@ inicio: 2026-10-25
 | 39391f8 | Rodada 03: lote de outro recorte, equipe mantida e fila na troca de obra |
 | 5972cbb | Rodada 04: testes de mutação do R-3, BAC do `custo_unitario`, modelo CSV com colunas vazias e teto de valores |
 | a8c25dc | Concordância de "custo unitário inválido" (achado do `arquiteto` r04) |
+| ed7744b | Registro do ciclo, emenda 02 do plano e dívidas registradas |
+| 13bd3f1 | Rodada 05 (auditoria r01): BAC com centavos dos CR-3/4/5 pela store, fixture com os coeficientes publicados, `arredondarProporcao` meio para cima |
 
 ## Rodadas
 | Rodada | testes | arquiteto | especialista-obra | seguranca | auditoria |
@@ -67,7 +69,8 @@ inicio: 2026-10-25
 | 01 (011e278) | REPROVADO: CR-13 e CR-14 sem o antes no teste (B3); N-8 sem o registro do ciclo | REPROVADO: R-1 (recorte de outra obra na calculadora); R-2 (linha editada com a fonte SINAPI); R-3 a R-11 não bloqueiam | REPROVADO: item 1 (linha editada com o selo oficial); itens 2 a 8 | APROVADO: 2 Baixos, 3 Info | — |
 | 02 (80efda4) | REPROVADO só por documentação: N-8 e a emenda da EO-2 | REPROVADO: R-1b (lote gera tarefa de outro recorte); imprecisões 1 e 2; resíduo do R-3 | REPROVADO: V-1 (custo alterado troca a equipe); V-3; ponto 7 (`custo_unitario`) | APROVADO: 1 Baixo (atributos quadráticos), 1 Info (guarda da obra) | — |
 | 03 (39391f8) | REPROVADO: mutação do R-3 sobrevivente (M1 e M3); BAC do `custo_unitario` não afirmado; N-8; emenda 02 | APROVADO: sem pendência de código; registros antes da entrega | APROVADO: recomendação R3-1 (modelo CSV); R3-2 e R3-3 | APROVADO: 3 Info | — |
-| 04 (5972cbb) | APROVADO no código: 925 testes; M1, M2 e M3 mortas; reprovação só documental | APROVADO: 2 baixos (concordância, corrigida em a8c25dc; registro dos tetos e do modelo) | APROVADO: tetos com folga; T-1 (verba > R$ 10 mi) registrado | APROVADO: sem Infinity/NaN; linhas `#` sem injeção | A PREENCHER |
+| 04 (5972cbb) | APROVADO no código: 925 testes; M1, M2 e M3 mortas; reprovação só documental | APROVADO: 2 baixos (concordância, corrigida em a8c25dc; registro dos tetos e do modelo) | APROVADO: tetos com folga; T-1 (verba > R$ 10 mi) registrado | APROVADO: sem Infinity/NaN; linhas `#` sem injeção | auditoria r01 (ed7744b): REPROVADO, 5 Baixos |
+| 05 (13bd3f1) | gates do dev: 933 passaram, 54 pulados; M-3 reexecutado pelo orquestrador | — | — | — | reauditoria: A PREENCHER |
 
 ### Testes, antes → depois
 | Ponto | Vitest | E2E | Fonte |
@@ -77,6 +80,7 @@ inicio: 2026-10-25
 | Rodada 02 (80efda4) | 895 (+49), 54 pulados (949); 44 arquivos | 33 | `dev-frontend`; `testes` r02 |
 | Rodada 03 (39391f8) | 912 (+17), 54 pulados (966); 44 arquivos | 33 | `dev-frontend`; `testes` r03 |
 | Rodada 04 (5972cbb) | 925 passaram, 54 pulados (979) | 33 | `dev-frontend`; `testes` r04 |
+| Rodada 05 (13bd3f1) | 933 passaram, 54 pulados (987) | 33 | `dev-frontend` |
 
 - Os 54 pulados: 12 do corpus e 42 da referência SINAPI. Os dois só rodam com `CRONOAI_REF_DIR`.
 - Referência SINAPI 09/2026: 42/42 em E4, r02 e r03. Corpus MSPDI: 419/419 em todas as rodadas.
@@ -125,7 +129,7 @@ inicio: 2026-10-25
 | N-5 | Encargos (CR-10) | `recorteSinapi.test.ts` | não | PASS | 115,01% / 71,18% e 99,09% / 58,51% |
 | N-6 | E2E existente sem número mudado | `npm run e2e` | sim | PASS | 33 passed |
 | N-7 | CR-12 a CR-15 com o antes → depois | `sinapi.test.ts`, `sinapiRup.test.ts` | sim | PASS | Na r01: FAIL só no antes de CR-13/CR-14. Corrigido em 80efda4: 764 serventes; HH 17,55 e 2 d |
-| N-8 | Antes → depois no ciclo e no PR | testes + este registro | sim | PASS | Testes com o antes → depois desde a r02; este registro (seção "Números que mudaram"); a descrição do PR repete a tabela |
+| N-8 | Antes → depois no ciclo e no PR | testes + este registro | sim | PASS (ciclo); PR pendente | Testes com o antes → depois desde a r02 e este registro (seção "Números que mudaram"); a descrição do PR é escrita na entrega (`prs/PR-00006-sinapi-layout-2025.md`) |
 | LINHA-ALT | Linha editada: "· alterado"; custo e RUP mantêm a equipe; profissional trocado cai em 0,5 | `sinapiBudget.test.ts`, store, `SinapiModule.test.ts` | sim | PASS | CR-1 com RUP 0,9: 18 d.u.; CR-2: Pedreiro 2 + Servente 4; CR-3: + Carpinteiro 1; CR-3 com Armador: Armador 4 + Servente 2 (`testes` r03) |
 | OUTRO-REC | Fonte de outro recorte recusada na calculadora e no lote | store, `SinapiModule.test.ts` | sim | PASS | Calculadora: r02. Lote: r03, mensagem exata, nada gerado; chip "· outro recorte" (`chip-critical`) |
 | CSV-CUSTO | `custo_unitario` reconhecido: BAC 79.334,40 → 63.040,00 | `sinapiBudget.test.ts`; `useProjectStore.recorte.test.ts` ("BAC do lote a partir do CSV do modelo") | sim | PASS | `bac` `toBeCloseTo(63040, 2)` com os valores antigos do modelo (linha "· alterado", nota do custo informado); antes (coluna ignorada) 79.334,40 no nome e no comentário (`testes` r04) |
@@ -134,7 +138,7 @@ inicio: 2026-10-25
 | MUT-R3 | Guardas do R-3 protegidas por teste (mutação) | controle negativo do `testes` em cópia no scratchpad | sim | PASS | r04: M1 (última conferência), M2 (`desfazer` sem guarda) e M3 (índice fora da fila) derrubam 1 teste cada (`1 failed | 66 passed`); base da cópia 67/67. Na r03, M1 e M3 sobreviviam |
 | FILA | Sem deadlock e sem perda de gravação | revisão do `arquiteto` e da `seguranca` | sim | PASS | `arquiteto` r02 e r03; `seguranca` r03. Resíduo em `criarObra`/`duplicarObra`/`excluirObra` (ver Pendências) |
 | M-1 / M-2 | JSON > 6 MiB recusado antes de ler; malformado, desconhecido, versão 2 | E2E, `recorteSinapi.test.ts` | sim | PASS | Toast "Arquivo grande demais"; 3 mensagens |
-| M-3 | Exportação do seed igual à da base | script em `scratchpad\m3` (c05 dbaf67f × c06) | sim | PASS | SHA `a401d3a80ff304e097d8f7e1bc44312464c1055f91d95f45b0100c342c09e18e` nos dois (r01 e r02); NOT_RUN na r03 (parser intocado) |
+| M-3 | Exportação do seed igual à da base | script `scratchpad\m3\export.test.ts` (c05 dbaf67f × c06) | sim | PASS | Orquestrador no HEAD 13bd3f1: `r5-c06.xml` × `r4-c05.xml` com CreationDate/LastSaved normalizados, `diff` vazio, `valid:true`, `errors:[]`, 79.670 caracteres. Auditoria r01 no HEAD ed7744b: SHA `a401d3a8…e18e` nos dois lados |
 | P-2 / P-3 | Estrutura 1 → 2; recorte mais novo não sobrescrito | E2E, store | sim | PASS | `{ versao: 2, recortes: 0, obras: 1 }`; importação recusada |
 | P-5 | Rollback: app do 00005 recusa o esquema 5 e cai na memória sem gravar | argumento (`armazenamentoObras.ts`, `migracaoEstado.ts`) | não | NOT_RUN | Argumento do dev e do `arquiteto` r01; sem conferência manual |
 | S-1 | Limites de zip bomb | `zip.test.ts` | sim | PASS | 20 testes: declarado, razão > 200, `maxOutputLength`, CRC, soma, criptografia, método 12, ZIP64, multivolume, nome repetido |
@@ -189,6 +193,8 @@ Todos fixados em teste, com o antes no próprio teste (Inviolável 1). Só valem
 **Rodada 04 (39391f8 → 5972cbb):** modelo CSV com colunas vazias: com recorte, o 103332 do modelo passa de 17 d.u. e R$ 63.040,00 (valores de exemplo, marcado "alterado") para o publicado, 33 d.u. e R$ 79.334,40; sem recorte, nada muda (o catálogo coincide com o modelo antigo). "Linha N" nas mensagens passa a contar a linha do arquivo (com comentários e linhas em branco); sem essas linhas, os números são os de antes. Tetos: valores acima de quantidade 1e9, custo R$ 10.000.000, RUP 10.000 ou equipe 1.000 passam a ser recusados (antes, "1e308" virava BAC infinito); na célula, os tetos locais passam de 1e8/50/1e7/60 para 1e9/10.000/1e7/1.000.
 
 ## Desvios do plano
+
+- **Teste existente alterado (`useProjectStore.horizonte.test.ts:244`, do ciclo 00005):** a quantidade que estoura o horizonte de 50 anos passou de 1e12 para 1e9 (5972cbb), porque 1e12 agora cai no teto `LIMITES_LINHA` antes de chegar ao horizonte. Antes → depois: 1e12 → 1e9; as asserções (`/horizonte de 50 anos/`, sem tarefa criada, planilha mantida) não mudaram. Registrado também no PR.
 Avaliação do `arquiteto` r01 para os desvios 1 a 13; os demais vêm das rodadas 02 a 04.
 
 | # | Desvio | Avaliação |
@@ -206,7 +212,7 @@ Avaliação do `arquiteto` r01 para os desvios 1 a 13; os demais vêm das rodada
 | 11 | `MAX_RECORTE_BYTES` no Inviolável 4; Inviolável 7 e linha do `armazenamentoObras` do `CLAUDE.md` alterados | Aceitável com registro. **Mudança num inviolável: destacar no PR para o usuário aprovar** |
 | 12 | Helpers de teste (`scripts/sinapi/__testes__`, `e2e/fixtures.ts`, `sinapiSintetico.ts`) | Aceitável com registro |
 | 13 | `data-testid` novos no E2E | Aceitável |
-| R-5 | Arquivos fora das listas: `CartaoFase2.vue`, `CartaoSinapi.test.ts`, `useProjectStore.sinapi.caracterizacao.test.ts`; depois `SinapiModule.test.ts` | Aceitável com registro: coesos |
+| R-5 | Arquivos fora das listas: `CartaoFase2.vue`, `CartaoSinapi.test.ts`, `useProjectStore.sinapi.caracterizacao.test.ts`; depois `SinapiModule.test.ts` | Aceitável com registro: coesos; também `src/lib/premissas.ts` (`taxaCadastrada`, R-8 do `arquiteto`, 80efda4) e `premissas.test.ts` |
 | EO-2 | Tolerância de 0,05 substituída pela proporção arredondada a 2 casas (`CASAS_PROPORCAO_EQUIPE = 2`) na r02, sem emenda na hora | Emenda 02. Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR |
 | Linha alterada | Regra da linha editada (fonte "· alterado"; custo e RUP mantêm a equipe; profissional trocado cai em 0,5) não estava no plano | Emenda 02. Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR |
 | Outro recorte | Recusa de fonte de outro recorte na calculadora e no lote não estava no plano | Emenda 02. Decidido pelo orquestrador com autorização do usuário, sujeito à revisão dele no PR |
@@ -287,7 +293,12 @@ Avaliação do `arquiteto` r01 para os desvios 1 a 13; os demais vêm das rodada
 | especialista r04 T-1 | Verba global acima de R$ 10 milhões (elevadores, subestação) é recusada pelo teto de custo | dívida registrada em `divida-conhecida.md`; contorno: lançar a verba em reais (quantidade = valor, custo R$ 1,00); Orçamento valida subir o teto para 1e9 |
 | seguranca r04 (Info) | Linha de dados cuja 1ª célula começa com `#` é descartada sem aviso | registrado (o código SINAPI só tem dígitos) |
 | testes r04 | S-1 do parser instável (teto de 2 s); testes com teto de tempo em `planilha.test.ts` | pendência registrada (pré-existente) |
-| Auditoria | Achados | A PREENCHER |
+| auditoria r01 | 1: BAC com centavos dos CR-3/4/5 só por aritmética dentro do teste | corrigido (13bd3f1): pela store (calculadora e lote), 289.430,40 / 9.989,60 / 4.679,50, antes `Math.round` |
+| auditoria r01 | 2: fixture "literal do Analítico" com coeficientes arredondados (107113) e incompleta (101183); nome "727 min" | corrigido (13bd3f1): coeficientes publicados; CR-14 fixa Pedreiro 2 + Servente 9; nome "726 min (726,36)" |
+| auditoria r01 | 3: `premissas.ts` e o teste de horizonte alterado sem registro em Desvios | corrigido neste registro |
+| auditoria r01 | 4: N-8 citando PR inexistente; M-3 com evidência anterior a mudanças de código | corrigido neste registro (N-8 "PR pendente"; M-3 reexecutado no HEAD 13bd3f1) |
+| auditoria r01 | 5: `arredondarProporcao` não arredonda meio para cima em ponto flutuante (0,145 → 0,14) | corrigido (13bd3f1): `toPrecision(12)`; 0,145 → 0,15, 1,005 → 1,01, 0,29/2 com equipe 7 → 2 ajudantes; 0 de 7.447 pares mudam na planilha 09/2026 |
+| reauditoria | A PREENCHER | A PREENCHER |
 
 ## Pendências registradas
 - **Node 22 não verificado.** Só há o Node 26.12.1. O type stripping exige o 22.6 ou mais novo (com `--experimental-strip-types`). Rodar `npm run sinapi:recorte -- --ajuda` num Node 22 antes do merge.
@@ -298,7 +309,7 @@ Avaliação do `arquiteto` r01 para os desvios 1 a 13; os demais vêm das rodada
 - **V-1 e V-2 visuais.** Feitas pelo orquestrador pelo texto da página, não por imagem (captura preta). Temas claro e escuro, 1440 px, celular e a calculadora com recorte não conferidos na tela.
 - **P-5 (rollback):** só por argumento.
 - **`realpathSync` e nomes 8.3** (`seguranca` r01 #4): registrado.
-- **Rodada 04 e auditoria:** A PREENCHER.
+- **Rodada 05 e auditoria:** r01 da auditoria com 5 Baixos, corrigidos em 13bd3f1 e neste registro; reauditoria: A PREENCHER.
 - **Antes do PR:** PR empilhado em `feat/00005-premissas-calendarios` se o 00005 não tiver entrado na `master`. Recomendar exportar o `.xml` das obras antes de atualizar (o app do 00005 recusa o esquema 5).
 
 ## Validação de outras áreas (não substitui o parecer delas)
