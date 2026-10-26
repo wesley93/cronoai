@@ -107,6 +107,24 @@ public sealed class ConsultasIdentidade
     }
 
     /// <summary>
+    /// Membros DA EMPRESA ATIVA com o nome de exibição (junta <c>membro_empresa</c> e <c>usuario</c>). Único ponto que lê o nome
+    /// de colegas: o filtro por empresa é explícito (e o RLS de <c>membro_empresa</c> e o filtro "Empresa" do EF também valem).
+    /// Os removidos só entram com <paramref name="incluirRemovidos"/> (a rota exige a ação de gerir membros para isso).
+    /// </summary>
+    public async Task<IReadOnlyList<MembroListado>> ListarMembrosAsync(Guid usuarioId, Guid empresaId, bool incluirRemovidos, CancellationToken cancelamento = default)
+    {
+        await using var contexto = _fabrica.Criar(new ContextoSessaoBanco(usuarioId, empresaId));
+        return await (
+            from m in contexto.Membros
+            join u in contexto.Usuarios on m.UsuarioId equals u.Id
+            where m.EmpresaId == empresaId && (incluirRemovidos || m.RemovidoEm == null)
+            orderby u.NomeExibicao, m.UsuarioId
+            select new MembroListado(m.UsuarioId, u.NomeExibicao, m.Perfil, m.EscopoObras, m.RemovidoEm, m.Versao))
+            .AsNoTracking()
+            .ToListAsync(cancelamento);
+    }
+
+    /// <summary>
     /// Passo 5: grava a empresa ativa da sessão. Só vale para membro ATIVO (removido_em nulo): a FK composta garante que o vínculo
     /// existe (e ignora o RLS), mas ela aceita o vínculo removido, então a condição é conferida aqui. Devolve se alguma linha foi
     /// atualizada; se o usuário NÃO é membro ativo da empresa, devolve <c>false</c> (o endpoint responde 404), sem lançar.

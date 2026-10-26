@@ -59,7 +59,7 @@ public sealed class ObraSemVinculoTestes
                 Assert.False(string.IsNullOrWhiteSpace(declarado.NaoSeAplica), $"{entrada.Chave}: 403 sem justificativa de NaoSeAplica");
             }
 
-            var cenario = await CriarCenarioAsync(fabrica, idp, declarado.Perfil);
+            var cenario = await CriarCenarioAsync(fabrica, idp, declarado.Perfil, declarado.Escopo);
             using var navegador = cenario.Navegador.Navegador;
             var rota = new RotaRegistrada(entrada.Metodo, entrada.Padrao, false);
             var token = rota.EhEscrita ? await ClienteAutenticado.ObterTokenAntiforgeryAsync(navegador) : null;
@@ -150,14 +150,14 @@ public sealed class ObraSemVinculoTestes
 
     #region Métodos privados
 
-    // Empresa com um administrador técnico, uma obra real (nome com marcador) e um usuário do perfil dado, de escopo "vinculadas" e
-    // SEM nenhum vínculo: a obra existe na empresa dele e ele não a enxerga.
-    private async Task<CenarioSemVinculo> CriarCenarioAsync(ApiFactory fabrica, IdpEmMemoria idp, string perfil)
+    // Empresa com um administrador técnico, uma obra real (nome com marcador) e um usuário do perfil dado (escopo "vinculadas" ou
+    // "carteiras", sem nenhum vínculo nem carteira): a obra existe na empresa dele e ele não a enxerga.
+    private async Task<CenarioSemVinculo> CriarCenarioAsync(ApiFactory fabrica, IdpEmMemoria idp, string perfil, string? escopo = null)
     {
         var empresa = await _dados.CriarEmpresaAsync();
         var nome = "Obra-SV-MARCADOR-" + Guid.NewGuid().ToString("N");
         var obra = await _dados.CriarObraAsync(empresa, DadosTeste.AdministradorDe(empresa), DadosTeste.DadosObraValidos(nome));
-        var login = await CenarioLogin.NaEmpresaAsync(fabrica, idp, _dados, empresa, perfil, EscoposObras.Vinculadas);
+        var login = await CenarioLogin.NaEmpresaAsync(fabrica, idp, _dados, empresa, perfil, escopo ?? Perfis.EscopoUnico(perfil) ?? EscoposObras.Carteiras);
         return new CenarioSemVinculo(login, empresa, obra.Id, nome);
     }
 

@@ -175,10 +175,10 @@ public sealed class IsolamentoRotasTestes
         Assert.NotEmpty(comId);
 
         // Toda rota com {id} declara de que recurso real ele é: nenhuma cai no guid aleatório sem querer.
-        Assert.All(comId, e => Assert.Equal(RecursoAlheio.Obra, e.Recurso));
+        Assert.All(comId, e => Assert.True(e.Recurso is RecursoAlheio.Obra or RecursoAlheio.ObraEMembro, $"{e.Chave} tem {{id}} sem declarar a obra real"));
         Assert.All(
-            CatalogoRotas.Entradas.Where(e => e.Cenario == CenarioIsolamento.ComIdDeOutraEmpresa && e.Padrao.Contains("{id}", StringComparison.Ordinal)),
-            e => Assert.Equal(RecursoAlheio.Obra, e.Recurso));
+            CatalogoRotas.Entradas.Where(e => e.Padrao.Contains("{usuarioId}", StringComparison.Ordinal)),
+            e => Assert.True(e.Recurso is RecursoAlheio.Membro or RecursoAlheio.ObraEMembro, $"{e.Chave} tem {{usuarioId}} sem declarar o membro real"));
 
         foreach (var entrada in comId)
         {
@@ -210,7 +210,7 @@ public sealed class IsolamentoRotasTestes
                 && (texto.StartsWith("/api/v1/obras", StringComparison.Ordinal) || texto.StartsWith("/api/v1/auditoria", StringComparison.Ordinal)))
             .ToList();
 
-        Assert.True(endpoints.Count == 8, $"esperava exatamente 8 endpoints de obras e auditoria (6 de obras, a trilha da obra e a exportação), achou {endpoints.Count}: rota nova exige decidir a política e atualizar este número");
+        Assert.True(endpoints.Count == 11, $"esperava exatamente 11 endpoints de obras e auditoria (6 de obras, 3 de acessos, a trilha da obra e a exportação), achou {endpoints.Count}: rota nova exige decidir a política e atualizar este número");
         foreach (var endpoint in endpoints)
         {
             var politicas = endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>().Select(a => a.Policy).ToList();

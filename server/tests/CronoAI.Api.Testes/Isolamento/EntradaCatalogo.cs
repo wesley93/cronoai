@@ -32,4 +32,5 @@ public sealed record EntradaCatalogo(
 /// <param name="Perfil">Perfil do usuário do cenário (escopo <c>vinculadas</c>, sem nenhum vínculo).</param>
 /// <param name="Esperado">Status esperado.</param>
 /// <param name="NaoSeAplica">Justificativa quando o cenário "tem a ação e não tem a obra" não se aplica à rota.</param>
-public sealed record SemVinculoDoCenario(string Perfil, HttpStatusCode Esperado, string? NaoSeAplica = null);
+/// <param name="Escopo">Escopo de obras do usuário do cenário; nulo = o único do perfil (ou <c>carteiras</c> para gestor e diretoria, sem nenhuma carteira atribuída).</param>
+public sealed record SemVinculoDoCenario(string Perfil, HttpStatusCode Esperado, string? NaoSeAplica = null, string? Escopo = null);

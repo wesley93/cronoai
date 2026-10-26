@@ -61,8 +61,9 @@ public sealed class AuditoriaPorRotaTestes
             },
         };
 
+        // Os acessos de obra (conceder e revogar) têm o teste próprio de trilha: EscritasNovasTestes.
         var escritasDoCatalogo = CatalogoRotas.Entradas
-            .Where(e => e.Padrao.StartsWith("/api/v1/obras", StringComparison.Ordinal) && e.Metodo != "GET")
+            .Where(e => e.Padrao.StartsWith("/api/v1/obras", StringComparison.Ordinal) && e.Metodo != "GET" && !e.Padrao.Contains("/acessos", StringComparison.Ordinal))
             .Select(e => e.Chave)
             .ToList();
         Assert.NotEmpty(escritasDoCatalogo);

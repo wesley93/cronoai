@@ -1,9 +1,11 @@
 using CronoAI.Api;
+using CronoAI.Api.Acessos;
 using CronoAI.Api.Auditoria;
 using CronoAI.Api.Autenticacao;
 using CronoAI.Api.Borda;
 using CronoAI.Api.Desenvolvimento;
 using CronoAI.Api.Empresas;
+using CronoAI.Api.Membros;
 using CronoAI.Api.Obras;
 using CronoAI.Api.Sessao;
 using CronoAI.Dados;
@@ -48,6 +50,10 @@ builder.AdicionarAutenticacao();
 // Obras (ciclo 00013): scoped, porque depende do CronoDbContext e do ContextoSessao da requisição. Singleton aqui seria
 // capturar serviço scoped (e vazar a empresa de uma requisição para outra).
 builder.Services.AddScoped<ServicoObras>();
+
+// Membros e acessos de obra (ciclo 00014): scoped pelo mesmo motivo (CronoDbContext e ContextoSessao da requisição).
+builder.Services.AddScoped<ServicoMembros>();
+builder.Services.AddScoped<ServicoAcessosObra>();
 
 // Leitura e exportação da trilha (ciclo 00013, E3): scoped pelo mesmo motivo (CronoDbContext da requisição).
 builder.Services.Configure<OpcoesAuditoria>(builder.Configuration.GetSection(OpcoesAuditoria.Secao));
@@ -120,6 +126,8 @@ api.MapearAutenticacao();
 api.MapearEu();
 api.MapearEmpresas();
 api.MapearObras();
+api.MapearAcessosObra();
+api.MapearMembros();
 api.MapearAuditoria();
 app.MapearDesenvolvimento();
 

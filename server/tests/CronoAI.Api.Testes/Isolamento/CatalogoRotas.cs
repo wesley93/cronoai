@@ -39,6 +39,19 @@ public static class CatalogoRotas
         // Trilha de auditoria (ciclo 00013, E3): a da obra tem {id} (obra REAL de B); a exportação é por empresa da sessão.
         new("GET", Raiz + "/obras/{id}/auditoria", CenarioIsolamento.ComIdDeOutraEmpresa, Recurso: RecursoAlheio.Obra, SemVinculo: new("engenheiro_obra", HttpStatusCode.NotFound)),
         new("GET", Raiz + "/auditoria/exportacao.csv", CenarioIsolamento.SemRecurso),
+
+        // Membros (ciclo 00014, E3): o {usuarioId} é um membro REAL da empresa B.
+        new("GET", Raiz + "/membros", CenarioIsolamento.SemRecurso),
+        new("PUT", Raiz + "/membros/{usuarioId}", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { perfil = "engenheiro_obra", versao = 1 }, RecursoAlheio.Membro),
+        new("POST", Raiz + "/membros/{usuarioId}/remover", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { versao = 1 }, RecursoAlheio.Membro),
+        new("POST", Raiz + "/membros/{usuarioId}/reativar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { versao = 1 }, RecursoAlheio.Membro),
+
+        // Acessos de obra (ciclo 00014, E3): a obra é REAL de B e, na revogação, o {usuarioId} é membro REAL de B. O corpo do conceder
+        // leva um usuário qualquer: a obra invisível (404) é decidida ANTES de olhar o destino, então o 404 prova a obra e não o corpo.
+        // Quem tem a ação e não tem a obra é o gestor de portfólio sem carteira atribuída (escopo carteiras).
+        new("GET", Raiz + "/obras/{id}/acessos", CenarioIsolamento.ComIdDeOutraEmpresa, Recurso: RecursoAlheio.Obra, SemVinculo: new("gestor_portfolio", HttpStatusCode.NotFound, Escopo: "carteiras")),
+        new("POST", Raiz + "/obras/{id}/acessos", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { usuarioId = Guid.NewGuid() }, RecursoAlheio.Obra, new("gestor_portfolio", HttpStatusCode.NotFound, Escopo: "carteiras")),
+        new("POST", Raiz + "/obras/{id}/acessos/{usuarioId}/revogar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { }, RecursoAlheio.ObraEMembro, new("gestor_portfolio", HttpStatusCode.NotFound, Escopo: "carteiras")),
     ];
 
     /// <summary>Únicas rotas que podem ser anônimas (AllowAnonymous), por chave.</summary>

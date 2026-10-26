@@ -41,6 +41,13 @@ public sealed class MatrizPerfilRotaTestes
         ("POST", "/obras/{obra}/arquivar", [200, 403, 403, 403, 403, 403, 403]),
         ("POST", "/obras/{arquivada}/restaurar", [200, 403, 403, 403, 403, 403, 403]),
         ("GET", "/obras/{obra}/auditoria", [200, 200, 200, 403, 403, 200, 403]),
+        ("GET", "/membros", [200, 403, 403, 403, 403, 200, 403]),
+        ("PUT", "/membros/{alvo}", [200, 403, 403, 403, 403, 403, 403]),
+        ("POST", "/membros/{alvo}/remover", [200, 403, 403, 403, 403, 403, 403]),
+        ("POST", "/membros/{alvo}/reativar", [200, 403, 403, 403, 403, 403, 403]),
+        ("GET", "/obras/{obra}/acessos", [200, 403, 403, 403, 403, 200, 403]),
+        ("POST", "/obras/{obra}/acessos", [201, 403, 403, 403, 403, 201, 403]),
+        ("POST", "/obras/{obra}/acessos/{alvo}/revogar", [204, 403, 403, 403, 403, 204, 403]),
         ("GET", "/auditoria/exportacao.csv", [200, 403, 403, 403, 403, 403, 403]),
     ];
 
@@ -75,6 +82,10 @@ public sealed class MatrizPerfilRotaTestes
         var tecnico = DadosTeste.AdministradorDe(empresa);
         var obra = await _dados.CriarObraAsync(empresa, tecnico);
         var arquivada = await _dados.CriarObraAsync(empresa, tecnico);
+
+        // Alvo das rotas de membro e de acesso: engenheiro de obra ativo da MESMA empresa, ainda sem vínculo.
+        var alvo = await _dados.CriarUsuarioAsync();
+        await _dados.VincularAsync(empresa, alvo, Perfis.EngenheiroObra);
         await _banco.ProduzirEstadoComoSuperusuarioAsync($"UPDATE cronoai.obra SET arquivada_em = greatest(now(), criada_em) WHERE id = '{arquivada.Id}'");
 
         // Todo perfil vê as duas obras: gestor, diretoria e administrador têm escopo todas; os demais, vínculo explícito.
@@ -94,14 +105,14 @@ public sealed class MatrizPerfilRotaTestes
 
         foreach (var (metodo, rota, esperado) in _tabela)
         {
-            var url = "/api/v1" + rota.Replace("{obra}", obra.Id.ToString("D"), StringComparison.Ordinal).Replace("{arquivada}", arquivada.Id.ToString("D"), StringComparison.Ordinal);
+            var url = "/api/v1" + rota.Replace("{obra}", obra.Id.ToString("D"), StringComparison.Ordinal).Replace("{arquivada}", arquivada.Id.ToString("D"), StringComparison.Ordinal).Replace("{alvo}", alvo.ToString("D"), StringComparison.Ordinal);
             if (rota.StartsWith("/auditoria/exportacao", StringComparison.Ordinal))
             {
                 var hoje = DateOnly.FromDateTime(DateTime.UtcNow);
                 url += $"?de={hoje.AddDays(-30):yyyy-MM-dd}&ate={hoje:yyyy-MM-dd}";
             }
 
-            using var resposta = await EnviarAsync(navegador, metodo, url, rota, obra.Id, arquivada.Id);
+            using var resposta = await EnviarAsync(navegador, metodo, url, rota, obra.Id, arquivada.Id, alvo);
             var corpo = await resposta.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
             Assert.True((int)resposta.StatusCode == esperado[coluna], $"{perfil} {metodo} {rota}: esperado {esperado[coluna]}, veio {(int)resposta.StatusCode}: {corpo}");
@@ -133,8 +144,8 @@ public sealed class MatrizPerfilRotaTestes
 
         Assert.Empty(problemas);
 
-        // Controle: a enumeração enxerga rotas de dado (8 neste ciclo; rota nova tem de declarar a ação).
-        Assert.True(comAcao >= 8, $"esperava ao menos 8 rotas de dado, achou {comAcao}");
+        // Controle: a enumeração enxerga as rotas de dado do ciclo (rota nova tem de declarar a ação).
+        Assert.True(comAcao == 15, $"esperava exatamente 15 rotas de dado (6 de obra, 3 de acesso, 4 de membro, trilha e exportação), achou {comAcao}: rota nova exige declarar a ação e atualizar este número");
     }
 
     [Fact]
@@ -197,7 +208,7 @@ public sealed class MatrizPerfilRotaTestes
     private async Task<int> ContarAsync(string sql) =>
         int.Parse(await _banco.ConsultarComoSuperusuarioAsync(sql), System.Globalization.CultureInfo.InvariantCulture);
 
-    private async Task<HttpResponseMessage> EnviarAsync(HttpClient navegador, string metodo, string url, string rota, Guid obra, Guid arquivada)
+    private async Task<HttpResponseMessage> EnviarAsync(HttpClient navegador, string metodo, string url, string rota, Guid obra, Guid arquivada, Guid alvo)
     {
         if (metodo == "GET")
         {
@@ -209,6 +220,10 @@ public sealed class MatrizPerfilRotaTestes
             "/obras" => new { nome = "Obra Ficticia " + Guid.NewGuid().ToString("N")[..10], uf = "PE", municipioIbge = "2699999" },
             "/obras/{obra}" => new { versao = await VersaoAsync(obra), nome = await NomeAsync(obra), uf = "PE", municipioIbge = "2699999", dataStatus = "2026-11-15" },
             "/obras/{obra}/arquivar" => new { versao = await VersaoAsync(obra) },
+            "/membros/{alvo}" => new { perfil = "suprimentos", versao = await VersaoDoMembroAsync(alvo) },
+            "/membros/{alvo}/remover" or "/membros/{alvo}/reativar" => new { versao = await VersaoDoMembroAsync(alvo) },
+            "/obras/{obra}/acessos" => new { usuarioId = alvo },
+            "/obras/{obra}/acessos/{alvo}/revogar" => new { },
             _ => new { versao = await VersaoAsync(arquivada) },
         };
         return await ClienteAutenticado.EscreverAsync(navegador, new HttpMethod(metodo), url, corpo);
@@ -216,6 +231,10 @@ public sealed class MatrizPerfilRotaTestes
 
     private async Task<long> VersaoAsync(Guid obra) =>
         long.Parse(await _banco.ConsultarComoSuperusuarioAsync($"SELECT versao FROM cronoai.obra WHERE id = '{obra}'"), System.Globalization.CultureInfo.InvariantCulture);
+
+    // xmin do vínculo, que a API expõe como versão (inteiro).
+    private async Task<long> VersaoDoMembroAsync(Guid usuario) =>
+        long.Parse(await _banco.ConsultarComoSuperusuarioAsync($"SELECT xmin::text FROM cronoai.membro_empresa WHERE usuario_id = '{usuario}' ORDER BY criado_em DESC LIMIT 1"), System.Globalization.CultureInfo.InvariantCulture);
 
     private Task<string> NomeAsync(Guid obra) => _banco.ConsultarComoSuperusuarioAsync($"SELECT nome FROM cronoai.obra WHERE id = '{obra}'");
 
