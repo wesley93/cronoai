@@ -70,10 +70,17 @@ public sealed class AmbienteApi : IAsyncDisposable
     /// <summary>Outro usuário logado NO MESMO host (mesmos singletons: limitadores, relógio), com a própria empresa.</summary>
     public Task<CenarioLogin> NovoUsuarioAsync(int empresas = 1) => CenarioLogin.CriarAsync(_fabrica, _idp, _dados, empresas);
 
+    /// <summary>Novo usuário, com o perfil e o escopo dados, vinculado à MESMA empresa do usuário principal (para provar a matriz por perfil), já logado.</summary>
+    public Task<CenarioLogin> NovoUsuarioNaEmpresaAsync(string perfil, string? escopoObras = null) =>
+        CenarioLogin.NaEmpresaAsync(_fabrica, _idp, _dados, EmpresaId, perfil, escopoObras);
+
+    public DadosTeste Dados => _dados;
+
     /// <summary>Escrita com antiforgery; devolve o status e o corpo JSON (ou o texto, se não for JSON).</summary>
-    public async Task<RespostaJson> EscreverAsync(HttpMethod metodo, string url, object? corpo = null, IDictionary<string, string>? cabecalhos = null)
+    public async Task<RespostaJson> EscreverAsync(HttpMethod metodo, string url, object? corpo = null, IDictionary<string, string>? cabecalhos = null, string? token = null)
     {
-        var token = await ClienteAutenticado.ObterTokenAntiforgeryAsync(Navegador);
+        // Token informado: escritas CONCORRENTES do mesmo navegador o obtêm UMA vez (cada GET de antiforgery troca o cookie).
+        token ??= await ClienteAutenticado.ObterTokenAntiforgeryAsync(Navegador);
         using var requisicao = new HttpRequestMessage(metodo, url);
         requisicao.Headers.Add("X-XSRF-TOKEN", token);
         foreach (var (nome, valor) in cabecalhos ?? new Dictionary<string, string>())

@@ -14,4 +14,7 @@ public enum StatusResultadoObra
 
     /// <summary>Conflito com o estado atual (versão velha, obra arquivada, nome repetido): 409.</summary>
     Conflito,
+
+    /// <summary>O perfil pode editar a obra mas não os campos de cadastro que o corpo muda (nome, UF, município, responsável, SINAPI): 403.</summary>
+    CampoNaoPermitido,
 }

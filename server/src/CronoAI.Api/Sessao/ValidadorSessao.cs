@@ -7,7 +7,7 @@ namespace CronoAI.Api.Sessao;
 
 /// <summary>
 /// <c>OnValidatePrincipal</c> do cookie: a CADA requisição faz UMA consulta (passo 6 do plano 00012, seção 3.9):
-/// sessão aberta e não vencida, usuário ativo e vínculo vigente com a empresa ativa. Falhou: rejeita o principal e
+/// sessão aberta e não vencida, usuário ativo e vínculo vigente (membro não removido) com a empresa ativa, trazendo o perfil e o escopo. Falhou: rejeita o principal e
 /// apaga o cookie (logout e desativação valem no servidor). Usa <see cref="ConsultasIdentidade"/> (fábrica), nunca
 /// o <c>CronoDbContext</c> scoped.
 /// </summary>
@@ -38,7 +38,7 @@ public static class ValidadorSessao
             return;
         }
 
-        servicos.GetRequiredService<ContextoSessao>().Preencher(sessaoId, usuarioId, validada.EmpresaAtivaId);
+        servicos.GetRequiredService<ContextoSessao>().Preencher(sessaoId, usuarioId, validada.EmpresaAtivaId, validada.Perfil, validada.EscopoObras);
     }
 
     #endregion

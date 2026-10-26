@@ -80,6 +80,12 @@ public sealed class ServicoObras
             return ufInvalida;
         }
 
+        var responsavelInvalido = await ConferirResponsavelAsync(dados, cancelamento);
+        if (responsavelInvalido is not null)
+        {
+            return responsavelInvalido;
+        }
+
         var empresaId = _contexto.EmpresaId ?? throw new InvalidOperationException("Escrita de obra sem empresa ativa na sessão.");
         var obra = Obra.Criar(empresaId, dados, metadados.InstanteUtc);
         _banco.Obras.Add(obra);
@@ -124,11 +130,32 @@ public sealed class ServicoObras
             return ufInvalida;
         }
 
+        // O responsável é um membro da EMPRESA (não revela nada de obra): o mesmo 400 para removido, alheio e inexistente.
+        var responsavelInvalido = await ConferirResponsavelAsync(dados, cancelamento);
+        if (responsavelInvalido is not null)
+        {
+            return responsavelInvalido;
+        }
+
         var obra = await _banco.Obras.SingleOrDefaultAsync(o => o.Id == id, cancelamento);
         var recusa = Recusar(obra, versao, exigeAtiva: true);
         if (recusa is not null)
         {
             return recusa;
+        }
+
+        // Ordem das recusas: 404 → 409 de versão → 409 de arquivada → 403 de campo (acima). Quem edita a obra mas não o cadastro
+        // (engenheiro de planejamento) pode reenviar o cadastro IGUAL ao atual; mudar nome, UF, município, responsável ou SINAPI é
+        // 403 com os NOMES dos campos. Só quem vê todas as obras (administrador) renomeia: o 409 de nome repetido não revela obra
+        // fora do alcance (oráculo de existência).
+        if (!PodeEditarCadastro())
+        {
+            var camposProibidos = obra!.CamposDeCadastroAlterados(dados);
+            if (camposProibidos.Count > 0)
+            {
+                _logger.EscritaRecusadaPorCampoNaoPermitido(obra.Id);
+                return ResultadoEscritaObra.CampoNaoPermitido(camposProibidos);
+            }
         }
 
         // Sem mudança: o EF não emite UPDATE, a versão não anda e nada é auditado.
@@ -303,6 +330,24 @@ public sealed class ServicoObras
         var tipo = atual.EstaArquivada ? ResultadoEscritaObra.ObraArquivada : ResultadoEscritaObra.ConflitoDeVersao;
         _logger.EscritaRecusadaPorConflito(atual.Id, tipo);
         return ResultadoEscritaObra.Conflito(tipo, ObraResposta.De(atual));
+    }
+
+    // Perfil ausente (defeito) vale como "sem permissão": falha fechada.
+    private bool PodeEditarCadastro() =>
+        _contexto.Perfil is { } perfil && MatrizPermissoes.Permite(perfil, AcoesPermissao.ObrasEditarCadastro);
+
+    // O responsável precisa ser membro ATIVO da empresa ativa. Removido, de outra empresa e inexistente são indistinguíveis (o
+    // filtro de empresa e a política de SELECT de membro_empresa escondem a alheia): mesmo 400, mesma mensagem. A FK do banco
+    // continua como rede de segurança (ela aceitaria o removido).
+    private async Task<ResultadoEscritaObra?> ConferirResponsavelAsync(DadosObra dados, CancellationToken cancelamento)
+    {
+        if (dados.ResponsavelId is not { } responsavel)
+        {
+            return null;
+        }
+
+        var ativo = await _banco.Membros.AsNoTracking().AnyAsync(m => m.UsuarioId == responsavel && m.RemovidoEm == null, cancelamento);
+        return ativo ? null : ResultadoEscritaObra.Invalida("responsavelId", "O responsável deve ser membro da empresa.");
     }
 
     // A UF (e a UF do SINAPI) precisa existir na lista nacional (27 linhas): devolve 400 na chave certa, em vez de deixar a FK

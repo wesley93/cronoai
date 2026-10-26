@@ -16,17 +16,27 @@ public sealed class ResultadoEscritaObra
 
     public const string ObraNomeDuplicado = "obra-nome-duplicado";
 
+    /// <summary><c>type</c> curto do 403 de campo de cadastro (extensão <c>campos</c>).</summary>
+    public const string CampoNaoPermitidoTipo = "campo-nao-permitido";
+
     #endregion
 
     #region Construtor
 
-    private ResultadoEscritaObra(StatusResultadoObra status, ObraResposta? obra, string? tipoDoConflito, ObraResposta? estadoAtual, IDictionary<string, string[]>? erros)
+    private ResultadoEscritaObra(
+        StatusResultadoObra status,
+        ObraResposta? obra,
+        string? tipoDoConflito,
+        ObraResposta? estadoAtual,
+        IDictionary<string, string[]>? erros,
+        IReadOnlyList<string>? camposNaoPermitidos = null)
     {
         Status = status;
         Obra = obra;
         TipoDoConflito = tipoDoConflito;
         EstadoAtual = estadoAtual;
         Erros = erros;
+        CamposNaoPermitidos = camposNaoPermitidos;
     }
 
     #endregion
@@ -46,6 +56,9 @@ public sealed class ResultadoEscritaObra
     /// <summary>Erros por campo (só em <see cref="StatusResultadoObra.Invalida"/>).</summary>
     public IDictionary<string, string[]>? Erros { get; }
 
+    /// <summary>Nomes (só os nomes, nunca os valores) dos campos de cadastro que o perfil não pode mudar (só em <see cref="StatusResultadoObra.CampoNaoPermitido"/>).</summary>
+    public IReadOnlyList<string>? CamposNaoPermitidos { get; }
+
     #endregion
 
     #region Métodos públicos
@@ -56,6 +69,9 @@ public sealed class ResultadoEscritaObra
         new(StatusResultadoObra.Invalida, null, null, null, new Dictionary<string, string[]> { [campo] = [mensagem] });
 
     public static ResultadoEscritaObra NaoEncontrada() => new(StatusResultadoObra.NaoEncontrada, null, null, null, null);
+
+    public static ResultadoEscritaObra CampoNaoPermitido(IReadOnlyList<string> campos) =>
+        new(StatusResultadoObra.CampoNaoPermitido, null, null, null, null, campos);
 
     public static ResultadoEscritaObra Conflito(string tipo, ObraResposta? estadoAtual) =>
         new(StatusResultadoObra.Conflito, null, tipo, estadoAtual, null);

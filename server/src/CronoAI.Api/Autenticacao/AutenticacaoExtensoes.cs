@@ -62,8 +62,12 @@ public static class AutenticacaoExtensoes
             .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())
             .AddPolicy(RequisitoEmpresaAtiva.PoliticaEmpresaAtiva, politica => politica
                 .RequireAuthenticatedUser()
-                .AddRequirements(new RequisitoEmpresaAtiva()));
+                .AddRequirements(new RequisitoEmpresaAtiva()))
+            .AdicionarPoliticasDePermissao();
         servicos.AddScoped<IAuthorizationHandler, TratadorRequisitoEmpresaAtiva>();
+
+        // Scoped: o tratador lê o perfil do ContextoSessao da requisição (singleton capturaria um contexto de outra requisição).
+        servicos.AddScoped<IAuthorizationHandler, TratadorRequisitoPermissao>();
         servicos.AddSingleton<IAuthorizationMiddlewareResultHandler, ResultadoAutorizacaoProblemDetails>();
 
         servicos.AddAntiforgery(opcoes =>

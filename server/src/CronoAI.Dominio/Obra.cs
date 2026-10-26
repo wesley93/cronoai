@@ -143,6 +143,46 @@ public sealed partial class Obra : IDadoDeEmpresa, IArquivavel
     }
 
     /// <summary>
+    /// Chaves do contrato (camelCase) dos campos de CADASTRO que <paramref name="novos"/> mudam em relação à obra atual: nome, UF,
+    /// município, responsável e SINAPI (os três campos do SINAPI contam como <c>sinapi</c>). Compara os dados já validados e
+    /// normalizados (<see cref="Validar"/>): o nome com espaços nas pontas igual ao atual não conta como mudança. Não inclui
+    /// <c>dataStatus</c> nem <c>opcoesCronograma</c>, que fazem parte da edição comum.
+    /// </summary>
+    public IReadOnlyList<string> CamposDeCadastroAlterados(DadosObra novos)
+    {
+        ArgumentNullException.ThrowIfNull(novos);
+        var alterados = new List<string>();
+        if (!string.Equals(Nome, novos.Nome, StringComparison.Ordinal))
+        {
+            alterados.Add("nome");
+        }
+
+        if (!string.Equals(Uf, novos.Uf, StringComparison.Ordinal))
+        {
+            alterados.Add("uf");
+        }
+
+        if (!string.Equals(MunicipioIbge, novos.MunicipioIbge, StringComparison.Ordinal))
+        {
+            alterados.Add("municipioIbge");
+        }
+
+        if (ResponsavelId != novos.ResponsavelId)
+        {
+            alterados.Add("responsavelId");
+        }
+
+        if (!string.Equals(SinapiUf, novos.SinapiUf, StringComparison.Ordinal)
+            || !string.Equals(SinapiRegime, novos.SinapiRegime, StringComparison.Ordinal)
+            || SinapiDataBase != novos.SinapiDataBase)
+        {
+            alterados.Add("sinapi");
+        }
+
+        return alterados;
+    }
+
+    /// <summary>
     /// Valida e normaliza os campos (nome aparado) sem criar nada. Usado pela API para devolver todos os erros de
     /// validação do domínio antes de tocar no banco.
     /// </summary>

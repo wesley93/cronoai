@@ -27,7 +27,9 @@ public static class EuEndpoints
                     usuarioId,
                     nome,
                     empresas.Select(e => new EmpresaResumo(e.Id, e.Nome)).ToList(),
-                    contexto.EmpresaId);
+                    contexto.EmpresaId,
+                    contexto.Perfil,
+                    contexto.EscopoObras);
                 return TypedResults.Ok(resposta);
             })
             .ProducesProblem(StatusCodes.Status401Unauthorized);

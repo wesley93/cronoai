@@ -26,5 +26,8 @@ public static partial class LogsObras
     [LoggerMessage(EventId = 25, Level = LogLevel.Warning, Message = "Obra sumiu no meio da escrita (resposta 404) obra_id={ObraId}")]
     public static partial void ObraSumiuNoMeioDaEscrita(this ILogger logger, Guid obraId);
 
+    [LoggerMessage(EventId = 26, Level = LogLevel.Information, Message = "Escrita de obra recusada por campo de cadastro não permitido ao perfil obra_id={ObraId}")]
+    public static partial void EscritaRecusadaPorCampoNaoPermitido(this ILogger logger, Guid obraId);
+
     #endregion
 }

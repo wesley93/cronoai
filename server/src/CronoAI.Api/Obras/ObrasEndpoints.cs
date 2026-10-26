@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using CronoAI.Api.Borda;
 using CronoAI.Api.Sessao;
+using CronoAI.Dominio;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace CronoAI.Api.Obras;
@@ -31,6 +32,7 @@ public static class ObrasEndpoints
         api.MapGet("/obras", async Task<Ok<IReadOnlyList<ObraResposta>>> (ServicoObras servico, CancellationToken cancelamento, bool incluirArquivadas = false) =>
                 TypedResults.Ok(await servico.ListarAsync(incluirArquivadas, cancelamento)))
             .RequireAuthorization(RequisitoEmpresaAtiva.PoliticaEmpresaAtiva)
+            .RequerPermissao(AcoesPermissao.ObrasLer)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
@@ -39,6 +41,7 @@ public static class ObrasEndpoints
                 var obra = await servico.ObterAsync(id, cancelamento);
                 return obra is null ? NaoEncontrada() : TypedResults.Ok(obra);
             })
+            .RequerPermissao(AcoesPermissao.ObrasLer)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
@@ -57,6 +60,7 @@ public static class ObrasEndpoints
                 };
             })
             .RequireAuthorization(RequisitoEmpresaAtiva.PoliticaEmpresaAtiva)
+            .RequerPermissao(AcoesPermissao.ObrasCriar)
             .WithMetadata(new LimiteDeCorpoMetadata(LimiteDoCorpoEmBytes))
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -65,6 +69,7 @@ public static class ObrasEndpoints
 
         grupo.MapPut("/{id}", async Task<Results<Ok<ObraResposta>, ValidationProblem, ProblemHttpResult>> (Guid id, AtualizarObraRequisicao requisicao, ServicoObras servico, CancellationToken cancelamento) =>
                 Traduzir(await servico.AtualizarAsync(id, requisicao, cancelamento)))
+            .RequerPermissao(AcoesPermissao.ObrasEditar)
             .WithMetadata(new LimiteDeCorpoMetadata(LimiteDoCorpoEmBytes))
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -74,6 +79,7 @@ public static class ObrasEndpoints
 
         grupo.MapPost("/{id}/arquivar", async Task<Results<Ok<ObraResposta>, ValidationProblem, ProblemHttpResult>> (Guid id, MudancaArquivamentoRequisicao requisicao, ServicoObras servico, CancellationToken cancelamento) =>
                 Traduzir(await servico.ArquivarAsync(id, requisicao, cancelamento)))
+            .RequerPermissao(AcoesPermissao.ObrasArquivar)
             .WithMetadata(new LimiteDeCorpoMetadata(LimiteDoCorpoEmBytes))
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -83,6 +89,7 @@ public static class ObrasEndpoints
 
         grupo.MapPost("/{id}/restaurar", async Task<Results<Ok<ObraResposta>, ValidationProblem, ProblemHttpResult>> (Guid id, MudancaArquivamentoRequisicao requisicao, ServicoObras servico, CancellationToken cancelamento) =>
                 Traduzir(await servico.RestaurarAsync(id, requisicao, cancelamento)))
+            .RequerPermissao(AcoesPermissao.ObrasArquivar)
             .WithMetadata(new LimiteDeCorpoMetadata(LimiteDoCorpoEmBytes))
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -103,8 +110,17 @@ public static class ObrasEndpoints
         StatusResultadoObra.Ok => TypedResults.Ok(resultado.Obra!),
         StatusResultadoObra.Invalida => TypedResults.ValidationProblem(resultado.Erros!),
         StatusResultadoObra.NaoEncontrada => NaoEncontrada(),
+        StatusResultadoObra.CampoNaoPermitido => CampoNaoPermitido(resultado),
         _ => Conflito(resultado),
     };
+
+    // 403 de campo de cadastro: type curto e só os NOMES dos campos (nunca o valor enviado nem o atual).
+    private static ProblemHttpResult CampoNaoPermitido(ResultadoEscritaObra resultado) =>
+        TypedResults.Problem(
+            statusCode: StatusCodes.Status403Forbidden,
+            title: "O seu perfil não pode alterar estes campos de cadastro da obra.",
+            type: ResultadoEscritaObra.CampoNaoPermitidoTipo,
+            extensions: new Dictionary<string, object?> { ["campos"] = resultado.CamposNaoPermitidos });
 
     private static ProblemHttpResult NaoEncontrada() =>
         TypedResults.Problem(statusCode: StatusCodes.Status404NotFound, title: "Recurso não encontrado.");

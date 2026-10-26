@@ -129,7 +129,7 @@ public sealed class ServicoObrasCorridaTestes
     private static ServicoObras CriarServico(CronoDbContext banco, Guid usuario, Guid empresa, LogsEmMemoria? logs = null)
     {
         var contexto = new ContextoSessao();
-        contexto.Preencher(Guid.NewGuid(), usuario, empresa);
+        contexto.Preencher(Guid.NewGuid(), usuario, empresa, Perfis.Administrador, EscoposObras.Todas);
         ILogger<ServicoObras> logger = logs is null ? NullLogger<ServicoObras>.Instance : new LoggerFactory([logs]).CreateLogger<ServicoObras>();
         return new ServicoObras(banco, contexto, TimeProvider.System, logger);
     }

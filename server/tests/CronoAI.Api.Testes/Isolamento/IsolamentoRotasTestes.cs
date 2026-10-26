@@ -145,7 +145,7 @@ public sealed class IsolamentoRotasTestes
             var rota = new RotaRegistrada(entrada.Metodo, entrada.Padrao, entrada.Cenario == CenarioIsolamento.Anonima);
             var token = rota.EhEscrita ? await ClienteAutenticado.ObterTokenAntiforgeryAsync(navegador) : null;
 
-            using var resposta = await EnviarAsync(navegador, rota, empresaB, obraB.Id, token);
+            using var resposta = await EnviarAsync(navegador, rota, empresaB, new RecursosDeIsolamento(obraB.Id, usuarioB), token);
             var corpo = await resposta.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
             if (entrada.Cenario == CenarioIsolamento.ComIdDeOutraEmpresa && resposta.StatusCode != HttpStatusCode.NotFound)
@@ -184,7 +184,7 @@ public sealed class IsolamentoRotasTestes
         {
             // O MESMO montador que o X5 usa: a requisição que vai para a rede leva a obra real de B no {id}.
             var rota = new RotaRegistrada(entrada.Metodo, entrada.Padrao, false);
-            using var requisicao = RequisicaoDeIsolamento.Montar(rota, empresaB, obraB.Id, null);
+            using var requisicao = RequisicaoDeIsolamento.Montar(rota, empresaB, new RecursosDeIsolamento(obraB.Id, usuarioB), null);
             var id = Guid.Parse(System.Text.RegularExpressions.Regex.Match(requisicao.RequestUri!.ToString(), "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").Value);
 
             Assert.Equal(obraB.Id, id);
@@ -245,9 +245,9 @@ public sealed class IsolamentoRotasTestes
     private static IReadOnlyList<RotaRegistrada> Rotas(ApiFactory fabrica) =>
         DetectorDeRotas.Enumerar(fabrica.Services.GetRequiredService<EndpointDataSource>());
 
-    private static async Task<HttpResponseMessage> EnviarAsync(HttpClient navegador, RotaRegistrada rota, Guid empresaAlheia, Guid? obraAlheia, string? antiforgery)
+    private static async Task<HttpResponseMessage> EnviarAsync(HttpClient navegador, RotaRegistrada rota, Guid empresaAlheia, RecursosDeIsolamento? recursos, string? antiforgery)
     {
-        using var requisicao = RequisicaoDeIsolamento.Montar(rota, empresaAlheia, obraAlheia, antiforgery);
+        using var requisicao = RequisicaoDeIsolamento.Montar(rota, empresaAlheia, recursos, antiforgery);
         return await navegador.SendAsync(requisicao, TestContext.Current.CancellationToken);
     }
 

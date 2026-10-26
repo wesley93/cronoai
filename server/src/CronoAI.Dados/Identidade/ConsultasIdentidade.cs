@@ -91,7 +91,7 @@ public sealed class ConsultasIdentidade
         await contexto.SaveChangesAsync(cancelamento);
     }
 
-    /// <summary>Passo 4: "minhas empresas" (membro ⋈ empresa), ordenadas por nome.</summary>
+    /// <summary>Passo 4: "minhas empresas" (membro ATIVO ⋈ empresa), ordenadas por nome. Membro removido não tem a empresa.</summary>
     public async Task<IReadOnlyList<EmpresaDoUsuario>> MinhasEmpresasAsync(Guid usuarioId, CancellationToken cancelamento = default)
     {
         await using var contexto = _fabrica.Criar(ContextoSessaoBanco.DoUsuario(usuarioId));
@@ -99,7 +99,7 @@ public sealed class ConsultasIdentidade
         // Sem empresa no contexto: o filtro "Empresa" zeraria a consulta; o vínculo é lido pelo usuário (explícito).
         return await (
             from m in contexto.Membros.IgnoreQueryFilters(_ignorarFiltroEmpresa)
-            where m.UsuarioId == usuarioId
+            where m.UsuarioId == usuarioId && m.RemovidoEm == null
             join e in contexto.Empresas on m.EmpresaId equals e.Id
             orderby e.Nome, e.Id
             select new EmpresaDoUsuario(e.Id, e.Nome))
@@ -107,15 +107,23 @@ public sealed class ConsultasIdentidade
     }
 
     /// <summary>
-    /// Passo 5: grava a empresa ativa da sessão. A FK composta garante o vínculo (e ignora o RLS). Devolve se
-    /// alguma linha foi atualizada; se o usuário NÃO é membro da empresa, a FK é violada (23503) e o método devolve
-    /// <c>false</c> (o endpoint responde 404), sem lançar.
+    /// Passo 5: grava a empresa ativa da sessão. Só vale para membro ATIVO (removido_em nulo): a FK composta garante que o vínculo
+    /// existe (e ignora o RLS), mas ela aceita o vínculo removido, então a condição é conferida aqui. Devolve se alguma linha foi
+    /// atualizada; se o usuário NÃO é membro ativo da empresa, devolve <c>false</c> (o endpoint responde 404), sem lançar.
     /// </summary>
     public async Task<bool> DefinirEmpresaAtivaAsync(Guid sessaoId, Guid usuarioId, Guid empresaId, CancellationToken cancelamento = default)
     {
         await using var contexto = _fabrica.Criar(ContextoSessaoBanco.DoUsuario(usuarioId));
         try
         {
+            var ativo = await contexto.Membros
+                .IgnoreQueryFilters(_ignorarFiltroEmpresa)
+                .AnyAsync(m => m.UsuarioId == usuarioId && m.EmpresaId == empresaId && m.RemovidoEm == null, cancelamento);
+            if (!ativo)
+            {
+                return false;
+            }
+
             var linhas = await contexto.Sessoes
                 .Where(s => s.Id == sessaoId && s.UsuarioId == usuarioId && s.EncerradaEm == null)
                 .ExecuteUpdateAsync(set => set.SetProperty(s => s.EmpresaAtivaId, empresaId), cancelamento);
@@ -138,24 +146,43 @@ public sealed class ConsultasIdentidade
     }
 
     /// <summary>
-    /// Passo 6: validação por requisição, em UMA consulta: sessão aberta e não vencida, usuário ativo e (se houver
-    /// empresa ativa) vínculo vigente. Contexto: o <c>usuario_id</c> do cookie, sem empresa.
+    /// Passo 6: validação por requisição, em UMA consulta: sessão aberta e não vencida, usuário ativo e (se houver empresa ativa)
+    /// vínculo vigente, isto é, membro NÃO removido. A mesma consulta devolve o perfil e o escopo de obras do membro: a troca de
+    /// perfil vale na próxima requisição e a remoção derruba a sessão na próxima requisição. Contexto: o <c>usuario_id</c> do
+    /// cookie, sem empresa.
     /// </summary>
     public async Task<SessaoValidada?> ValidarSessaoAsync(Guid sessaoId, Guid usuarioId, DateTime agoraUtc, CancellationToken cancelamento = default)
     {
         await using var contexto = _fabrica.Criar(ContextoSessaoBanco.DoUsuario(usuarioId));
 
-        return await (
+        // Subconsultas correlacionadas dentro do MESMO SQL: o membro ativo da empresa ativa (se não houver, perfil nulo).
+        var leitura = await (
             from s in contexto.Sessoes
             where s.Id == sessaoId && s.UsuarioId == usuarioId && s.EncerradaEm == null && s.ExpiraEm > agoraUtc
             join u in contexto.Usuarios on s.UsuarioId equals u.Id
             where u.DesativadoEm == null
-            let vinculoVigente = s.EmpresaAtivaId == null
-                || contexto.Membros.IgnoreQueryFilters(_ignorarFiltroEmpresa)
-                    .Any(m => m.UsuarioId == s.UsuarioId && m.EmpresaId == s.EmpresaAtivaId)
-            where vinculoVigente
-            select new SessaoValidada(s.EmpresaAtivaId, u.Emissor))
+            select new
+            {
+                s.EmpresaAtivaId,
+                u.Emissor,
+                Perfil = contexto.Membros.IgnoreQueryFilters(_ignorarFiltroEmpresa)
+                    .Where(m => m.UsuarioId == s.UsuarioId && m.EmpresaId == s.EmpresaAtivaId && m.RemovidoEm == null)
+                    .Select(m => m.Perfil)
+                    .FirstOrDefault(),
+                Escopo = contexto.Membros.IgnoreQueryFilters(_ignorarFiltroEmpresa)
+                    .Where(m => m.UsuarioId == s.UsuarioId && m.EmpresaId == s.EmpresaAtivaId && m.RemovidoEm == null)
+                    .Select(m => m.EscopoObras)
+                    .FirstOrDefault(),
+            })
             .SingleOrDefaultAsync(cancelamento);
+
+        // Empresa ativa sem membro ativo (removido, ou vínculo que sumiu): a sessão não vale.
+        if (leitura is null || (leitura.EmpresaAtivaId is not null && leitura.Perfil is null))
+        {
+            return null;
+        }
+
+        return new SessaoValidada(leitura.EmpresaAtivaId, leitura.Emissor, leitura.Perfil, leitura.Escopo);
     }
 
     #endregion

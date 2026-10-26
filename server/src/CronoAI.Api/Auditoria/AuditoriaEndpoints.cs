@@ -1,5 +1,6 @@
 using CronoAI.Api.Borda;
 using CronoAI.Api.Sessao;
+using CronoAI.Dominio;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace CronoAI.Api.Auditoria;
@@ -27,6 +28,7 @@ public static class AuditoriaEndpoints
                 };
             })
             .RequireAuthorization(RequisitoEmpresaAtiva.PoliticaEmpresaAtiva)
+            .RequerPermissao(AcoesPermissao.TrilhaLer)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
@@ -46,6 +48,7 @@ public static class AuditoriaEndpoints
                 };
             })
             .RequireAuthorization(RequisitoEmpresaAtiva.PoliticaEmpresaAtiva)
+            .RequerPermissao(AcoesPermissao.TrilhaExportar)
             .AddEndpointFilter<LimiteDeExportacaoFilter>()
             .Produces<string>(StatusCodes.Status200OK, contentType: "text/csv")
             .ProducesProblem(StatusCodes.Status401Unauthorized)

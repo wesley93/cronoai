@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace CronoAI.Api.Testes.Isolamento;
 
 /// <summary>
@@ -9,6 +11,9 @@ public static class CatalogoRotas
     #region Campos
 
     private const string Raiz = "/api/v1";
+
+    // Justificativa do "não se aplica" (ciclo 00014): a ação só existe para o administrador (escopo todas), que enxerga todas as obras.
+    private const string SoAdministrador = "ação só do administrador, que enxerga todas as obras da empresa: não há usuário com a ação e sem alcance; o perfil sem a ação recebe 403 antes de carregar a obra";
 
     public static readonly IReadOnlyList<EntradaCatalogo> Entradas =
     [
@@ -26,13 +31,13 @@ public static class CatalogoRotas
         // Obras (ciclo 00013): o {id} é uma obra REAL da empresa B (meta-teste Concretizacao_de_id_usa_obra_real_da_empresa_B).
         new("GET", Raiz + "/obras", CenarioIsolamento.SemRecurso),
         new("POST", Raiz + "/obras", CenarioIsolamento.SemRecurso, _ => CorpoDeObra()),
-        new("GET", Raiz + "/obras/{id}", CenarioIsolamento.ComIdDeOutraEmpresa, Recurso: RecursoAlheio.Obra),
-        new("PUT", Raiz + "/obras/{id}", CenarioIsolamento.ComIdDeOutraEmpresa, _ => CorpoDeAtualizacao(), RecursoAlheio.Obra),
-        new("POST", Raiz + "/obras/{id}/arquivar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { versao = 1 }, RecursoAlheio.Obra),
-        new("POST", Raiz + "/obras/{id}/restaurar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { versao = 1 }, RecursoAlheio.Obra),
+        new("GET", Raiz + "/obras/{id}", CenarioIsolamento.ComIdDeOutraEmpresa, Recurso: RecursoAlheio.Obra, SemVinculo: new("engenheiro_obra", HttpStatusCode.NotFound)),
+        new("PUT", Raiz + "/obras/{id}", CenarioIsolamento.ComIdDeOutraEmpresa, _ => CorpoDeAtualizacao(), RecursoAlheio.Obra, new("engenheiro_planejamento", HttpStatusCode.NotFound)),
+        new("POST", Raiz + "/obras/{id}/arquivar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { versao = 1 }, RecursoAlheio.Obra, new("engenheiro_obra", HttpStatusCode.Forbidden, SoAdministrador)),
+        new("POST", Raiz + "/obras/{id}/restaurar", CenarioIsolamento.ComIdDeOutraEmpresa, _ => new { versao = 1 }, RecursoAlheio.Obra, new("engenheiro_obra", HttpStatusCode.Forbidden, SoAdministrador)),
 
         // Trilha de auditoria (ciclo 00013, E3): a da obra tem {id} (obra REAL de B); a exportação é por empresa da sessão.
-        new("GET", Raiz + "/obras/{id}/auditoria", CenarioIsolamento.ComIdDeOutraEmpresa, Recurso: RecursoAlheio.Obra),
+        new("GET", Raiz + "/obras/{id}/auditoria", CenarioIsolamento.ComIdDeOutraEmpresa, Recurso: RecursoAlheio.Obra, SemVinculo: new("engenheiro_obra", HttpStatusCode.NotFound)),
         new("GET", Raiz + "/auditoria/exportacao.csv", CenarioIsolamento.SemRecurso),
     ];
 

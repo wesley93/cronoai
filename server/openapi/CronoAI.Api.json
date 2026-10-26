@@ -1104,7 +1104,9 @@
           "id",
           "nomeExibicao",
           "empresas",
-          "empresaAtivaId"
+          "empresaAtivaId",
+          "perfil",
+          "escopoObras"
         ],
         "type": "object",
         "properties": {
@@ -1130,6 +1132,18 @@
               "string"
             ],
             "format": "uuid"
+          },
+          "perfil": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "escopoObras": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

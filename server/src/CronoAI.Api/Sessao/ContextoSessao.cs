@@ -24,11 +24,17 @@ public sealed class ContextoSessao
 
     public Guid? EmpresaId { get; private set; }
 
+    /// <summary>Perfil do membro na empresa ativa (nulo sem empresa ativa). Vem da consulta que valida a sessão, nunca do cliente.</summary>
+    public string? Perfil { get; private set; }
+
+    /// <summary>Escopo de obras do membro na empresa ativa (nulo sem empresa ativa).</summary>
+    public string? EscopoObras { get; private set; }
+
     #endregion
 
     #region Métodos públicos
 
-    public void Preencher(Guid sessaoId, Guid usuarioId, Guid? empresaId)
+    public void Preencher(Guid sessaoId, Guid usuarioId, Guid? empresaId, string? perfil = null, string? escopoObras = null)
     {
         if (_preenchido)
         {
@@ -39,6 +45,8 @@ public sealed class ContextoSessao
         SessaoId = sessaoId;
         UsuarioId = usuarioId;
         EmpresaId = empresaId;
+        Perfil = perfil;
+        EscopoObras = escopoObras;
     }
 
     /// <summary>Contexto imutável entregue ao <c>CronoDbContext</c> (vazio se a requisição não está autenticada).</summary>

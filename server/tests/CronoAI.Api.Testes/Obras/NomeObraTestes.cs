@@ -75,11 +75,13 @@ public sealed class NomeObraTestes
         await using var api = await AmbienteApi.CriarAsync(_banco, _dados);
         var nome = "Obra Simultanea " + Guid.NewGuid().ToString("N")[..10];
 
+        // O token de antiforgery é obtido UMA vez: dois GET concorrentes trocariam o cookie um do outro e o 400 viraria o desfecho.
+        var token = await ClienteAutenticado.ObterTokenAntiforgeryAsync(api.Navegador);
         var respostas = await Task.WhenAll(
             Enumerable.Range(0, 2).Select(async _ =>
             {
                 await Task.Yield();
-                return await api.EscreverAsync(HttpMethod.Post, "/api/v1/obras", AmbienteApi.CorpoValido(nome));
+                return await api.EscreverAsync(HttpMethod.Post, "/api/v1/obras", AmbienteApi.CorpoValido(nome), token: token);
             }));
 
         Assert.Equal(1, respostas.Count(r => r.Status == HttpStatusCode.Created));

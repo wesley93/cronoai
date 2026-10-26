@@ -28,19 +28,38 @@ public sealed record CenarioPermissoes(
     Guid CarteiraK2,
     Guid Frente1)
 {
+    #region Propriedades
+
+    /// <summary>Sujeito (<c>sub</c>) de cada usuário do cenário: o que o IdP em memória precisa para fazer o login dele.</summary>
+    public IReadOnlyDictionary<Guid, string> Sujeitos { get; init; } = new Dictionary<Guid, string>();
+
+    #endregion
+
     #region Métodos públicos
 
-    public static async Task<CenarioPermissoes> CriarAsync(DadosTeste dados)
+    /// <param name="dados">Fábrica dos dados de teste.</param>
+    /// <param name="emissor">Emissor dos usuários (o do IdP em memória, nos testes de API que fazem login deles).</param>
+    public static async Task<CenarioPermissoes> CriarAsync(DadosTeste dados, string emissor = "https://idp.teste")
     {
         ArgumentNullException.ThrowIfNull(dados);
-        var a = await dados.CriarUsuarioAsync();
-        var b = await dados.CriarUsuarioAsync();
-        var c = await dados.CriarUsuarioAsync();
-        var g = await dados.CriarUsuarioAsync();
-        var d = await dados.CriarUsuarioAsync();
-        var r = await dados.CriarUsuarioAsync();
-        var f = await dados.CriarUsuarioAsync();
-        var z = await dados.CriarUsuarioAsync();
+        var sujeitos = new Dictionary<Guid, string>();
+
+        async Task<Guid> NovoAsync()
+        {
+            var sujeito = "sub-" + Guid.NewGuid().ToString("N");
+            var id = await dados.CriarUsuarioAsync(sujeito, emissor);
+            sujeitos[id] = sujeito;
+            return id;
+        }
+
+        var a = await NovoAsync();
+        var b = await NovoAsync();
+        var c = await NovoAsync();
+        var g = await NovoAsync();
+        var d = await NovoAsync();
+        var r = await NovoAsync();
+        var f = await NovoAsync();
+        var z = await NovoAsync();
 
         var empresaX = await dados.CriarEmpresaAsync(comAdministradorTecnico: false);
         await dados.VincularAsync(empresaX, a);
@@ -75,7 +94,7 @@ public sealed record CenarioPermissoes(
         // R é removido DEPOIS de receber o vínculo: o vínculo físico segue existindo, mas fica inerte.
         await dados.RemoverMembroAsync(empresaX, r);
 
-        return new CenarioPermissoes(empresaX, empresaY, a, b, c, g, d, r, f, z, obra1, obra2, obra3, obraY, k, k2, frente1);
+        return new CenarioPermissoes(empresaX, empresaY, a, b, c, g, d, r, f, z, obra1, obra2, obra3, obraY, k, k2, frente1) { Sujeitos = sujeitos };
     }
 
     #endregion
