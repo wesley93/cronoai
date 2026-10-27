@@ -4,7 +4,9 @@ import type { WorkCalendarConfig } from '@/types/domain'
 const DAY_MS = 86_400_000
 
 export function parseISO(iso: string): Date {
-  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
+  const y = parseInt(iso.substring(0, 4), 10)
+  const m = parseInt(iso.substring(5, 7), 10)
+  const d = parseInt(iso.substring(8, 10), 10)
   return new Date(Date.UTC(y, m - 1, d))
 }
 
@@ -130,6 +132,13 @@ export class WorkCalendar {
   /** Dias úteis no intervalo [from, to). */
   countWorkingBetween(fromIso: string, toIso: string): number {
     if (toIso <= fromIso) return 0
+
+    // Fast path: O(1) difference if both dates are within the pre-calculated indexed range
+    if (this.dates.length > 0 && fromIso >= this.baseDate && toIso <= this.dates[this.dates.length - 1]) {
+      return this.indexOnOrAfter(toIso) - this.indexOnOrAfter(fromIso)
+    }
+
+    // Slow path: fallback to sequential walking
     let n = 0
     let cursor = fromIso
     while (cursor < toIso) {
