@@ -1,0 +1,3 @@
+## 2024-10-27 - Fast paths in Date Calendars
+**Learning:** `countWorkingBetween` was a hot path running an O(N) loop iterating day-by-day. Since `WorkCalendar` already pre-calculates and indexes working days, we can implement an O(1) fast path by simply subtracting the pre-computed indices if the date range falls within the indexed span. Additionally, `parseISO` was allocating arrays via `split` and `map` when simple `substring` and `parseInt` are much faster.
+**Action:** When working with calendar or date span algorithms, look for opportunities to use O(1) index differences instead of O(N) iterative walking. For simple, fixed-format string parsing (like ISO dates), avoid array allocations (`split`, `map`, `slice`) in favor of direct string indexing or substrings.
