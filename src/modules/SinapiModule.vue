@@ -271,7 +271,7 @@ function add() {
                 <div class="truncate text-[12px]">{{ t.name }}</div>
                 <div class="text-[11px] text-zinc-500">{{ t.durationDays }} d.u. · {{ fmtBRL(t.bac) }} · {{ t.resources.map((r) => `${r.units} ${r.resource}`).join(' + ') }}</div>
               </div>
-              <button class="btn-ghost px-2 py-1" title="Remover da EAP" @click="project.removeTask(t.uid)"><Trash2 class="h-3.5 w-3.5" /></button>
+              <button class="btn-ghost px-2 py-1" title="Remover da EAP" :aria-label="`Remover ${t.name} da EAP`" @click="project.removeTask(t.uid)"><Trash2 class="h-3.5 w-3.5" /></button>
             </li>
           </ul>
           <p v-else class="p-2 text-xs text-zinc-500">Nenhum pacote inserido ainda.</p>
