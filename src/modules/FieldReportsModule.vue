@@ -91,7 +91,7 @@ const updates = computed(() => project.state.log.filter((l) => l.kind === 'apont
                     <span v-if="r.kind === 'material'"> · reflete em Suprimentos</span>
                   </div>
                 </div>
-                <button class="btn-ghost px-2 py-1" title="Marcar como resolvida" @click="project.resolveRestriction(r.id)"><Check class="h-3.5 w-3.5" /></button>
+                <button class="btn-ghost px-2 py-1" title="Marcar como resolvida" aria-label="Marcar como resolvida" @click="project.resolveRestriction(r.id)"><Check class="h-3.5 w-3.5" /></button>
               </li>
             </ul>
             <p v-else class="p-3 text-xs text-zinc-500">Nenhuma restrição aberta. Aprovações com restrições aparecem aqui.</p>
