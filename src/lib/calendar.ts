@@ -130,6 +130,14 @@ export class WorkCalendar {
   /** Dias úteis no intervalo [from, to). */
   countWorkingBetween(fromIso: string, toIso: string): number {
     if (toIso <= fromIso) return 0
+    // Fast path: use precomputed dates index if possible
+    if (fromIso >= this.baseDate) {
+      let i = this.indexByDate.get(fromIso)
+      if (i === undefined) i = this.indexOnOrAfter(fromIso)
+      let j = this.indexByDate.get(toIso)
+      if (j === undefined) j = this.indexOnOrAfter(toIso)
+      if (i < this.dates.length && j < this.dates.length) return j - i
+    }
     let n = 0
     let cursor = fromIso
     while (cursor < toIso) {
