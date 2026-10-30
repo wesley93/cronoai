@@ -4,8 +4,6 @@ import { parseISO } from './calendar'
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 const brlCents = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 })
 const num = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 })
-const dateShort = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'UTC' })
-const dateLong = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
 const weekday = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', timeZone: 'UTC' })
 
 export const fmtBRL = (v: number) => brl.format(Number.isFinite(v) ? v : 0)
@@ -23,10 +21,12 @@ export function fmtBRLCompact(v: number): string {
   return fmtBRL(v)
 }
 
-export const fmtDate = (iso?: string) => (iso ? dateShort.format(parseISO(iso)) : '—')
-export const fmtDateLong = (iso?: string) => (iso ? dateLong.format(parseISO(iso)).replace('.', '') : '—')
 const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
-export const fmtMonth = (iso: string) => `${MONTHS[Number(iso.slice(5, 7)) - 1]}/${iso.slice(2, 4)}`
+
+// Otimização: formatar datas extraindo as partes diretamente da string ISO
+export const fmtDate = (iso?: string) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : '—')
+export const fmtDateLong = (iso?: string) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)} de ${MONTHS[Number(iso.slice(5, 7)) - 1]} de ${iso.slice(0, 4)}` : '—')
+export const fmtMonth = (iso: string) => (iso && iso.length >= 7 ? `${MONTHS[Number(iso.slice(5, 7)) - 1]}/${iso.slice(2, 4)}` : '—')
 export const fmtWeekday = (iso: string) => weekday.format(parseISO(iso)).replace('.', '')
 
 export function fmtDays(n: number, unit = 'dia útil', plural = 'dias úteis'): string {
