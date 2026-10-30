@@ -114,8 +114,8 @@ function send() {
       </div>
       <div class="flex flex-col gap-2">
         <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="onPhoto" />
-        <button class="btn-secondary px-2.5" title="Anexar foto da obra" @click="fileInput?.click()"><ImagePlus class="h-4 w-4" /></button>
-        <button class="btn-success px-2.5" title="Enviar relato" @click="send"><Send class="h-4 w-4" /></button>
+        <button class="btn-secondary px-2.5" title="Anexar foto da obra" aria-label="Anexar foto da obra" @click="fileInput?.click()"><ImagePlus class="h-4 w-4" /></button>
+        <button class="btn-success px-2.5" title="Enviar relato" aria-label="Enviar relato" @click="send"><Send class="h-4 w-4" /></button>
       </div>
     </div>
   </div>
