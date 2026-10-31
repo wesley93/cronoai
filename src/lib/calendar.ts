@@ -130,6 +130,15 @@ export class WorkCalendar {
   /** Dias úteis no intervalo [from, to). */
   countWorkingBetween(fromIso: string, toIso: string): number {
     if (toIso <= fromIso) return 0
+
+    // O(1) lookup se as datas estiverem no índice (dentro do horizonte planejado)
+    const idxFrom = this.indexByDate.get(fromIso)
+    const idxTo = this.indexByDate.get(toIso)
+    if (idxFrom !== undefined && idxTo !== undefined) {
+      return idxTo - idxFrom
+    }
+
+    // Fallback O(N) para datas longínquas fora do horizonte
     let n = 0
     let cursor = fromIso
     while (cursor < toIso) {
