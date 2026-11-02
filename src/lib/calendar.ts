@@ -104,7 +104,15 @@ export class WorkCalendar {
 
   /** Índice do dia útil em `iso`; se não for útil, o próximo dia útil. */
   indexOnOrAfter(iso: string): number {
-    if (iso < this.baseDate) return -this.countWorkingBetween(iso, this.baseDate)
+    if (iso < this.baseDate) {
+      let n = 0
+      let cursor = iso
+      while (cursor < this.baseDate) {
+        if (this.isWorkingDay(cursor)) n++
+        cursor = addCalendarDays(cursor, 1)
+      }
+      return -n
+    }
     let cursor = iso
     for (let guard = 0; guard < 30; guard++) {
       const idx = this.indexByDate.get(cursor)
@@ -116,7 +124,15 @@ export class WorkCalendar {
 
   /** Índice do dia útil em `iso`; se não for útil, o dia útil anterior. */
   indexOnOrBefore(iso: string): number {
-    if (iso < this.baseDate) return -this.countWorkingBetween(iso, this.baseDate) - 1
+    if (iso < this.baseDate) {
+      let n = 0
+      let cursor = iso
+      while (cursor < this.baseDate) {
+        if (this.isWorkingDay(cursor)) n++
+        cursor = addCalendarDays(cursor, 1)
+      }
+      return -n - 1
+    }
     let cursor = iso
     for (let guard = 0; guard < 30; guard++) {
       const idx = this.indexByDate.get(cursor)
@@ -130,13 +146,8 @@ export class WorkCalendar {
   /** Dias úteis no intervalo [from, to). */
   countWorkingBetween(fromIso: string, toIso: string): number {
     if (toIso <= fromIso) return 0
-    let n = 0
-    let cursor = fromIso
-    while (cursor < toIso) {
-      if (this.isWorkingDay(cursor)) n++
-      cursor = addCalendarDays(cursor, 1)
-    }
-    return n
+    // Otimização O(1) usando o índice de dias úteis já pré-calculado
+    return this.indexOnOrAfter(toIso) - this.indexOnOrAfter(fromIso)
   }
 
   private walkForward(fromIso: string, workingDays: number): string {
