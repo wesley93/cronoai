@@ -1,0 +1,3 @@
+## 2025-03-01 - WBS Hierarchy Traversal Anti-Pattern
+**Learning:** Using `startsWith` inside a loop iterating over parent tasks to find their descendants (e.g. `leaves.filter(k => k.wbs.startsWith(t.wbs + '.'))`) creates an $O(N^2)$ performance bottleneck. This pattern was found in `computeSchedule` (`buildEdges`) and `msProjectTasks`, both of which are executed frequently (especially in scenario simulations and UI reactivity).
+**Action:** Always pre-calculate hierarchical relationships or rollups in a single bottom-up $O(N)$ pass. By splitting the `wbs` string of leaves (e.g., `parts.slice(0, i).join('.')`) and populating a dictionary/Map, you can accumulate values or group relationships without repeated substring filtering.
