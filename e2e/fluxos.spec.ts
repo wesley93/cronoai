@@ -52,7 +52,7 @@ test('C-4 e C-5: aprovar o apontamento, exportar o XML e importar o mesmo arquiv
 
   // Exportar (o toast some em 5 s: é conferido antes de gravar o arquivo)
   const download = page.waitForEvent('download')
-  await topo(page).getByRole('button', { name: 'Exportar para MS Project' }).click()
+  await topo(page).getByRole('button', { name: 'Exportar cronograma atualizado no padrão MSPDI' }).click()
   const arquivo = await download
   await expect(toast(page, 'XML do MS Project gerado e validado')).toContainText('29 tarefas, 24 vínculos')
   expect(arquivo.suggestedFilename()).toBe('Edificio_Residencial_Aurora_12_Pavimentos_2026-10-23.xml')
@@ -67,7 +67,7 @@ test('C-4 e C-5: aprovar o apontamento, exportar o XML e importar o mesmo arquiv
 
   // Importar o arquivo exportado
   const seletor = page.waitForEvent('filechooser')
-  await topo(page).getByRole('button', { name: 'Importar .xml' }).click()
+  await topo(page).getByRole('button', { name: 'Importar XML do MS Project (MSPDI)' }).click()
   await (await seletor).setFiles(caminho)
   await expect(toast(page, 'Cronograma importado')).toContainText('29 tarefas carregadas')
   // Os avisos de importação saem no mesmo tick do toast de sucesso (useMsProject.ts), então a ausência já vale aqui
