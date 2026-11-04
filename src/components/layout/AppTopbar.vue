@@ -56,10 +56,10 @@ async function onFile(e: Event) {
     </div>
 
     <input ref="fileInput" type="file" accept=".xml,application/xml,text/xml" class="hidden" @change="onFile" />
-    <button class="btn-secondary" title="Importar XML do MS Project (MSPDI)" @click="fileInput?.click()">
+    <button class="btn-secondary" title="Importar XML do MS Project (MSPDI)" aria-label="Importar XML do MS Project (MSPDI)" @click="fileInput?.click()">
       <Upload class="h-3.5 w-3.5" /><span class="hidden sm:inline">Importar .xml</span>
     </button>
-    <button class="btn-primary" title="Exportar cronograma atualizado no padrão MSPDI" @click="exportXml">
+    <button class="btn-primary" title="Exportar cronograma atualizado no padrão MSPDI" aria-label="Exportar cronograma atualizado no padrão MSPDI" @click="exportXml">
       <Download class="h-3.5 w-3.5" /><span class="hidden sm:inline">Exportar para MS Project</span>
     </button>
     <button class="btn-ghost px-2" :aria-label="ui.theme === 'dark' ? 'Tema claro' : 'Tema escuro'" @click="ui.toggleTheme">
