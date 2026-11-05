@@ -21,6 +21,25 @@ export function childrenOf(tasks: Task[], summary: Task): Task[] {
   return tasks.filter((t) => !t.isSummary && t.wbs.startsWith(summary.wbs + '.'))
 }
 
+/** Pré-calcula um índice mapeando WBS de tarefas-resumo para suas tarefas-folha, permitindo consultas O(1). */
+export function buildLeafIndex(tasks: Task[]): Map<string, Task[]> {
+  const index = new Map<string, Task[]>()
+  for (const t of tasks) {
+    if (t.isSummary) continue
+    let w = t.wbs
+    while (w.includes('.')) {
+      w = w.substring(0, w.lastIndexOf('.'))
+      let arr = index.get(w)
+      if (!arr) {
+        arr = []
+        index.set(w, arr)
+      }
+      arr.push(t)
+    }
+  }
+  return index
+}
+
 /** Compara códigos de EAP numericamente (01.10 > 01.9). */
 export function compareWbs(a: string, b: string): number {
   const pa = a.split('.').map(Number)
@@ -38,8 +57,9 @@ export function sortByWbs(tasks: Task[]): Task[] {
 
 export function rollupSummaries(tasks: Task[], schedule: ScheduleResult): Map<number, SummaryRollup> {
   const out = new Map<number, SummaryRollup>()
+  const leafIndex = buildLeafIndex(tasks)
   for (const s of tasks.filter((t) => t.isSummary)) {
-    const kids = childrenOf(tasks, s)
+    const kids = leafIndex.get(s.wbs) || []
     const scheduled = kids.map((k) => schedule.byUid.get(k.uid)).filter((x) => !!x)
     if (!scheduled.length) continue
     const bac = kids.reduce((acc, k) => acc + k.bac, 0)
