@@ -1,0 +1,3 @@
+## 2025-02-20 - O(N^2) WBS Traversal Anti-Pattern
+**Learning:** The codebase frequently uses `tasks.filter(t => t.wbs.startsWith(summary.wbs + '.'))` inside maps/loops over summary tasks (like in `msProjectTasks`, `computePackageEvm`, `rollupSummaries`, and `buildEdges`). This creates an O(N^2) performance bottleneck when parsing WBS relationships, scaling poorly with large project trees.
+**Action:** When working on tree hierarchy aggregations in CronoAI, always pre-calculate a leaf index map (`buildLeafIndex`) in a single pass before iterating over summary groups to maintain O(N) complexity for subtree queries.

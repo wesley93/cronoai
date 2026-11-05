@@ -1,6 +1,7 @@
 // Gerenciamento do Valor Agregado (EVM / PMBOK) e Curva S físico-financeira.
 import type { ScheduleResult, Task } from '@/types/domain'
 import { addCalendarDays, parseISO, toISO, type WorkCalendar } from './calendar'
+import { buildLeafIndex } from './wbs'
 
 export interface EvmMetrics {
   bac: number
@@ -95,8 +96,9 @@ export function computeEvm(tasks: Task[], cal: WorkCalendar, statusDate: string)
 /** EVM por pacote de 1º nível da EAP (01, 02, ...). */
 export function computePackageEvm(tasks: Task[], cal: WorkCalendar, statusDate: string): PackageEvm[] {
   const groups = tasks.filter((t) => t.isSummary && t.outlineLevel === 1)
+  const leafIndex = buildLeafIndex(tasks)
   return groups.map((g) => {
-    const kids = tasks.filter((t) => !t.isSummary && t.wbs.startsWith(g.wbs + '.'))
+    const kids = leafIndex.get(g.wbs) || []
     return { wbs: g.wbs, name: g.name, ...computeEvm(kids, cal, statusDate) }
   })
 }
