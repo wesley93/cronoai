@@ -1,6 +1,7 @@
 // Motor de Caminho Crítico (CPM) com vínculos FS/SS/FF/SF, latência e reprogramação pela data de status.
 import type { PredecessorLink, ScheduleResult, ScheduledTask, Task } from '@/types/domain'
 import { WorkCalendar } from './calendar'
+import { buildWbsIndex } from './wbs'
 
 export interface ScheduleOptions {
   /** baseline = ignora avanço; forecast = reprograma o saldo a partir da data de status (como o MS Project). */
@@ -19,8 +20,9 @@ interface Edge {
 function buildEdges(tasks: Task[], leaves: Task[]): Edge[] {
   const leafSet = new Set(leaves.map((t) => t.uid))
   const byUid = new Map(tasks.map((t) => [t.uid, t]))
+  const kidsByWbs = buildWbsIndex(tasks)
   const leafDescendants = (summary: Task): number[] =>
-    leaves.filter((l) => l.wbs.startsWith(summary.wbs + '.')).map((l) => l.uid)
+    (kidsByWbs.get(summary.wbs) || []).map((l: Task) => l.uid)
 
   const edges: Edge[] = []
   for (const t of leaves) {

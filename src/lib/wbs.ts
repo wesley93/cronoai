@@ -17,6 +17,23 @@ export function leafTasks(tasks: Task[]): Task[] {
   return tasks.filter((t) => !t.isSummary)
 }
 
+
+/** ⚡ Bolt: Caches O(1) WBS lookups to avoid O(N^2) hierarchy traversals */
+export function buildWbsIndex(tasks: Task[]): Map<string, Task[]> {
+  const map = new Map<string, Task[]>()
+  for (const t of tasks) {
+    if (t.isSummary) continue
+    const parts = t.wbs.split('.')
+    let wbs = ''
+    for (let i = 0; i < parts.length - 1; i++) {
+      wbs = wbs ? `${wbs}.${parts[i]}` : parts[i]
+      if (!map.has(wbs)) map.set(wbs, [])
+      map.get(wbs)!.push(t)
+    }
+  }
+  return map
+}
+
 export function childrenOf(tasks: Task[], summary: Task): Task[] {
   return tasks.filter((t) => !t.isSummary && t.wbs.startsWith(summary.wbs + '.'))
 }
@@ -38,8 +55,10 @@ export function sortByWbs(tasks: Task[]): Task[] {
 
 export function rollupSummaries(tasks: Task[], schedule: ScheduleResult): Map<number, SummaryRollup> {
   const out = new Map<number, SummaryRollup>()
-  for (const s of tasks.filter((t) => t.isSummary)) {
-    const kids = childrenOf(tasks, s)
+  const kidsByWbs = buildWbsIndex(tasks)
+  for (const s of tasks) {
+    if (!s.isSummary) continue
+    const kids = kidsByWbs.get(s.wbs) || []
     const scheduled = kids.map((k) => schedule.byUid.get(k.uid)).filter((x) => !!x)
     if (!scheduled.length) continue
     const bac = kids.reduce((acc, k) => acc + k.bac, 0)

@@ -45,7 +45,7 @@ import {
 } from '@/lib/scenarios'
 import { SAFETY_MARGIN_DAYS, analyzeSupplies } from '@/lib/supplies'
 import { fmtBRL, fmtMonth, uid } from '@/lib/format'
-import { nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
+import { buildWbsIndex, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
 
 const STORAGE_KEY = 'cronoai-state-v1'
 
@@ -205,10 +205,11 @@ export const useProjectStore = defineStore('project', () => {
   const msProjectTasks = computed<MSProjectTask[]>(() => {
     const status = state.meta.statusDate
     const pvOf = (t: Task) => t.bac * plannedFraction(t, baseCalendar.value, status)
+    const kidsByWbs = buildWbsIndex(state.tasks)
     return tasksByWbs.value.map((t): MSProjectTask => {
       if (t.isSummary) {
         const r = rollups.value.get(t.uid)
-        const kids = leaves.value.filter((k) => k.wbs.startsWith(t.wbs + '.'))
+        const kids = kidsByWbs.get(t.wbs) || []
         const start = r?.start ?? state.meta.startDate
         const finish = r?.finish ?? start
         return {
@@ -225,8 +226,8 @@ export const useProjectStore = defineStore('project', () => {
           IsCritical: !!r?.critical,
           TotalSlack: null,
           BudgetAtCompletion: r?.bac ?? 0,
-          PlannedValue: kids.reduce((a, k) => a + pvOf(k), 0),
-          EarnedValue: kids.reduce((a, k) => a + (k.bac * k.percentComplete) / 100, 0),
+          PlannedValue: kids.reduce((a: number, k: Task) => a + pvOf(k), 0),
+          EarnedValue: kids.reduce((a: number, k: Task) => a + (k.bac * k.percentComplete) / 100, 0),
           ActualCost: r?.actualCost ?? 0,
           Resources: [],
           MaterialLeadTime: null,
