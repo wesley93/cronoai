@@ -160,19 +160,19 @@ const cellInput =
     <!-- Cadastro -->
     <SectionCard v-if="showForm" title="Cadastrar insumo crítico" subtitle="A DLP é calculada a partir do início reprogramado da tarefa vinculada" :icon="PackagePlus">
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="lg:col-span-2"><label class="label">Insumo</label><input v-model="form.name" class="input" maxlength="80" placeholder="Ex.: Esquadria de alumínio" /></div>
-        <div class="lg:col-span-2"><label class="label">Especificação</label><input v-model="form.spec" class="input" maxlength="120" placeholder="Linha, acabamento, norma…" /></div>
+        <div class="lg:col-span-2"><label for="formName" class="label">Insumo</label><input id="formName" v-model="form.name" class="input" maxlength="80" placeholder="Ex.: Esquadria de alumínio" /></div>
+        <div class="lg:col-span-2"><label for="formSpec" class="label">Especificação</label><input id="formSpec" v-model="form.spec" class="input" maxlength="120" placeholder="Linha, acabamento, norma…" /></div>
         <div class="lg:col-span-2">
-          <label class="label">Tarefa do MS Project que consome o insumo</label>
-          <select v-model.number="form.taskUid" class="input text-xs">
+          <label for="formTaskUid" class="label">Tarefa do MS Project que consome o insumo</label>
+          <select id="formTaskUid" v-model.number="form.taskUid" class="input text-xs">
             <option v-for="t in project.leaves" :key="t.uid" :value="t.uid">[UID {{ t.uid }}] {{ t.wbs }} - {{ t.name }}</option>
           </select>
         </div>
-        <div><label class="label">Lead time do fornecedor (dias)</label><input v-model.number="form.leadTimeDays" type="number" min="0" max="365" class="input tabular-nums" /></div>
-        <div><label class="label">Fornecedor</label><input v-model="form.supplier" class="input" maxlength="80" /></div>
-        <div><label class="label">Quantidade</label><input v-model.number="form.quantity" type="number" min="0" step="any" class="input tabular-nums" /></div>
-        <div><label class="label">Unidade</label><input v-model="form.unit" class="input" maxlength="8" /></div>
-        <div><label class="label">Preço unitário (R$)</label><input v-model.number="form.unitPrice" type="number" min="0" step="0.01" class="input tabular-nums" /></div>
+        <div><label for="formLeadTimeDays" class="label">Lead time do fornecedor (dias)</label><input id="formLeadTimeDays" v-model.number="form.leadTimeDays" type="number" min="0" max="365" class="input tabular-nums" /></div>
+        <div><label for="formSupplier" class="label">Fornecedor</label><input id="formSupplier" v-model="form.supplier" class="input" maxlength="80" /></div>
+        <div><label for="formQuantity" class="label">Quantidade</label><input id="formQuantity" v-model.number="form.quantity" type="number" min="0" step="any" class="input tabular-nums" /></div>
+        <div><label for="formUnit" class="label">Unidade</label><input id="formUnit" v-model="form.unit" class="input" maxlength="8" /></div>
+        <div><label for="formUnitPrice" class="label">Preço unitário (R$)</label><input id="formUnitPrice" v-model.number="form.unitPrice" type="number" min="0" step="0.01" class="input tabular-nums" /></div>
         <div class="flex items-end gap-2">
           <button class="btn-primary flex-1" :disabled="!formValid" @click="addMaterial"><PackagePlus class="h-3.5 w-3.5" /> Cadastrar</button>
           <button class="btn-ghost" @click="showForm = false">Cancelar</button>
