@@ -38,8 +38,34 @@ export function sortByWbs(tasks: Task[]): Task[] {
 
 export function rollupSummaries(tasks: Task[], schedule: ScheduleResult): Map<number, SummaryRollup> {
   const out = new Map<number, SummaryRollup>()
-  for (const s of tasks.filter((t) => t.isSummary)) {
-    const kids = childrenOf(tasks, s)
+
+  // O(N) pre-calculation of hierarchical relationships
+  const kidsBySummaryWbs = new Map<string, Task[]>()
+  const summaries: Task[] = []
+
+  for (const t of tasks) {
+    if (t.isSummary) {
+      summaries.push(t)
+      kidsBySummaryWbs.set(t.wbs, [])
+    }
+  }
+
+  for (const t of tasks) {
+    if (!t.isSummary) {
+      const parts = t.wbs.split('.')
+      let currentPrefix = ''
+      for (let i = 0; i < parts.length - 1; i++) {
+        currentPrefix = currentPrefix ? `${currentPrefix}.${parts[i]}` : parts[i]
+        const kids = kidsBySummaryWbs.get(currentPrefix)
+        if (kids) {
+          kids.push(t)
+        }
+      }
+    }
+  }
+
+  for (const s of summaries) {
+    const kids = kidsBySummaryWbs.get(s.wbs) || []
     const scheduled = kids.map((k) => schedule.byUid.get(k.uid)).filter((x) => !!x)
     if (!scheduled.length) continue
     const bac = kids.reduce((acc, k) => acc + k.bac, 0)
