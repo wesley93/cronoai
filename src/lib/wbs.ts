@@ -21,6 +21,37 @@ export function childrenOf(tasks: Task[], summary: Task): Task[] {
   return tasks.filter((t) => !t.isSummary && t.wbs.startsWith(summary.wbs + '.'))
 }
 
+/**
+ * Pré-calcula os filhos (folhas) de cada tarefa resumo em uma única passagem (O(N)),
+ * evitando a busca em O(N²) que ocorre ao chamar `childrenOf` dentro de um loop.
+ */
+export function buildChildrenMap(tasks: Task[]): Map<string, Task[]> {
+  const map = new Map<string, Task[]>()
+
+  // Apenas tarefas resumo terão entradas no mapa, inicialmente vazias
+  for (const t of tasks) {
+    if (t.isSummary) map.set(t.wbs, [])
+  }
+
+  // Para cada folha, adicionamos ela ao array de cada um dos seus ancestrais
+  for (const t of tasks) {
+    if (t.isSummary) continue
+
+    // Ancestrais da folha '01.02.03' -> '01', '01.02'
+    const parts = t.wbs.split('.')
+    let currentPath = ''
+    for (let i = 0; i < parts.length - 1; i++) {
+      currentPath = currentPath ? `${currentPath}.${parts[i]}` : parts[i]
+      const children = map.get(currentPath)
+      if (children) {
+        children.push(t)
+      }
+    }
+  }
+
+  return map
+}
+
 /** Compara códigos de EAP numericamente (01.10 > 01.9). */
 export function compareWbs(a: string, b: string): number {
   const pa = a.split('.').map(Number)
@@ -38,8 +69,10 @@ export function sortByWbs(tasks: Task[]): Task[] {
 
 export function rollupSummaries(tasks: Task[], schedule: ScheduleResult): Map<number, SummaryRollup> {
   const out = new Map<number, SummaryRollup>()
+  const childrenMap = buildChildrenMap(tasks)
+
   for (const s of tasks.filter((t) => t.isSummary)) {
-    const kids = childrenOf(tasks, s)
+    const kids = childrenMap.get(s.wbs) || []
     const scheduled = kids.map((k) => schedule.byUid.get(k.uid)).filter((x) => !!x)
     if (!scheduled.length) continue
     const bac = kids.reduce((acc, k) => acc + k.bac, 0)
