@@ -1,0 +1,3 @@
+## 2024-11-09 - Avoid O(N^2) WBS Hierarchy Traversals
+**Learning:** Codebase performance anti-pattern found where WBS hierarchy traversals (e.g., repeatedly calling `childrenOf` which uses array `.filter()` with `.startsWith()` for parent-child matching inside loops) led to O(N^2) complexity. This occurred during rollup generation in `src/lib/wbs.ts` and UI computed properties in `src/stores/useProjectStore.ts`.
+**Action:** Always pre-calculate hierarchical relationships or rollups in a single bottom-up O(N) pass using a map structure (like `buildChildrenMap`) before iterating through elements.

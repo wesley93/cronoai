@@ -45,7 +45,7 @@ import {
 } from '@/lib/scenarios'
 import { SAFETY_MARGIN_DAYS, analyzeSupplies } from '@/lib/supplies'
 import { fmtBRL, fmtMonth, uid } from '@/lib/format'
-import { nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
+import { buildChildrenMap, nextChildWbs, nextUid, parseFloorRange, rollupSummaries, sortByWbs } from '@/lib/wbs'
 
 const STORAGE_KEY = 'cronoai-state-v1'
 
@@ -205,10 +205,15 @@ export const useProjectStore = defineStore('project', () => {
   const msProjectTasks = computed<MSProjectTask[]>(() => {
     const status = state.meta.statusDate
     const pvOf = (t: Task) => t.bac * plannedFraction(t, baseCalendar.value, status)
+    const childrenMap = buildChildrenMap(state.tasks)
+
+    // Pré-calcula os valores de PV e EV para cada folha em uma única passagem para evitar recalcular
+    const leafValues = new Map(leaves.value.map((t) => [t.uid, { pv: pvOf(t), ev: (t.bac * t.percentComplete) / 100 }]))
+
     return tasksByWbs.value.map((t): MSProjectTask => {
       if (t.isSummary) {
         const r = rollups.value.get(t.uid)
-        const kids = leaves.value.filter((k) => k.wbs.startsWith(t.wbs + '.'))
+        const kids = childrenMap.get(t.wbs) || []
         const start = r?.start ?? state.meta.startDate
         const finish = r?.finish ?? start
         return {
@@ -225,8 +230,8 @@ export const useProjectStore = defineStore('project', () => {
           IsCritical: !!r?.critical,
           TotalSlack: null,
           BudgetAtCompletion: r?.bac ?? 0,
-          PlannedValue: kids.reduce((a, k) => a + pvOf(k), 0),
-          EarnedValue: kids.reduce((a, k) => a + (k.bac * k.percentComplete) / 100, 0),
+          PlannedValue: kids.reduce((a, k) => a + (leafValues.get(k.uid)?.pv ?? 0), 0),
+          EarnedValue: kids.reduce((a, k) => a + (leafValues.get(k.uid)?.ev ?? 0), 0),
           ActualCost: r?.actualCost ?? 0,
           Resources: [],
           MaterialLeadTime: null,
@@ -577,8 +582,10 @@ export const useProjectStore = defineStore('project', () => {
   function suggestPredecessorFor(groupWbs: string, tasks: Task[] = state.tasks, sched = schedule.value): number | undefined {
     const groups = sortByWbs(tasks.filter((t) => t.isSummary && t.outlineLevel === 1)).map((g) => g.wbs)
     const idx = groups.indexOf(groupWbs)
+    const childrenMap = buildChildrenMap(tasks)
+
     for (let i = (idx < 0 ? groups.length : idx) - 1; i >= 0; i--) {
-      const leaves = tasks.filter((t) => !t.isSummary && t.wbs.startsWith(groups[i] + '.'))
+      const leaves = childrenMap.get(groups[i]) || []
       if (leaves.length) return leaves.reduce((best, t) => ((sched.byUid.get(t.uid)?.ef ?? 0) > (sched.byUid.get(best.uid)?.ef ?? 0) ? t : best)).uid
     }
     return undefined
