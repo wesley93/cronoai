@@ -17,10 +17,6 @@ export function leafTasks(tasks: Task[]): Task[] {
   return tasks.filter((t) => !t.isSummary)
 }
 
-export function childrenOf(tasks: Task[], summary: Task): Task[] {
-  return tasks.filter((t) => !t.isSummary && t.wbs.startsWith(summary.wbs + '.'))
-}
-
 /** Compara códigos de EAP numericamente (01.10 > 01.9). */
 export function compareWbs(a: string, b: string): number {
   const pa = a.split('.').map(Number)
@@ -38,8 +34,22 @@ export function sortByWbs(tasks: Task[]): Task[] {
 
 export function rollupSummaries(tasks: Task[], schedule: ScheduleResult): Map<number, SummaryRollup> {
   const out = new Map<number, SummaryRollup>()
+
+  // O(N) pre-calculation of WBS children per summary prefix to avoid O(N^2) .startsWith() filtering per summary task
+  const leaves = tasks.filter((t) => !t.isSummary)
+  const childrenBySummary = new Map<string, Task[]>()
+  for (const leaf of leaves) {
+    const parts = leaf.wbs.split('.')
+    let prefix = ''
+    for (let i = 0; i < parts.length - 1; i++) {
+      prefix = prefix ? `${prefix}.${parts[i]}` : parts[i]
+      if (!childrenBySummary.has(prefix)) childrenBySummary.set(prefix, [])
+      childrenBySummary.get(prefix)!.push(leaf)
+    }
+  }
+
   for (const s of tasks.filter((t) => t.isSummary)) {
-    const kids = childrenOf(tasks, s)
+    const kids = childrenBySummary.get(s.wbs) || []
     const scheduled = kids.map((k) => schedule.byUid.get(k.uid)).filter((x) => !!x)
     if (!scheduled.length) continue
     const bac = kids.reduce((acc, k) => acc + k.bac, 0)

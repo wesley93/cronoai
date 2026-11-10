@@ -205,10 +205,27 @@ export const useProjectStore = defineStore('project', () => {
   const msProjectTasks = computed<MSProjectTask[]>(() => {
     const status = state.meta.statusDate
     const pvOf = (t: Task) => t.bac * plannedFraction(t, baseCalendar.value, status)
+
+    // O(N) pre-calculation of EV and PV per summary WBS prefix to avoid O(N^2) .startsWith() filtering per summary task
+    const summaryPV = new Map<string, number>()
+    const summaryEV = new Map<string, number>()
+
+    for (const leaf of leaves.value) {
+      const pv = pvOf(leaf)
+      const ev = (leaf.bac * leaf.percentComplete) / 100
+
+      const parts = leaf.wbs.split('.')
+      let prefix = ''
+      for (let i = 0; i < parts.length - 1; i++) {
+        prefix = prefix ? `${prefix}.${parts[i]}` : parts[i]
+        summaryPV.set(prefix, (summaryPV.get(prefix) || 0) + pv)
+        summaryEV.set(prefix, (summaryEV.get(prefix) || 0) + ev)
+      }
+    }
+
     return tasksByWbs.value.map((t): MSProjectTask => {
       if (t.isSummary) {
         const r = rollups.value.get(t.uid)
-        const kids = leaves.value.filter((k) => k.wbs.startsWith(t.wbs + '.'))
         const start = r?.start ?? state.meta.startDate
         const finish = r?.finish ?? start
         return {
@@ -225,8 +242,8 @@ export const useProjectStore = defineStore('project', () => {
           IsCritical: !!r?.critical,
           TotalSlack: null,
           BudgetAtCompletion: r?.bac ?? 0,
-          PlannedValue: kids.reduce((a, k) => a + pvOf(k), 0),
-          EarnedValue: kids.reduce((a, k) => a + (k.bac * k.percentComplete) / 100, 0),
+          PlannedValue: summaryPV.get(t.wbs) || 0,
+          EarnedValue: summaryEV.get(t.wbs) || 0,
           ActualCost: r?.actualCost ?? 0,
           Resources: [],
           MaterialLeadTime: null,
