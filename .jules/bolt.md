@@ -1,0 +1,4 @@
+
+## 2024-11-12 - Eliminate O(N²) WBS Hierarchy Traversals
+**Learning:** The application extensively uses Work Breakdown Structure (WBS) strings to manage hierarchical relationships. Repeatedly matching child elements to their parent/ancestor using `.filter(t => t.wbs.startsWith(parentWbs + '.'))` inside a loop across groups/summaries leads to accidental O(N²) performance bottlenecks, especially in core algorithms like CPM calculation and EVM processing that run on every keystroke/change in the UI.
+**Action:** Always pre-calculate hierarchical relationships or rollups in a single bottom-up O(N) pass. Iterate through `leaves`, use a loop `while (wbs.includes('.')) { wbs = wbs.substring(0, wbs.lastIndexOf('.')) }` to walk up the hierarchy and store values into a `Map<string, T>` (where the key is the ancestor WBS) for subsequent O(1) lookups by summary tasks.
