@@ -77,14 +77,14 @@ const ac = (t: Task) => (t.isSummary ? (project.rollups.get(t.uid)?.actualCost ?
 
     <div class="card flex flex-wrap items-end gap-4 p-4">
       <div class="relative min-w-[220px] flex-1">
-        <label class="label">Filtrar</label>
+        <label for="wbs-filter" class="label">Filtrar</label>
         <Search class="absolute bottom-2.5 left-3 h-3.5 w-3.5 text-zinc-400" />
-        <input v-model="filter" class="input pl-8" placeholder="UID, EAP, nome ou código SINAPI" />
+        <input id="wbs-filter" v-model="filter" class="input pl-8" placeholder="UID, EAP, nome ou código SINAPI" />
       </div>
       <div>
-        <label class="label">Data de status</label>
+        <label for="wbs-status-date" class="label">Data de status</label>
         <div class="flex gap-2">
-          <input v-model="statusDate" type="date" class="input w-auto" />
+          <input id="wbs-status-date" v-model="statusDate" type="date" class="input w-auto" />
           <button class="btn-secondary" @click="applyStatusDate">Reprogramar</button>
         </div>
       </div>
