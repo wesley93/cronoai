@@ -19,8 +19,20 @@ interface Edge {
 function buildEdges(tasks: Task[], leaves: Task[]): Edge[] {
   const leafSet = new Set(leaves.map((t) => t.uid))
   const byUid = new Map(tasks.map((t) => [t.uid, t]))
-  const leafDescendants = (summary: Task): number[] =>
-    leaves.filter((l) => l.wbs.startsWith(summary.wbs + '.')).map((l) => l.uid)
+
+  // Performance optimization: Pre-calculate descendants in an O(N) lookup map
+  // instead of filtering with .startsWith() for every summary task.
+  const leavesByAncestor = new Map<string, number[]>()
+  for (const t of leaves) {
+    let wbs = t.wbs
+    while (wbs.includes('.')) {
+      wbs = wbs.substring(0, wbs.lastIndexOf('.'))
+      if (!leavesByAncestor.has(wbs)) leavesByAncestor.set(wbs, [])
+      leavesByAncestor.get(wbs)!.push(t.uid)
+    }
+  }
+
+  const leafDescendants = (summary: Task): number[] => leavesByAncestor.get(summary.wbs) ?? []
 
   const edges: Edge[] = []
   for (const t of leaves) {

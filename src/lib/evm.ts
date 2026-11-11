@@ -95,8 +95,22 @@ export function computeEvm(tasks: Task[], cal: WorkCalendar, statusDate: string)
 /** EVM por pacote de 1º nível da EAP (01, 02, ...). */
 export function computePackageEvm(tasks: Task[], cal: WorkCalendar, statusDate: string): PackageEvm[] {
   const groups = tasks.filter((t) => t.isSummary && t.outlineLevel === 1)
+
+  // Performance optimization: Pre-calculate descendants in an O(N) lookup map
+  // instead of doing an O(N) filter for every group iteration (O(N^2) total).
+  const leavesByAncestor = new Map<string, Task[]>()
+  for (const t of tasks) {
+    if (t.isSummary) continue
+    let wbs = t.wbs
+    while (wbs.includes('.')) {
+      wbs = wbs.substring(0, wbs.lastIndexOf('.'))
+      if (!leavesByAncestor.has(wbs)) leavesByAncestor.set(wbs, [])
+      leavesByAncestor.get(wbs)!.push(t)
+    }
+  }
+
   return groups.map((g) => {
-    const kids = tasks.filter((t) => !t.isSummary && t.wbs.startsWith(g.wbs + '.'))
+    const kids = leavesByAncestor.get(g.wbs) ?? []
     return { wbs: g.wbs, name: g.name, ...computeEvm(kids, cal, statusDate) }
   })
 }

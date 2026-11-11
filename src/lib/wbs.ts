@@ -38,8 +38,22 @@ export function sortByWbs(tasks: Task[]): Task[] {
 
 export function rollupSummaries(tasks: Task[], schedule: ScheduleResult): Map<number, SummaryRollup> {
   const out = new Map<number, SummaryRollup>()
+
+  // Performance optimization: Build an O(N) lookup map for leaves by ancestor
+  // instead of calling childrenOf (which does an O(N) .startsWith filter) for each summary task (O(N^2) total).
+  const leavesByAncestor = new Map<string, Task[]>()
+  for (const t of tasks) {
+    if (t.isSummary) continue
+    let wbs = t.wbs
+    while (wbs.includes('.')) {
+      wbs = wbs.substring(0, wbs.lastIndexOf('.'))
+      if (!leavesByAncestor.has(wbs)) leavesByAncestor.set(wbs, [])
+      leavesByAncestor.get(wbs)!.push(t)
+    }
+  }
+
   for (const s of tasks.filter((t) => t.isSummary)) {
-    const kids = childrenOf(tasks, s)
+    const kids = leavesByAncestor.get(s.wbs) ?? []
     const scheduled = kids.map((k) => schedule.byUid.get(k.uid)).filter((x) => !!x)
     if (!scheduled.length) continue
     const bac = kids.reduce((acc, k) => acc + k.bac, 0)

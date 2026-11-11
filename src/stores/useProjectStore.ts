@@ -205,10 +205,25 @@ export const useProjectStore = defineStore('project', () => {
   const msProjectTasks = computed<MSProjectTask[]>(() => {
     const status = state.meta.statusDate
     const pvOf = (t: Task) => t.bac * plannedFraction(t, baseCalendar.value, status)
+
+    // Performance optimization: Pre-calculate PV and EV rollups in a single O(N) bottom-up pass
+    // instead of O(N^2) parent-child filtering with .startsWith()
+    const pvByWbs = new Map<string, number>()
+    const evByWbs = new Map<string, number>()
+    for (const leaf of leaves.value) {
+      const pv = pvOf(leaf)
+      const ev = (leaf.bac * leaf.percentComplete) / 100
+      let wbs = leaf.wbs
+      while (wbs.includes('.')) {
+        wbs = wbs.substring(0, wbs.lastIndexOf('.'))
+        pvByWbs.set(wbs, (pvByWbs.get(wbs) ?? 0) + pv)
+        evByWbs.set(wbs, (evByWbs.get(wbs) ?? 0) + ev)
+      }
+    }
+
     return tasksByWbs.value.map((t): MSProjectTask => {
       if (t.isSummary) {
         const r = rollups.value.get(t.uid)
-        const kids = leaves.value.filter((k) => k.wbs.startsWith(t.wbs + '.'))
         const start = r?.start ?? state.meta.startDate
         const finish = r?.finish ?? start
         return {
@@ -225,8 +240,8 @@ export const useProjectStore = defineStore('project', () => {
           IsCritical: !!r?.critical,
           TotalSlack: null,
           BudgetAtCompletion: r?.bac ?? 0,
-          PlannedValue: kids.reduce((a, k) => a + pvOf(k), 0),
-          EarnedValue: kids.reduce((a, k) => a + (k.bac * k.percentComplete) / 100, 0),
+          PlannedValue: pvByWbs.get(t.wbs) ?? 0,
+          EarnedValue: evByWbs.get(t.wbs) ?? 0,
           ActualCost: r?.actualCost ?? 0,
           Resources: [],
           MaterialLeadTime: null,
@@ -577,8 +592,22 @@ export const useProjectStore = defineStore('project', () => {
   function suggestPredecessorFor(groupWbs: string, tasks: Task[] = state.tasks, sched = schedule.value): number | undefined {
     const groups = sortByWbs(tasks.filter((t) => t.isSummary && t.outlineLevel === 1)).map((g) => g.wbs)
     const idx = groups.indexOf(groupWbs)
+
+    // Performance optimization: Build an O(N) lookup map for leaves by ancestor
+    // instead of doing an O(N) filter for every group iteration (O(N^2) total).
+    const leavesByAncestor = new Map<string, Task[]>()
+    for (const t of tasks) {
+      if (t.isSummary) continue
+      let wbs = t.wbs
+      while (wbs.includes('.')) {
+        wbs = wbs.substring(0, wbs.lastIndexOf('.'))
+        if (!leavesByAncestor.has(wbs)) leavesByAncestor.set(wbs, [])
+        leavesByAncestor.get(wbs)!.push(t)
+      }
+    }
+
     for (let i = (idx < 0 ? groups.length : idx) - 1; i >= 0; i--) {
-      const leaves = tasks.filter((t) => !t.isSummary && t.wbs.startsWith(groups[i] + '.'))
+      const leaves = leavesByAncestor.get(groups[i]) ?? []
       if (leaves.length) return leaves.reduce((best, t) => ((sched.byUid.get(t.uid)?.ef ?? 0) > (sched.byUid.get(best.uid)?.ef ?? 0) ? t : best)).uid
     }
     return undefined
